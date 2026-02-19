@@ -131,27 +131,236 @@ states:
 | `succeed` | Terminal success state | -- |
 | `fail` | Terminal failure state | -- |
 
-### Actions and events
+### Actions
 
-| Actions | Events |
-|---------|--------|
-| `ai.code` -- run a Claude coding session | `pr.reviewed` -- PR has been reviewed |
-| `github.create_pr` -- open a pull request | `ci.complete` -- CI checks have finished |
-| `github.push` -- push to remote | |
-| `github.merge` -- merge the PR | |
-| `github.comment_issue` -- post a comment on the GitHub issue | |
+Actions are synchronous or asynchronous operations that a `task` state executes.
 
-### Customizing the graph
+#### `ai.code`
 
-You can add, remove, or reorder states to match your workflow. States from the default config that aren't overridden in your file are preserved -- you only need to define the states you want to change or add.
+Spawns a containerized Claude Code session to work the issue. This is the only **async** action -- the daemon starts a worker goroutine and polls for completion.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_turns` | int | `50` | Max autonomous conversation turns |
+| `max_duration` | duration | `30m` | Max wall-clock time for the session |
+| `containerized` | bool | `true` | Run Claude inside a Docker container |
+| `supervisor` | bool | `true` | Enable supervisor mode (can spawn child sessions via MCP) |
+| `system_prompt` | string | `""` | Custom system prompt, inline or `file:.plural/prompts/coding.md` |
+
+#### `github.create_pr`
+
+Opens a pull request for the work item's branch.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `link_issue` | bool | `true` | Link the PR back to the source issue |
+
+#### `github.push`
+
+Pushes the current branch to the remote. No configurable params. Used internally during the review feedback loop and available for custom workflows.
+
+#### `github.merge`
+
+Merges the PR and optionally cleans up the branch/worktree.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `method` | string | `rebase` | Merge strategy: `rebase`, `squash`, or `merge` |
+| `cleanup` | bool | `true` | Delete branch and worktree after merge |
+
+#### `github.comment_issue`
+
+Posts a comment on the source issue. No-op for non-GitHub issues.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `body` | string | *(required)* | Comment body, inline or `file:.plural/templates/comment.md` |
+
+---
+
+### Events
+
+Events are polled conditions that a `wait` state checks on each daemon tick.
+
+#### `pr.reviewed`
+
+Polls for PR review status. This event fires (advances to the next state) **only on approval**. Here is what it checks on each poll cycle, in order:
+
+1. **PR closed externally?** If the PR was closed without merging, the event does *not* fire -- the work item stays in the wait state.
+2. **PR merged externally?** If someone merged the PR outside the daemon, the event fires and the workflow advances (skipping the merge state).
+3. **New review comments?** If the comment count increased since the last check *and* `auto_address` is enabled *and* `FeedbackRounds < max_feedback_rounds`, the daemon spawns a Claude session to address the feedback (see [Review Feedback Loop](#review-feedback-loop) below). The event does *not* fire while feedback is being addressed.
+4. **Approved?** If the PR review decision is "approved", the event fires and the workflow advances to the next state.
+5. **Changes requested / no review yet?** The event does *not* fire. The daemon keeps polling. There is no explicit "rejected" transition -- instead, the reviewer's comments are picked up by step 3 on the next cycle.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto_address` | bool | `true` | Automatically address review comments with a new Claude session |
+| `max_feedback_rounds` | int | `3` | Max review-address cycles before stopping |
+| `system_prompt` | string | `""` | Custom system prompt for the feedback sessions |
+
+#### `ci.complete`
+
+Polls CI check status on the PR. This event fires **only when CI passes** (or when there are no CI checks configured).
+
+- **Passing / no checks:** Event fires, workflow advances.
+- **Pending:** Event does not fire, daemon keeps polling.
+- **Failing:** Event does not fire. The `on_failure` param controls behavior:
+  - `retry` (default) -- keep polling (CI may be re-triggered by a push or manual action)
+  - `abandon` -- logged, but the work item stays in the wait state
+  - `notify` -- logged, but the work item stays in the wait state
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `on_failure` | string | `retry` | Behavior on CI failure: `retry`, `abandon`, or `notify` |
+
+> **Note:** `abandon` and `notify` are currently structural -- they log the failure and set metadata but do not yet trigger distinct behavior (e.g., closing the PR or sending a notification). In practice all three options keep the item in the wait state.
+
+---
+
+### Review Feedback Loop
+
+Addressing PR review comments is **not a separate workflow state** -- it is an internal sub-loop within the `await_review` wait state. This is how it works:
+
+```
+await_review (polling) ──► new comments detected
+        │                       │
+        │               auto_address: true?
+        │               rounds < max_feedback_rounds?
+        │                       │
+        │                       ▼
+        │               spawn Claude session with
+        │               formatted review comments
+        │                       │
+        │                       ▼
+        │               Claude addresses feedback
+        │                       │
+        │                       ▼
+        │               push changes, increment
+        │               FeedbackRounds counter
+        │                       │
+        ◄───────────────────────┘
+        │               (back to polling)
+        │
+        ▼
+  PR approved ──► event fires ──► next state (await_ci)
+```
+
+Each feedback round:
+
+1. The daemon detects `commentCount > commentsAddressed` on the PR
+2. Fetches the full review comments (file, line, body, author)
+3. Formats them into a structured prompt and resumes the existing Claude session
+4. Claude makes fixes and the daemon pushes the changes
+5. `FeedbackRounds` increments; polling resumes
+
+This repeats up to `max_feedback_rounds` times (default 3). After that, the daemon stops auto-addressing and waits for the reviewer to approve as-is.
+
+---
+
+### Default State Machine
+
+The default workflow when no `.plural/workflow.yaml` exists:
+
+```
+coding ──► open_pr ──► await_review ──► await_ci ──► merge ──► done
+  │           │            │               │
+  └──error──► └──error──►  └──error──►     └──error──► failed
+```
+
+| State | Type | Action/Event | Next | Error |
+|-------|------|-------------|------|-------|
+| `coding` | task | `ai.code` | `open_pr` | `failed` |
+| `open_pr` | task | `github.create_pr` | `await_review` | `failed` |
+| `await_review` | wait | `pr.reviewed` | `await_ci` | `failed` |
+| `await_ci` | wait | `ci.complete` | `merge` | `failed` |
+| `merge` | task | `github.merge` | `done` | -- |
+| `done` | succeed | -- | -- | -- |
+| `failed` | fail | -- | -- | -- |
+
+**Fast-path shortcuts:** If the Claude session itself creates a PR (via MCP tools during coding), the daemon detects this and skips `open_pr`, advancing directly to `await_review`. If the session also merges, it skips straight to `done`.
+
+---
+
+### Customizing the Graph
+
+You can add, remove, or reorder states to match your workflow. When you override a state in your `.plural/workflow.yaml`, it **fully replaces** that state's definition (not a field-by-field merge). States from the default config that you don't mention are preserved.
+
+**Examples:**
+
+Skip CI and merge immediately after approval:
+```yaml
+states:
+  await_review:
+    type: wait
+    event: pr.reviewed
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge          # skip await_ci
+    error: failed
+```
+
+Add a comment on the issue before opening a PR:
+```yaml
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: notify_issue   # go to new state instead of open_pr
+    error: failed
+
+  notify_issue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Coding complete, opening a PR now."
+    next: open_pr
+    error: failed
+```
+
+Use a custom system prompt for coding:
+```yaml
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      system_prompt: "file:.plural/prompts/coding.md"
+    next: open_pr
+    error: failed
+```
 
 **Override precedence**: CLI flag > `.plural/workflow.yaml` > `~/.plural/config.json` > defaults.
 
 **System prompts** can be inline strings or `file:./path` references (relative to repo root).
 
-**Hooks** run on the host after each workflow step via the `after` field. Hook failures are logged but don't block the workflow.
+**After-hooks** run shell commands on the host after a state completes via the `after` field. Hook failures are logged but don't block the workflow. Hooks receive environment variables: `PLURAL_REPO_PATH`, `PLURAL_BRANCH`, `PLURAL_SESSION_ID`, `PLURAL_ISSUE_ID`, `PLURAL_ISSUE_TITLE`, `PLURAL_ISSUE_URL`, `PLURAL_PR_URL`, `PLURAL_WORKTREE`, `PLURAL_PROVIDER`.
+
+```yaml
+states:
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash
+    after:
+      - run: "curl -X POST $SLACK_WEBHOOK -d '{\"text\": \"Merged PR for issue\"}'"
+    next: done
+```
 
 **Provider support**: The agent can poll GitHub issues (by label), Asana tasks (by project), or Linear issues (by team).
+
+```yaml
+source:
+  provider: github          # github | asana | linear
+  filter:
+    label: queued            # github: issue label to poll
+    project: ""              # asana: project GID
+    team: ""                 # linear: team ID
+```
 
 ## Configuration
 
