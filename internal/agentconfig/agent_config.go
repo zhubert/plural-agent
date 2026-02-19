@@ -133,26 +133,6 @@ func (c *AgentConfig) RemoveSession(id string) bool {
 	return false
 }
 
-func (c *AgentConfig) RemoveSessions(ids []string) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	idSet := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		idSet[id] = true
-	}
-	removed := 0
-	filtered := c.sessions[:0]
-	for _, s := range c.sessions {
-		if idSet[s.ID] {
-			removed++
-		} else {
-			filtered = append(filtered, s)
-		}
-	}
-	c.sessions = filtered
-	return removed
-}
-
 func (c *AgentConfig) ClearOrphanedParentIDs(deletedIDs []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -203,36 +183,12 @@ func (c *AgentConfig) MarkSessionPRMerged(sessionID string) bool {
 	return false
 }
 
-func (c *AgentConfig) MarkSessionPRClosed(sessionID string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := range c.sessions {
-		if c.sessions[i].ID == sessionID {
-			c.sessions[i].PRClosed = true
-			return true
-		}
-	}
-	return false
-}
-
 func (c *AgentConfig) MarkSessionMergedToParent(sessionID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i := range c.sessions {
 		if c.sessions[i].ID == sessionID {
 			c.sessions[i].MergedToParent = true
-			return true
-		}
-	}
-	return false
-}
-
-func (c *AgentConfig) SetSessionAutonomous(sessionID string, autonomous bool) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := range c.sessions {
-		if c.sessions[i].ID == sessionID {
-			c.sessions[i].Autonomous = autonomous
 			return true
 		}
 	}
@@ -275,30 +231,6 @@ func (c *AgentConfig) GetChildSessions(supervisorID string) []config.Session {
 		}
 	}
 	return children
-}
-
-func (c *AgentConfig) GetSessionsByBroadcastGroup(groupID string) []config.Session {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var result []config.Session
-	for _, s := range c.sessions {
-		if s.BroadcastGroupID == groupID {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-func (c *AgentConfig) UpdateSessionPRCommentCount(sessionID string, count int) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := range c.sessions {
-		if c.sessions[i].ID == sessionID {
-			c.sessions[i].PRCommentCount = count
-			return true
-		}
-	}
-	return false
 }
 
 func (c *AgentConfig) UpdateSessionPRCommentsAddressedCount(sessionID string, count int) bool {

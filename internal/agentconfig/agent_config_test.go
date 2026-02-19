@@ -134,16 +134,6 @@ func TestAgentConfig_SessionCRUD(t *testing.T) {
 		t.Error("expected RemoveSession to return false for already removed session")
 	}
 
-	// RemoveSessions batch
-	c.AddSession(config.Session{ID: "s3"})
-	c.AddSession(config.Session{ID: "s4"})
-	removed := c.RemoveSessions([]string{"s2", "s3", "nonexistent"})
-	if removed != 2 {
-		t.Errorf("expected 2 removed, got %d", removed)
-	}
-	if sessions := c.GetSessions(); len(sessions) != 1 || sessions[0].ID != "s4" {
-		t.Errorf("expected only s4, got %v", sessions)
-	}
 }
 
 func TestAgentConfig_MarkSessionMethods(t *testing.T) {
@@ -158,7 +148,6 @@ func TestAgentConfig_MarkSessionMethods(t *testing.T) {
 		{"Started", c.MarkSessionStarted, func(s *config.Session) bool { return s.Started }},
 		{"PRCreated", c.MarkSessionPRCreated, func(s *config.Session) bool { return s.PRCreated }},
 		{"PRMerged", c.MarkSessionPRMerged, func(s *config.Session) bool { return s.PRMerged }},
-		{"PRClosed", c.MarkSessionPRClosed, func(s *config.Session) bool { return s.PRClosed }},
 		{"MergedToParent", c.MarkSessionMergedToParent, func(s *config.Session) bool { return s.MergedToParent }},
 	}
 
@@ -177,27 +166,6 @@ func TestAgentConfig_MarkSessionMethods(t *testing.T) {
 				t.Error("expected field to be true after marking")
 			}
 		})
-	}
-}
-
-func TestAgentConfig_SetSessionAutonomous(t *testing.T) {
-	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1"})
-
-	if c.SetSessionAutonomous("nonexistent", true) {
-		t.Error("expected false for nonexistent")
-	}
-	if !c.SetSessionAutonomous("s1", true) {
-		t.Error("expected true")
-	}
-	if !c.GetSession("s1").Autonomous {
-		t.Error("expected autonomous to be true")
-	}
-	if !c.SetSessionAutonomous("s1", false) {
-		t.Error("expected true")
-	}
-	if c.GetSession("s1").Autonomous {
-		t.Error("expected autonomous to be false")
 	}
 }
 
@@ -230,23 +198,6 @@ func TestAgentConfig_ChildSessions(t *testing.T) {
 	}
 }
 
-func TestAgentConfig_BroadcastGroup(t *testing.T) {
-	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1", BroadcastGroupID: "group1"})
-	c.AddSession(config.Session{ID: "s2", BroadcastGroupID: "group1"})
-	c.AddSession(config.Session{ID: "s3", BroadcastGroupID: "group2"})
-
-	result := c.GetSessionsByBroadcastGroup("group1")
-	if len(result) != 2 {
-		t.Errorf("expected 2 sessions in group1, got %d", len(result))
-	}
-
-	result = c.GetSessionsByBroadcastGroup("nonexistent")
-	if len(result) != 0 {
-		t.Errorf("expected 0 sessions for nonexistent group, got %d", len(result))
-	}
-}
-
 func TestAgentConfig_ClearOrphanedParentIDs(t *testing.T) {
 	c := NewAgentConfig()
 	c.AddSession(config.Session{ID: "s1", ParentID: "deleted-parent"})
@@ -266,19 +217,9 @@ func TestAgentConfig_ClearOrphanedParentIDs(t *testing.T) {
 	}
 }
 
-func TestAgentConfig_PRCommentCounts(t *testing.T) {
+func TestAgentConfig_PRCommentsAddressedCount(t *testing.T) {
 	c := NewAgentConfig()
 	c.AddSession(config.Session{ID: "s1"})
-
-	if c.UpdateSessionPRCommentCount("nonexistent", 5) {
-		t.Error("expected false for nonexistent")
-	}
-	if !c.UpdateSessionPRCommentCount("s1", 5) {
-		t.Error("expected true")
-	}
-	if c.GetSession("s1").PRCommentCount != 5 {
-		t.Errorf("PRCommentCount: got %d", c.GetSession("s1").PRCommentCount)
-	}
 
 	if c.UpdateSessionPRCommentsAddressedCount("nonexistent", 3) {
 		t.Error("expected false for nonexistent")

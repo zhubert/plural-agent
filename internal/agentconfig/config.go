@@ -13,18 +13,13 @@ type Config interface {
 	GetSessions() []config.Session
 	AddSession(session config.Session)
 	RemoveSession(id string) bool
-	RemoveSessions(ids []string) int
 	ClearOrphanedParentIDs(deletedIDs []string)
 	MarkSessionStarted(sessionID string) bool
 	MarkSessionPRCreated(sessionID string) bool
 	MarkSessionPRMerged(sessionID string) bool
-	MarkSessionPRClosed(sessionID string) bool
 	MarkSessionMergedToParent(sessionID string) bool
-	SetSessionAutonomous(sessionID string, autonomous bool) bool
 	AddChildSession(supervisorID, childID string) bool
 	GetChildSessions(supervisorID string) []config.Session
-	GetSessionsByBroadcastGroup(groupID string) []config.Session
-	UpdateSessionPRCommentCount(sessionID string, count int) bool
 	UpdateSessionPRCommentsAddressedCount(sessionID string, count int) bool
 
 	// Repo settings
