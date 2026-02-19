@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/spf13/cobra v1.10.2
-	github.com/zhubert/plural-core v0.0.0
+	github.com/zhubert/plural-core v0.0.0-20260219161410-2158ee00e008
 )
 
 require (
@@ -13,5 +13,3 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/zhubert/plural-core => ../plural-core
