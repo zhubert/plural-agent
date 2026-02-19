@@ -1,2 +1,21 @@
-plural
+# Binary
 plural-agent
+
+# Core dumps
+core
+core.*
+
+# GoReleaser output
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Test coverage
+coverage.out
