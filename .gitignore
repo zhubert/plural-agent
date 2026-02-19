@@ -1,6 +1,8 @@
 # Binary
 plural-agent
 
+.plural/
+
 # Core dumps
 core
 core.*
