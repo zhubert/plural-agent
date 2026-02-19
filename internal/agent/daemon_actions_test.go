@@ -8,7 +8,7 @@ import (
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
 	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/workflow"
+	"github.com/zhubert/plural-agent/workflow"
 )
 
 var errGHFailed = fmt.Errorf("gh: command failed")

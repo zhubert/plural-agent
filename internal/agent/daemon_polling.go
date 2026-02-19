@@ -10,7 +10,7 @@ import (
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/issues"
-	"github.com/zhubert/plural-core/workflow"
+	"github.com/zhubert/plural-agent/workflow"
 )
 
 // pollForNewIssues checks for new issues and creates work items for them.

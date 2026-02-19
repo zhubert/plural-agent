@@ -12,7 +12,7 @@ import (
 	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/issues"
 	"github.com/zhubert/plural-core/session"
-	"github.com/zhubert/plural-core/workflow"
+	"github.com/zhubert/plural-agent/workflow"
 )
 
 // Daemon is the persistent orchestrator that manages the full lifecycle of work items.

@@ -10,7 +10,7 @@ import (
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/issues"
 	"github.com/zhubert/plural-core/session"
-	"github.com/zhubert/plural-core/workflow"
+	"github.com/zhubert/plural-agent/workflow"
 )
 
 // CodingAction implements the ai.code action.

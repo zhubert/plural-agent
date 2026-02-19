@@ -107,7 +107,7 @@ Key files: `daemon.go` (main loop), `daemon_actions.go` (action execution), `dae
 
 ### Adding a New Daemon Action
 
-1. Define the action string in `plural-core/workflow` (e.g., `ai.code`, `github.create_pr`)
+1. Define the action string in `workflow/` (e.g., `ai.code`, `github.create_pr`)
 2. Add handler in `daemon_actions.go`
 3. Wire it into the workflow engine's action dispatch
 4. Add tests in `daemon_actions_test.go`
