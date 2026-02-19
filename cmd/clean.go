@@ -25,7 +25,7 @@ It will prompt for confirmation before proceeding unless the --yes flag is used.
 
 func init() {
 	agentCleanCmd.Flags().BoolVarP(&agentCleanSkipConfirm, "yes", "y", false, "Skip confirmation prompt")
-	agentCmd.AddCommand(agentCleanCmd)
+	rootCmd.AddCommand(agentCleanCmd)
 }
 
 func runAgentClean(cmd *cobra.Command, args []string) error {

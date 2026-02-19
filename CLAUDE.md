@@ -23,10 +23,10 @@ go test ./...                    # Test
 ./plural-agent --debug           # Enable debug logging (on by default)
 ./plural-agent -q                # Quiet mode (info level only)
 
-./plural-agent agent --repo owner/repo         # Run headless daemon
-./plural-agent agent --repo owner/repo --once  # Process one tick and exit
-./plural-agent agent clean                     # Clear daemon state and lock files
-./plural-agent agent clean -y                  # Clear without confirmation prompt
+./plural-agent --repo owner/repo         # Run headless daemon
+./plural-agent --repo owner/repo --once  # Process one tick and exit
+./plural-agent clean                     # Clear daemon state and lock files
+./plural-agent clean -y                  # Clear without confirmation prompt
 ```
 
 ## Debug Logs

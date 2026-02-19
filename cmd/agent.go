@@ -33,43 +33,18 @@ var (
 )
 
 
-var agentCmd = &cobra.Command{
-	Use:   "agent",
-	Short: "Run headless autonomous agent daemon",
-	Long: `Persistent orchestrator daemon that manages the full lifecycle of work items:
-picking up issues, coding, PR creation, review feedback cycles, and final merge.
-
-The daemon is stoppable and restartable without losing track of in-flight work.
-State is persisted to ~/.plural/daemon-state.json.
-
-If --repo is not specified and the current directory is inside a git repository,
-that repository is used as the default. Auto-merge is enabled by default;
-use --no-auto-merge to disable.
-
-All sessions are containerized (container = sandbox).
-
-Examples:
-  plural agent                                # Use current git repo as default
-  plural agent --repo owner/repo              # Run daemon (long-running, auto-merge on)
-  plural agent --repo owner/repo --once       # Process one tick and exit
-  plural agent --repo /path/to/repo           # Use filesystem path instead
-  plural agent --repo owner/repo --no-auto-merge  # Disable auto-merge
-  plural agent --repo owner/repo --max-turns 100`,
-	RunE: runAgent,
-}
-
 func init() {
-	agentCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
-	agentCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
-	agentCmd.Flags().IntVar(&agentMaxConcurrent, "max-concurrent", 0, "Override max concurrent sessions (0 = use config)")
-	agentCmd.Flags().IntVar(&agentMaxTurns, "max-turns", 0, "Override max autonomous turns per session (0 = use config default of 50)")
-	agentCmd.Flags().IntVar(&agentMaxDuration, "max-duration", 0, "Override max autonomous duration in minutes (0 = use config default of 30)")
-	agentCmd.Flags().BoolVar(&agentAutoAddressPRComments, "auto-address-pr-comments", false, "Auto-address PR review comments")
-	agentCmd.Flags().BoolVar(&agentAutoBroadcastPR, "auto-broadcast-pr", false, "Auto-create PRs when broadcast group completes")
-	agentCmd.Flags().BoolVar(&agentAutoMerge, "auto-merge", false, "Auto-merge PRs after review approval and CI pass (default: true)")
-	agentCmd.Flags().BoolVar(&agentNoAutoMerge, "no-auto-merge", false, "Disable auto-merge")
-	agentCmd.Flags().StringVar(&agentMergeMethod, "merge-method", "", "Merge method: rebase, squash, or merge (default: rebase)")
-	rootCmd.AddCommand(agentCmd)
+	rootCmd.RunE = runAgent
+	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
+	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
+	rootCmd.Flags().IntVar(&agentMaxConcurrent, "max-concurrent", 0, "Override max concurrent sessions (0 = use config)")
+	rootCmd.Flags().IntVar(&agentMaxTurns, "max-turns", 0, "Override max autonomous turns per session (0 = use config default of 50)")
+	rootCmd.Flags().IntVar(&agentMaxDuration, "max-duration", 0, "Override max autonomous duration in minutes (0 = use config default of 30)")
+	rootCmd.Flags().BoolVar(&agentAutoAddressPRComments, "auto-address-pr-comments", false, "Auto-address PR review comments")
+	rootCmd.Flags().BoolVar(&agentAutoBroadcastPR, "auto-broadcast-pr", false, "Auto-create PRs when broadcast group completes")
+	rootCmd.Flags().BoolVar(&agentAutoMerge, "auto-merge", false, "Auto-merge PRs after review approval and CI pass (default: true)")
+	rootCmd.Flags().BoolVar(&agentNoAutoMerge, "no-auto-merge", false, "Disable auto-merge")
+	rootCmd.Flags().StringVar(&agentMergeMethod, "merge-method", "", "Merge method: rebase, squash, or merge (default: rebase)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
