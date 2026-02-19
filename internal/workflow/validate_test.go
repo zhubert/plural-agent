@@ -375,6 +375,40 @@ func TestValidate(t *testing.T) {
 			},
 			wantFields: []string{"states.c.params.body"},
 		},
+		{
+			name: "valid settings",
+			cfg: &Config{
+				Start:  "s",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{"s": {Type: StateTypeSucceed}},
+				Settings: &SettingsConfig{
+					ContainerImage: "img:v1",
+					MaxConcurrent:  3,
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "negative max_concurrent in settings",
+			cfg: &Config{
+				Start:  "s",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{"s": {Type: StateTypeSucceed}},
+				Settings: &SettingsConfig{
+					MaxConcurrent: -1,
+				},
+			},
+			wantFields: []string{"settings.max_concurrent"},
+		},
+		{
+			name: "nil settings is valid",
+			cfg: &Config{
+				Start:  "s",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{"s": {Type: StateTypeSucceed}},
+			},
+			wantFields: nil,
+		},
 	}
 
 	for _, tt := range tests {

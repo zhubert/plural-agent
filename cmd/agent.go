@@ -9,9 +9,10 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/zhubert/plural-agent/internal/agentconfig"
 	"github.com/zhubert/plural-agent/internal/daemon"
+	"github.com/zhubert/plural-agent/internal/workflow"
 	"github.com/zhubert/plural-core/cli"
-	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/issues"
 	"github.com/zhubert/plural-core/logger"
@@ -89,12 +90,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("docker is required for agent mode.\nInstall: https://docs.docker.com/get-docker/")
 	}
 
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("error loading config: %w", err)
-	}
-
 	// Enable debug logging for agent mode (always on for headless autonomous operation)
 	logger.SetDebug(true)
 
@@ -110,12 +105,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	gitSvc := git.NewGitService()
 	sessSvc := session.NewSessionService()
 
-	// Initialize issue providers
-	githubProvider := issues.NewGitHubProvider(gitSvc)
-	asanaProvider := issues.NewAsanaProvider(cfg)
-	linearProvider := issues.NewLinearProvider(cfg)
-	issueRegistry := issues.NewProviderRegistry(githubProvider, asanaProvider, linearProvider)
-
 	// If --repo is not provided, try to detect from current working directory
 	resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
 	if err != nil {
@@ -125,6 +114,37 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		agentLogger.Info("no --repo specified, using current directory", "repo", resolved)
 	}
 	agentRepo = resolved
+
+	// Load workflow config for settings
+	wfCfg, err := workflow.LoadAndMerge(agentRepo)
+	if err != nil {
+		return fmt.Errorf("error loading workflow config: %w", err)
+	}
+
+	// Build AgentConfig from workflow settings + defaults
+	var cfgOpts []agentconfig.AgentConfigOption
+	cfgOpts = append(cfgOpts, agentconfig.WithRepos([]string{agentRepo}))
+	if wfCfg.Settings != nil {
+		if wfCfg.Settings.ContainerImage != "" {
+			cfgOpts = append(cfgOpts, agentconfig.WithContainerImage(wfCfg.Settings.ContainerImage))
+		}
+		if wfCfg.Settings.BranchPrefix != "" {
+			cfgOpts = append(cfgOpts, agentconfig.WithBranchPrefix(wfCfg.Settings.BranchPrefix))
+		}
+		if wfCfg.Settings.MaxConcurrent > 0 {
+			cfgOpts = append(cfgOpts, agentconfig.WithMaxConcurrent(wfCfg.Settings.MaxConcurrent))
+		}
+		if wfCfg.Settings.CleanupMerged != nil {
+			cfgOpts = append(cfgOpts, agentconfig.WithCleanupMerged(*wfCfg.Settings.CleanupMerged))
+		}
+	}
+	cfg := agentconfig.NewAgentConfig(cfgOpts...)
+
+	// Initialize issue providers (nil configs — Asana/Linear are configured via workflow source, not config.json)
+	githubProvider := issues.NewGitHubProvider(gitSvc)
+	asanaProvider := issues.NewAsanaProvider(cfg)
+	linearProvider := issues.NewLinearProvider(cfg)
+	issueRegistry := issues.NewProviderRegistry(githubProvider, asanaProvider, linearProvider)
 
 	// Build daemon options
 	var opts []daemon.Option

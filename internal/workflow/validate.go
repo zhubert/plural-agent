@@ -51,6 +51,9 @@ func Validate(cfg *Config) []ValidationError {
 	// Provider validation
 	errs = append(errs, validateSource(cfg)...)
 
+	// Settings validation
+	errs = append(errs, validateSettings(cfg.Settings)...)
+
 	return errs
 }
 
@@ -308,6 +311,21 @@ func validateSource(cfg *Config) []ValidationError {
 		}
 	}
 
+	return errs
+}
+
+// validateSettings validates the optional settings section.
+func validateSettings(s *SettingsConfig) []ValidationError {
+	if s == nil {
+		return nil
+	}
+	var errs []ValidationError
+	if s.MaxConcurrent < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "settings.max_concurrent",
+			Message: "max_concurrent must not be negative",
+		})
+	}
 	return errs
 }
 

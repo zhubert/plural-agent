@@ -135,5 +135,13 @@ func Merge(partial, defaults *Config) *Config {
 		result.States[name] = state
 	}
 
+	// Settings: partial wins if present, otherwise keep defaults
+	if partial.Settings != nil {
+		result.Settings = partial.Settings
+	} else if defaults.Settings != nil {
+		s := *defaults.Settings
+		result.Settings = &s
+	}
+
 	return result
 }

@@ -172,4 +172,79 @@ func TestMerge(t *testing.T) {
 			t.Error("expected default max_turns of 50")
 		}
 	})
+
+	t.Run("partial settings override defaults", func(t *testing.T) {
+		cleanup := true
+		partial := &Config{
+			Settings: &SettingsConfig{
+				ContainerImage: "custom:latest",
+				MaxConcurrent:  5,
+				CleanupMerged:  &cleanup,
+			},
+		}
+		defaults := DefaultWorkflowConfig()
+		result := Merge(partial, defaults)
+
+		if result.Settings == nil {
+			t.Fatal("expected settings to be present")
+		}
+		if result.Settings.ContainerImage != "custom:latest" {
+			t.Errorf("container_image: got %q", result.Settings.ContainerImage)
+		}
+		if result.Settings.MaxConcurrent != 5 {
+			t.Errorf("max_concurrent: got %d", result.Settings.MaxConcurrent)
+		}
+		if result.Settings.CleanupMerged == nil || !*result.Settings.CleanupMerged {
+			t.Error("cleanup_merged: expected true")
+		}
+	})
+
+	t.Run("nil partial settings keeps default settings", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States:  map[string]*State{"s": {Type: StateTypeSucceed}},
+			Settings: &SettingsConfig{
+				BranchPrefix: "default/",
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		if result.Settings == nil {
+			t.Fatal("expected settings from defaults")
+		}
+		if result.Settings.BranchPrefix != "default/" {
+			t.Errorf("branch_prefix: got %q", result.Settings.BranchPrefix)
+		}
+	})
+
+	t.Run("both nil settings produces nil", func(t *testing.T) {
+		partial := &Config{}
+		defaults := DefaultWorkflowConfig() // no Settings
+		result := Merge(partial, defaults)
+
+		if result.Settings != nil {
+			t.Error("expected nil settings when both are nil")
+		}
+	})
+
+	t.Run("default settings is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States:  map[string]*State{"s": {Type: StateTypeSucceed}},
+			Settings: &SettingsConfig{
+				BranchPrefix: "original/",
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		// Mutate the result; should not affect defaults
+		result.Settings.BranchPrefix = "mutated/"
+		if defaults.Settings.BranchPrefix != "original/" {
+			t.Error("merge should deep-copy settings from defaults")
+		}
+	})
 }

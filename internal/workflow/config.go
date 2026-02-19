@@ -23,6 +23,15 @@ type Config struct {
 	Start    string            `yaml:"start"`
 	Source   SourceConfig      `yaml:"source"`
 	States   map[string]*State `yaml:"states"`
+	Settings *SettingsConfig   `yaml:"settings,omitempty"`
+}
+
+// SettingsConfig holds agent-level settings that can be specified in the workflow YAML.
+type SettingsConfig struct {
+	ContainerImage string `yaml:"container_image,omitempty"`
+	BranchPrefix   string `yaml:"branch_prefix,omitempty"`
+	MaxConcurrent  int    `yaml:"max_concurrent,omitempty"`
+	CleanupMerged  *bool  `yaml:"cleanup_merged,omitempty"`
 }
 
 // State represents a single node in the workflow graph.

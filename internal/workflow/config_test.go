@@ -215,6 +215,127 @@ states:
 	}
 }
 
+func TestSettingsConfigParse(t *testing.T) {
+	t.Run("full settings", func(t *testing.T) {
+		yamlStr := `
+workflow: test
+start: s
+source:
+  provider: github
+  filter:
+    label: queued
+states:
+  s:
+    type: succeed
+settings:
+  container_image: custom:latest
+  branch_prefix: agent/
+  max_concurrent: 5
+  cleanup_merged: true
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings == nil {
+			t.Fatal("expected settings")
+		}
+		if cfg.Settings.ContainerImage != "custom:latest" {
+			t.Errorf("container_image: got %q", cfg.Settings.ContainerImage)
+		}
+		if cfg.Settings.BranchPrefix != "agent/" {
+			t.Errorf("branch_prefix: got %q", cfg.Settings.BranchPrefix)
+		}
+		if cfg.Settings.MaxConcurrent != 5 {
+			t.Errorf("max_concurrent: got %d", cfg.Settings.MaxConcurrent)
+		}
+		if cfg.Settings.CleanupMerged == nil || !*cfg.Settings.CleanupMerged {
+			t.Error("cleanup_merged: expected true")
+		}
+	})
+
+	t.Run("cleanup_merged false", func(t *testing.T) {
+		yamlStr := `
+settings:
+  cleanup_merged: false
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings == nil {
+			t.Fatal("expected settings")
+		}
+		if cfg.Settings.CleanupMerged == nil {
+			t.Fatal("expected cleanup_merged to be non-nil")
+		}
+		if *cfg.Settings.CleanupMerged {
+			t.Error("cleanup_merged: expected false")
+		}
+	})
+
+	t.Run("cleanup_merged omitted is nil", func(t *testing.T) {
+		yamlStr := `
+settings:
+  max_concurrent: 2
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings == nil {
+			t.Fatal("expected settings")
+		}
+		if cfg.Settings.CleanupMerged != nil {
+			t.Error("cleanup_merged: expected nil when omitted")
+		}
+	})
+
+	t.Run("no settings section", func(t *testing.T) {
+		yamlStr := `
+workflow: test
+start: s
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings != nil {
+			t.Error("expected nil settings when section absent")
+		}
+	})
+
+	t.Run("settings round-trip via marshal", func(t *testing.T) {
+		cleanup := true
+		original := SettingsConfig{
+			ContainerImage: "img:v1",
+			BranchPrefix:   "pfx/",
+			MaxConcurrent:  7,
+			CleanupMerged:  &cleanup,
+		}
+		data, err := yaml.Marshal(&original)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var parsed SettingsConfig
+		if err := yaml.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if parsed.ContainerImage != original.ContainerImage {
+			t.Errorf("container_image: got %q", parsed.ContainerImage)
+		}
+		if parsed.BranchPrefix != original.BranchPrefix {
+			t.Errorf("branch_prefix: got %q", parsed.BranchPrefix)
+		}
+		if parsed.MaxConcurrent != original.MaxConcurrent {
+			t.Errorf("max_concurrent: got %d", parsed.MaxConcurrent)
+		}
+		if parsed.CleanupMerged == nil || !*parsed.CleanupMerged {
+			t.Error("cleanup_merged: expected true")
+		}
+	})
+}
+
 func TestConfigPartialParse(t *testing.T) {
 	// Only source section, no states
 	yamlStr := `

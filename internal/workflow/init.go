@@ -86,6 +86,13 @@ states:
 
   failed:
     type: fail
+
+# Agent settings (optional — override defaults for this repo)
+# settings:
+#   container_image: ghcr.io/zhubert/plural-claude
+#   branch_prefix: plural/
+#   max_concurrent: 3
+#   cleanup_merged: true
 `
 
 // WriteTemplate writes the default workflow.yaml template to repoPath/.plural/workflow.yaml.
