@@ -50,10 +50,7 @@ func TestNewAgentConfig_Options(t *testing.T) {
 		WithBranchPrefix("agent/"),
 		WithContainerImage("custom-image:latest"),
 		WithCleanupMerged(true),
-		WithMaxTurns(100),
-		WithMaxDurationMin(60),
 		WithMaxConcurrent(5),
-		WithMergeMethod("squash"),
 	)
 
 	if repos := c.GetRepos(); len(repos) != 1 || repos[0] != "/path/to/repo" {
@@ -68,17 +65,8 @@ func TestNewAgentConfig_Options(t *testing.T) {
 	if !c.GetAutoCleanupMerged() {
 		t.Error("cleanupMerged: got false")
 	}
-	if c.GetAutoMaxTurns() != 100 {
-		t.Errorf("maxTurns: got %d", c.GetAutoMaxTurns())
-	}
-	if c.GetAutoMaxDurationMin() != 60 {
-		t.Errorf("maxDurationMin: got %d", c.GetAutoMaxDurationMin())
-	}
 	if c.GetIssueMaxConcurrent() != 5 {
 		t.Errorf("maxConcurrent: got %d", c.GetIssueMaxConcurrent())
-	}
-	if c.GetAutoMergeMethod() != "squash" {
-		t.Errorf("mergeMethod: got %q", c.GetAutoMergeMethod())
 	}
 }
 

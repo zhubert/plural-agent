@@ -122,27 +122,11 @@ func TestDaemonOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("WithPollInterval", func(t *testing.T) {
-		d := testDaemon(cfg)
-		WithPollInterval(10 * time.Second)(d)
-		if d.pollInterval != 10*time.Second {
-			t.Errorf("expected 10s, got %v", d.pollInterval)
-		}
-	})
-
 	t.Run("WithMergeMethod", func(t *testing.T) {
 		d := testDaemon(cfg)
 		WithMergeMethod("squash")(d)
 		if d.mergeMethod != "squash" {
 			t.Errorf("expected squash, got %s", d.mergeMethod)
-		}
-	})
-
-	t.Run("WithReviewPollInterval", func(t *testing.T) {
-		d := testDaemon(cfg)
-		WithReviewPollInterval(5 * time.Second)(d)
-		if d.reviewPollInterval != 5*time.Second {
-			t.Errorf("expected 5s, got %v", d.reviewPollInterval)
 		}
 	})
 
@@ -841,24 +825,6 @@ func TestDaemon_HandleAsyncComplete_PRAlreadyMerged(t *testing.T) {
 	}
 	if item.CompletedAt == nil {
 		t.Error("expected CompletedAt to be set")
-	}
-}
-
-func TestDaemon_GetEffectiveMaxTurns(t *testing.T) {
-	cfg := testConfig()
-	cfg.AutoMaxTurns = 50
-	d := testDaemon(cfg)
-	d.repoFilter = "/test/repo"
-
-	// Default from config
-	if got := d.getEffectiveMaxTurns("/test/repo"); got != 50 {
-		t.Errorf("expected 50, got %d", got)
-	}
-
-	// CLI override
-	d.maxTurns = 100
-	if got := d.getEffectiveMaxTurns("/test/repo"); got != 100 {
-		t.Errorf("expected 100, got %d", got)
 	}
 }
 

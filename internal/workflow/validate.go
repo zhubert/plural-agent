@@ -12,10 +12,6 @@ type ValidationError struct {
 	Message string
 }
 
-func (e ValidationError) Error() string {
-	return fmt.Sprintf("%s: %s", e.Field, e.Message)
-}
-
 // Validate checks a Config for errors and returns all problems found.
 func Validate(cfg *Config) []ValidationError {
 	var errs []ValidationError

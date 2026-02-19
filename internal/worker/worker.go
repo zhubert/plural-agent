@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +50,7 @@ func NewSessionWorker(host Host, sess *config.Session, runner claude.RunnerInter
 }
 
 // NewDoneWorker creates a SessionWorker that is already done.
-// Useful for tests that need a completed worker.
+// Used by tests in other packages that need a completed worker.
 func NewDoneWorker() *SessionWorker {
 	w := &SessionWorker{
 		done: make(chan struct{}),
@@ -832,13 +831,4 @@ func (w *SessionWorker) notifySupervisor(supervisorID string, testsPassed bool) 
 // runAutoMerge runs the auto-merge state machine. See auto_merge.go.
 func (w *SessionWorker) runAutoMerge() {
 	RunAutoMerge(w.host, w.sessionID)
-}
-
-// FormatOutput trims strings for logging.
-func FormatOutput(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
 }

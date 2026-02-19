@@ -58,24 +58,9 @@ func WithCleanupMerged(cleanup bool) AgentConfigOption {
 	return func(c *AgentConfig) { c.cleanupMerged = cleanup }
 }
 
-// WithMaxTurns sets the max autonomous turns.
-func WithMaxTurns(max int) AgentConfigOption {
-	return func(c *AgentConfig) { c.maxTurns = max }
-}
-
-// WithMaxDurationMin sets the max autonomous duration in minutes.
-func WithMaxDurationMin(max int) AgentConfigOption {
-	return func(c *AgentConfig) { c.maxDurationMin = max }
-}
-
 // WithMaxConcurrent sets the max concurrent sessions.
 func WithMaxConcurrent(max int) AgentConfigOption {
 	return func(c *AgentConfig) { c.maxConcurrent = max }
-}
-
-// WithMergeMethod sets the merge method.
-func WithMergeMethod(method string) AgentConfigOption {
-	return func(c *AgentConfig) { c.mergeMethod = method }
 }
 
 // NewAgentConfig creates a new AgentConfig with defaults, then applies options.

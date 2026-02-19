@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -436,10 +435,4 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestValidationErrorString(t *testing.T) {
-	e := ValidationError{Field: "source.provider", Message: "provider is required"}
-	s := e.Error()
-	if !strings.Contains(s, "source.provider") || !strings.Contains(s, "provider is required") {
-		t.Errorf("unexpected error string: %q", s)
-	}
-}
+

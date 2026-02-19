@@ -103,16 +103,6 @@ func WithMergeMethod(method string) Option {
 	return func(d *Daemon) { d.mergeMethod = method }
 }
 
-// WithPollInterval sets the polling interval (mainly for testing).
-func WithPollInterval(d time.Duration) Option {
-	return func(dm *Daemon) { dm.pollInterval = d }
-}
-
-// WithReviewPollInterval sets the review polling interval (mainly for testing).
-func WithReviewPollInterval(d time.Duration) Option {
-	return func(dm *Daemon) { dm.reviewPollInterval = d }
-}
-
 // New creates a new daemon.
 func New(cfg agentconfig.Config, gitSvc *git.GitService, sessSvc *session.SessionService, registry *issues.ProviderRegistry, logger *slog.Logger, opts ...Option) *Daemon {
 	d := &Daemon{
@@ -594,11 +584,6 @@ func (d *Daemon) getMaxDuration() int {
 	return d.config.GetAutoMaxDurationMin()
 }
 
-// getAutoMerge returns whether auto-merge is enabled.
-func (d *Daemon) getAutoMerge() bool {
-	return d.autoMerge
-}
-
 // getMergeMethod returns the effective merge method.
 func (d *Daemon) getMergeMethod() string {
 	if d.mergeMethod != "" {
@@ -610,11 +595,6 @@ func (d *Daemon) getMergeMethod() string {
 // getAutoAddressPRComments returns whether auto-address PR comments is enabled.
 func (d *Daemon) getAutoAddressPRComments() bool {
 	return d.autoAddressPRComments || d.config.GetAutoAddressPRComments()
-}
-
-// getAutoBroadcastPR returns whether auto-broadcast PR is enabled.
-func (d *Daemon) getAutoBroadcastPR() bool {
-	return d.autoBroadcastPR || d.config.GetAutoBroadcastPR()
 }
 
 // loadWorkflowConfigs loads workflow configs and creates engines for all registered repos.
@@ -669,39 +649,6 @@ func (d *Daemon) getEngine(repoPath string) *workflow.Engine {
 	registry := d.buildActionRegistry()
 	checker := NewEventChecker(d)
 	return workflow.NewEngine(cfg, registry, checker, d.logger)
-}
-
-// getEffectiveMaxTurns returns the effective max turns considering CLI > workflow > config > default.
-func (d *Daemon) getEffectiveMaxTurns(repoPath string) int {
-	if d.maxTurns > 0 {
-		return d.maxTurns
-	}
-	wfCfg := d.getWorkflowConfig(repoPath)
-	codingState := wfCfg.States["coding"]
-	if codingState != nil {
-		p := workflow.NewParamHelper(codingState.Params)
-		if v := p.Int("max_turns", 0); v > 0 {
-			return v
-		}
-	}
-	return d.config.GetAutoMaxTurns()
-}
-
-// getEffectiveMaxDuration returns the effective max duration in minutes.
-func (d *Daemon) getEffectiveMaxDuration(repoPath string) int {
-	if d.maxDuration > 0 {
-		return d.maxDuration
-	}
-	wfCfg := d.getWorkflowConfig(repoPath)
-	codingState := wfCfg.States["coding"]
-	if codingState != nil {
-		p := workflow.NewParamHelper(codingState.Params)
-		dur := p.Duration("max_duration", 0)
-		if dur > 0 {
-			return int(dur.Minutes())
-		}
-	}
-	return d.config.GetAutoMaxDurationMin()
 }
 
 // getEffectiveMergeMethod returns the effective merge method.
