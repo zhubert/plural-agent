@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -890,5 +891,43 @@ func TestDaemon_WorkItemView_FallsBackToRepoFilter(t *testing.T) {
 
 	if view.RepoPath != "/fallback/repo" {
 		t.Errorf("expected fallback to repoFilter /fallback/repo, got %s", view.RepoPath)
+	}
+}
+
+func TestDaemon_SaveConfig_ResetOnSuccess(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Point config at a valid temp file so Save() succeeds
+	tmpFile := filepath.Join(t.TempDir(), "config.json")
+	cfg.SetFilePath(tmpFile)
+
+	// Simulate some prior failures
+	d.configSaveFailures = 3
+
+	// saveConfig should reset counter on success
+	d.saveConfig("test")
+
+	if d.configSaveFailures != 0 {
+		t.Errorf("expected configSaveFailures=0 after success, got %d", d.configSaveFailures)
+	}
+}
+
+func TestDaemon_SaveConfig_IncrementOnFailure(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Point the config at an invalid path to force Save() to fail
+	cfg.SetFilePath("/nonexistent/path/config.json")
+
+	d.saveConfig("test")
+
+	if d.configSaveFailures != 1 {
+		t.Errorf("expected configSaveFailures=1 after failure, got %d", d.configSaveFailures)
+	}
+
+	d.saveConfig("test2")
+	if d.configSaveFailures != 2 {
+		t.Errorf("expected configSaveFailures=2 after second failure, got %d", d.configSaveFailures)
 	}
 }

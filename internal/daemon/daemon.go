@@ -11,7 +11,6 @@ import (
 	"github.com/zhubert/plural-agent/internal/daemonstate"
 	"github.com/zhubert/plural-agent/internal/worker"
 	"github.com/zhubert/plural-agent/internal/workflow"
-	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/issues"
@@ -39,6 +38,9 @@ type Daemon struct {
 	engines        map[string]*workflow.Engine  // keyed by repo path
 	mu             sync.Mutex
 	logger         *slog.Logger
+
+	// Config save tracking
+	configSaveFailures int
 
 	// Options
 	once                  bool
@@ -493,72 +495,6 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 	}
 }
 
-// waitForActiveWorkers waits for all active workers to complete (used in --once mode).
-func (d *Daemon) waitForActiveWorkers(ctx context.Context) {
-	d.mu.Lock()
-	workers := make([]*worker.SessionWorker, 0, len(d.workers))
-	for _, w := range d.workers {
-		workers = append(workers, w)
-	}
-	d.mu.Unlock()
-
-	for _, w := range workers {
-		w.Wait()
-	}
-}
-
-// shutdown gracefully stops all workers and releases the lock.
-func (d *Daemon) shutdown() {
-	d.mu.Lock()
-	workers := make([]*worker.SessionWorker, 0, len(d.workers))
-	for _, w := range d.workers {
-		workers = append(workers, w)
-	}
-	d.mu.Unlock()
-
-	d.logger.Info("shutting down workers", "count", len(workers))
-	for _, w := range workers {
-		w.Cancel()
-	}
-
-	done := make(chan struct{})
-	go func() {
-		for _, w := range workers {
-			w.Wait()
-		}
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		d.logger.Info("all workers shut down")
-	case <-time.After(30 * time.Second):
-		d.logger.Warn("shutdown timed out")
-	}
-
-	d.saveState()
-	d.sessionMgr.Shutdown()
-}
-
-// releaseLock releases the daemon lock.
-func (d *Daemon) releaseLock() {
-	if d.lock != nil {
-		if err := d.lock.Release(); err != nil {
-			d.logger.Warn("failed to release lock", "error", err)
-		}
-	}
-}
-
-// saveState persists the daemon state to disk.
-func (d *Daemon) saveState() {
-	if d.state == nil {
-		return
-	}
-	d.state.LastPollAt = time.Now()
-	if err := d.state.Save(); err != nil {
-		d.logger.Error("failed to save daemon state", "error", err)
-	}
-}
 
 // getMaxConcurrent returns the effective max concurrent limit.
 func (d *Daemon) getMaxConcurrent() int {
@@ -688,79 +624,3 @@ func (d *Daemon) runHooks(ctx context.Context, hooks []workflow.HookConfig, item
 	workflow.RunHooks(ctx, hooks, hookCtx, d.logger)
 }
 
-// workItemView creates a read-only view of a work item for the engine.
-func (d *Daemon) workItemView(item *daemonstate.WorkItem) *workflow.WorkItemView {
-	// Use the session's actual repo path rather than d.repoFilter,
-	// which may be empty or a pattern (e.g., "owner/repo") in multi-repo daemons.
-	repoPath := d.repoFilter
-	if sess := d.config.GetSession(item.SessionID); sess != nil {
-		repoPath = sess.RepoPath
-	} else if item.SessionID != "" {
-		d.logger.Warn("session not found for work item, falling back to repoFilter",
-			"workItem", item.ID, "sessionID", item.SessionID, "repoFilter", d.repoFilter)
-	}
-
-	return &workflow.WorkItemView{
-		ID:                item.ID,
-		SessionID:         item.SessionID,
-		RepoPath:          repoPath,
-		Branch:            item.Branch,
-		PRURL:             item.PRURL,
-		CurrentStep:       item.CurrentStep,
-		Phase:             item.Phase,
-		StepData:          item.StepData,
-		FeedbackRounds:    item.FeedbackRounds,
-		CommentsAddressed: item.CommentsAddressed,
-	}
-}
-
-// activeSlotCount returns the number of work items consuming concurrency slots.
-func (d *Daemon) activeSlotCount() int {
-	return d.state.ActiveSlotCount()
-}
-
-// Compile-time assertion: Daemon must implement worker.Host.
-var _ worker.Host = (*Daemon)(nil)
-
-// --- Host interface implementation ---
-
-func (d *Daemon) Config() agentconfig.Config                { return d.config }
-func (d *Daemon) GitService() *git.GitService               { return d.gitService }
-func (d *Daemon) SessionManager() *manager.SessionManager    { return d.sessionMgr }
-func (d *Daemon) Logger() *slog.Logger                      { return d.logger }
-func (d *Daemon) MaxTurns() int                             { return d.getMaxTurns() }
-func (d *Daemon) MaxDuration() int                          { return d.getMaxDuration() }
-func (d *Daemon) AutoMerge() bool                           { return d.autoMerge }
-func (d *Daemon) MergeMethod() string                       { return d.getMergeMethod() }
-func (d *Daemon) DaemonManaged() bool                       { return true }
-func (d *Daemon) AutoAddressPRComments() bool               { return d.getAutoAddressPRComments() }
-
-func (d *Daemon) AutoCreatePR(ctx context.Context, sessionID string) (string, error) {
-	sess := d.config.GetSession(sessionID)
-	if sess == nil {
-		return "", fmt.Errorf("session not found")
-	}
-	return d.createPR(ctx, &daemonstate.WorkItem{SessionID: sessionID, Branch: sess.Branch})
-}
-
-func (d *Daemon) CreateChildSession(ctx context.Context, supervisorID, taskDescription string) (worker.SessionInfo, error) {
-	// Daemon doesn't directly support child sessions through Host interface;
-	// worker child creation goes through the Agent path. This is a no-op for daemon.
-	return worker.SessionInfo{}, fmt.Errorf("child sessions not supported in daemon mode")
-}
-
-func (d *Daemon) CleanupSession(ctx context.Context, sessionID string) error {
-	d.cleanupSession(ctx, sessionID)
-	return nil
-}
-
-func (d *Daemon) SaveRunnerMessages(sessionID string, runner claude.RunnerInterface) {
-	d.saveRunnerMessages(sessionID, runner)
-}
-
-func (d *Daemon) IsWorkerRunning(sessionID string) bool {
-	d.mu.Lock()
-	w, exists := d.workers[sessionID]
-	d.mu.Unlock()
-	return exists && !w.Done()
-}

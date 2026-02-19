@@ -830,5 +830,5 @@ func (w *SessionWorker) notifySupervisor(supervisorID string, testsPassed bool) 
 
 // runAutoMerge runs the auto-merge state machine. See auto_merge.go.
 func (w *SessionWorker) runAutoMerge() {
-	RunAutoMerge(w.host, w.sessionID)
+	RunAutoMerge(w.ctx, w.host, w.sessionID)
 }

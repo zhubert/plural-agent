@@ -176,9 +176,7 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	}
 
 	d.config.AddSession(*sess)
-	if err := d.config.Save(); err != nil {
-		log.Error("failed to save config", "error", err)
-	}
+	d.saveConfig("startCoding")
 
 	// Update work item with session info.
 	item.SessionID = sess.ID
@@ -291,9 +289,7 @@ func (d *Daemon) createPR(ctx context.Context, item *daemonstate.WorkItem) (stri
 
 	// Mark session as PR created
 	d.config.MarkSessionPRCreated(item.SessionID)
-	if err := d.config.Save(); err != nil {
-		log.Error("failed to save config after PR creation", "error", err)
-	}
+	d.saveConfig("createPR")
 
 	return prURL, nil
 }
@@ -337,9 +333,7 @@ func (d *Daemon) mergePR(ctx context.Context, item *daemonstate.WorkItem) error 
 
 	// Mark session as merged
 	d.config.MarkSessionPRMerged(item.SessionID)
-	if err := d.config.Save(); err != nil {
-		d.logger.Error("failed to save config after merge", "error", err)
-	}
+	d.saveConfig("mergePR")
 
 	// Auto-cleanup if enabled
 	if d.config.GetAutoCleanupMerged() {
@@ -425,9 +419,7 @@ func (d *Daemon) cleanupSession(ctx context.Context, sessionID string) {
 	d.config.ClearOrphanedParentIDs([]string{sessionID})
 	config.DeleteSessionMessages(sessionID)
 
-	if err := d.config.Save(); err != nil {
-		log.Error("failed to save config after cleanup", "error", err)
-	}
+	d.saveConfig("cleanupSession")
 
 	log.Info("cleaned up session")
 }

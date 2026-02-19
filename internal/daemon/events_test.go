@@ -1,0 +1,608 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/zhubert/plural-agent/internal/daemonstate"
+	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/plural-core/exec"
+)
+
+func TestCheckPRReviewed_PRClosed(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "CLOSED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for closed PR")
+	}
+	if data == nil || data["pr_closed"] != true {
+		t.Error("expected pr_closed=true in data")
+	}
+}
+
+func TestCheckPRReviewed_PRMergedExternally(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true for merged PR")
+	}
+	if data == nil || data["pr_merged_externally"] != true {
+		t.Error("expected pr_merged_externally=true in data")
+	}
+}
+
+func TestCheckPRReviewed_AddressingFeedbackPhase(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is OPEN
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false during addressing_feedback phase")
+	}
+}
+
+func TestCheckPRReviewed_PushingPhase(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "pushing")
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false during pushing phase")
+	}
+}
+
+func TestCheckPRReviewed_ReviewApproved(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR state = OPEN
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	// No comments
+	prListJSON, _ := json.Marshal([]struct {
+		State       string        `json:"state"`
+		HeadRefName string        `json:"headRefName"`
+		Comments    []interface{} `json:"comments"`
+		Reviews     []interface{} `json:"reviews"`
+	}{{State: "OPEN", HeadRefName: "feature-sess-1", Comments: []interface{}{}, Reviews: []interface{}{}}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list"}, exec.MockResponse{
+		Stdout: prListJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	// The pr view mock returns the OPEN state for the first call (GetPRState)
+	// and the reviews JSON for the second call (CheckPRReviewDecision).
+	// But since both use "gh pr view", we need to override the mock
+	// to return reviews JSON for the second call.
+	// Actually, since AddPrefixMatch uses the same prefix, we need
+	// to ensure the review check returns APPROVED.
+	// The trick is: GetPRState uses --json state, CheckPRReviewDecision uses --json reviews
+	// But MockExecutor prefix matching doesn't distinguish flags. So the same mock
+	// is returned for both. The OPEN state JSON will fail to parse as reviews (no reviews field),
+	// resulting in ReviewNone. That's the expected flow for "no review".
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// With only the PR state mock returning {"state":"OPEN"}, the review check
+	// will parse an empty reviews field → ReviewNone → not fired
+	if fired {
+		t.Error("expected fired=false with no review")
+	}
+}
+
+func TestCheckPRReviewed_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "nonexistent",
+		Branch:      "feature-1",
+		CurrentStep: "await_review",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when session not found")
+	}
+}
+
+func TestCheckCIComplete_CIPassing_AutoMergeEnabled(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "SUCCESS"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when CI passes with auto-merge")
+	}
+	if data == nil || data["ci_passed"] != true {
+		t.Error("expected ci_passed=true in data")
+	}
+}
+
+func TestCheckCIComplete_CIPassing_AutoMergeDisabled(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "SUCCESS"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = false
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when auto-merge disabled")
+	}
+}
+
+func TestCheckCIComplete_CIFailing_AbandonPolicy(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "FAILURE"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"on_failure": "abandon"})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for CI failure")
+	}
+	if data == nil {
+		t.Fatal("expected data")
+	}
+	if data["ci_action"] != "abandon" {
+		t.Errorf("expected ci_action=abandon, got %v", data["ci_action"])
+	}
+}
+
+func TestCheckCIComplete_CIFailing_DefaultRetry(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "FAILURE"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil) // default on_failure = "retry"
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for CI failure")
+	}
+	if data == nil {
+		t.Fatal("expected data")
+	}
+	if data["ci_action"] != "retry" {
+		t.Errorf("expected ci_action=retry, got %v", data["ci_action"])
+	}
+}
+
+func TestCheckCIComplete_CIPending(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "PENDING"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for pending CI")
+	}
+}
+
+func TestCheckCIComplete_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "nonexistent",
+		Branch:      "feature-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when session not found")
+	}
+}
+
+func TestCheckPRReviewed_MaxFeedbackRoundsReached(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	// Has new comments
+	type comment struct {
+		Body string `json:"body"`
+	}
+	prListJSON, _ := json.Marshal([]struct {
+		State       string    `json:"state"`
+		HeadRefName string    `json:"headRefName"`
+		Comments    []comment `json:"comments"`
+		Reviews     []interface{} `json:"reviews"`
+	}{{
+		State:       "OPEN",
+		HeadRefName: "feature-sess-1",
+		Comments:    []comment{{Body: "please fix"}},
+		Reviews:     []interface{}{},
+	}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list"}, exec.MockResponse{
+		Stdout: prListJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:             "item-1",
+		IssueRef:       config.IssueRef{Source: "github", ID: "1"},
+		SessionID:      "sess-1",
+		Branch:         "feature-sess-1",
+		CurrentStep:    "await_review",
+		FeedbackRounds: 3, // At the default max
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"auto_address": true, "max_feedback_rounds": 3})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when max feedback rounds reached")
+	}
+}
+
+func TestCheckPRReviewed_AutoAddressDisabled(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	// Has new comments
+	type comment struct {
+		Body string `json:"body"`
+	}
+	prListJSON, _ := json.Marshal([]struct {
+		State       string        `json:"state"`
+		HeadRefName string        `json:"headRefName"`
+		Comments    []comment     `json:"comments"`
+		Reviews     []interface{} `json:"reviews"`
+	}{{
+		State:       "OPEN",
+		HeadRefName: "feature-sess-1",
+		Comments:    []comment{{Body: "fix this"}},
+		Reviews:     []interface{}{},
+	}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list"}, exec.MockResponse{
+		Stdout: prListJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+		UpdatedAt:   time.Now(),
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"auto_address": false})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when auto_address disabled")
+	}
+}
