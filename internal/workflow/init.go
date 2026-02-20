@@ -6,13 +6,21 @@ import (
 	"path/filepath"
 )
 
-// Template is the default workflow.yaml content with the new step-functions format.
+// Template is the default workflow.yaml content with the step-functions format.
 const Template = `# Plural Agent Workflow Configuration
 # See: https://github.com/zhubert/plural for full documentation
 #
 # This file defines a state machine that controls how the plural agent
 # daemon processes issues. States are nodes connected by next (success)
 # and error (failure) edges.
+#
+# State types:
+#   task    - Execute an action (sync or async)
+#   wait    - Poll for an external event, with optional timeout enforcement
+#   choice  - Conditional branch based on step data
+#   pass    - Inject data into step data and transition immediately
+#   succeed - Terminal success
+#   fail    - Terminal failure
 
 workflow: issue-to-merge
 start: coding
@@ -34,8 +42,18 @@ states:
       # containerized: true    # Run sessions in Docker containers
       # supervisor: true       # Use supervisor mode for coding
       # system_prompt: ""      # Custom system prompt (inline or file:path/to/prompt.md)
-    # after:                   # Hooks to run after coding completes
+    # before:                  # Hooks to run before coding starts (failure blocks step)
+    #   - run: "make deps"
+    # after:                   # Hooks to run after coding completes (fire-and-forget)
     #   - run: "make lint"
+    # retry:                   # Retry on failure with exponential backoff
+    #   - max_attempts: 3
+    #     interval: 30s
+    #     backoff_rate: 2.0
+    #     errors: ["*"]        # Error patterns to match ("*" = all)
+    # catch:                   # Route specific errors to recovery states
+    #   - errors: ["*"]
+    #     next: failed
     next: open_pr
     error: failed
 
@@ -45,8 +63,6 @@ states:
     params:
       link_issue: true         # Link PR to the source issue
       # template: ""           # PR body template (inline or file:path/to/template.md)
-    # after:                   # Hooks to run after PR creation
-    #   - run: "echo PR created"
     next: await_review
     error: failed
 
@@ -57,15 +73,14 @@ states:
       auto_address: true       # Automatically address PR review comments
       max_feedback_rounds: 3   # Max review/feedback cycles
       # system_prompt: ""      # Custom system prompt for review phase
-    # after:                   # Hooks to run after review completes
-    #   - run: "echo review done"
     next: await_ci
     error: failed
 
   await_ci:
     type: wait
     event: ci.complete
-    timeout: 2h                # How long to wait for CI to complete
+    timeout: 2h                # Enforced: transitions to error after 2h
+    # timeout_next: ci_timed_out  # Optional: dedicated timeout transition (instead of error)
     params:
       on_failure: retry        # What to do on CI failure: retry, abandon, or notify
     next: merge
@@ -77,7 +92,7 @@ states:
     params:
       method: rebase           # Merge method: rebase, squash, or merge
       cleanup: true            # Delete branch after merge
-    # after:                   # Hooks to run after merge completes
+    # after:
     #   - run: "echo merged"
     next: done
 
@@ -86,6 +101,26 @@ states:
 
   failed:
     type: fail
+
+  # --- Example: choice state (conditional branching) ---
+  # check_result:
+  #   type: choice
+  #   choices:
+  #     - variable: ci_status    # Step data key to evaluate
+  #       equals: passing        # Condition: equals, not_equals, or is_present
+  #       next: merge
+  #     - variable: ci_status
+  #       equals: failing
+  #       next: fix_ci
+  #   default: await_ci          # Fallback if no rule matches
+
+  # --- Example: pass state (data injection) ---
+  # set_defaults:
+  #   type: pass
+  #   data:
+  #     merge_method: squash
+  #     cleanup_branch: true
+  #   next: coding
 
 # Agent settings (optional — override defaults for this repo)
 # settings:

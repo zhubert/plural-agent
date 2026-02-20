@@ -62,7 +62,7 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 	if !ValidStateTypes[state.Type] {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".type",
-			Message: fmt.Sprintf("unknown state type %q (must be task, wait, succeed, or fail)", state.Type),
+			Message: fmt.Sprintf("unknown state type %q (must be task, wait, choice, pass, succeed, or fail)", state.Type),
 		})
 		return errs // Can't validate further without valid type
 	}

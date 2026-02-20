@@ -118,6 +118,14 @@ Auth: `ANTHROPIC_API_KEY`, macOS keychain `anthropic_api_key`, `CLAUDE_CODE_OAUT
 
 Per-repo workflow config via `.plural/workflow.yaml`. The daemon loads workflow configs at startup, keyed by repo path. Override chain: CLI flag > workflow yaml > config.json > default.
 
+**State types**: `task` (execute action), `wait` (poll event with timeout enforcement), `choice` (conditional branch on step data), `pass` (inject data), `succeed`/`fail` (terminal).
+
+**Error recovery**: Task states support `retry` (max_attempts, interval, exponential backoff) and `catch` (route specific errors to recovery states). Retry count tracked in `_retry_count` step data key.
+
+**Timeouts**: Wait states with `timeout` are enforced at runtime. `timeout_next` provides a dedicated timeout transition edge; otherwise falls back to `error` edge. `StepEnteredAt` on WorkItem tracks when a step was entered.
+
+**Hooks**: `before` hooks run before step execution (failure blocks the step). `after` hooks run after completion (fire-and-forget). Both use `RunBeforeHooks()`/`RunHooks()` in `workflow/hooks.go`.
+
 Key files: `daemon/daemon.go` (main loop), `daemon/actions.go` (action execution), `daemon/events.go` (event handling), `daemon/polling.go` (issue fetching).
 
 ---

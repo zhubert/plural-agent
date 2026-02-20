@@ -127,7 +127,9 @@ states:
 | Type | Purpose | Required fields |
 |------|---------|-----------------|
 | `task` | Executes an action | `action`, `next` |
-| `wait` | Polls for an external event | `event`, `next` |
+| `wait` | Polls for an external event, with optional timeout enforcement | `event`, `next` |
+| `choice` | Conditional branch based on step data | `choices` |
+| `pass` | Inject data and transition immediately | `next` |
 | `succeed` | Terminal success state | -- |
 | `fail` | Terminal failure state | -- |
 
@@ -214,6 +216,131 @@ Polls CI check status on the PR. This event fires **only when CI passes** (or wh
 | `on_failure` | string | `retry` | Behavior on CI failure: `retry`, `abandon`, or `notify` |
 
 > **Note:** `abandon` and `notify` are currently structural -- they log the failure and set metadata but do not yet trigger distinct behavior (e.g., closing the PR or sending a notification). In practice all three options keep the item in the wait state.
+
+---
+
+### Timeouts
+
+Wait states with a `timeout` are **enforced at runtime**. When a work item has been waiting longer than the configured duration, the engine transitions out of the wait state:
+
+- If `timeout_next` is set, transitions to that state (e.g., a nudge or retry state)
+- Otherwise, follows the `error` edge
+- If neither exists, the engine returns an error
+
+```yaml
+states:
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: nudge_reviewers    # Dedicated timeout transition
+    next: await_ci
+    error: failed
+
+  nudge_reviewers:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been waiting for review for 48h. Could someone take a look?"
+    next: await_review               # Go back to waiting
+    error: failed
+```
+
+---
+
+### Retry and Catch
+
+Task states support `retry` and `catch` blocks for error recovery, similar to AWS Step Functions.
+
+**Retry** re-executes the same state on failure, with configurable backoff:
+
+```yaml
+states:
+  coding:
+    type: task
+    action: ai.code
+    retry:
+      - max_attempts: 3          # Required: how many retries
+        interval: 30s            # Optional: base delay between retries
+        backoff_rate: 2.0        # Optional: exponential multiplier (default 1.0)
+        errors: ["*"]            # Optional: error patterns to match ("*" = all)
+    next: open_pr
+    error: failed
+```
+
+On each failure, the engine checks retry rules in order. If a rule matches and attempts remain, the work item stays on the current step with phase `retry_pending` and `_retry_count` incremented in step data.
+
+**Catch** routes specific errors to recovery states:
+
+```yaml
+states:
+  coding:
+    type: task
+    action: ai.code
+    retry:
+      - max_attempts: 2
+    catch:
+      - errors: ["container_error"]
+        next: notify_and_fail
+      - errors: ["*"]             # Catch-all
+        next: failed
+    next: open_pr
+```
+
+The evaluation order is: **retry rules first** (if attempts remain), then **catch rules**, then the **error edge**. If none match, the engine returns an error.
+
+Both sync and async actions (like `ai.code`) support retry/catch.
+
+---
+
+### Choice State
+
+The `choice` state type evaluates rules against step data and branches conditionally:
+
+```yaml
+states:
+  check_ci_result:
+    type: choice
+    choices:
+      - variable: ci_status       # Step data key
+        equals: passing           # Condition
+        next: merge
+      - variable: ci_status
+        equals: failing
+        next: fix_ci
+      - variable: pr_closed
+        equals: true
+        next: failed
+    default: await_ci             # Fallback if no rule matches
+```
+
+**Conditions:**
+
+| Condition | Description |
+|-----------|-------------|
+| `equals` | Exact match (supports strings, numbers, booleans) |
+| `not_equals` | Inequality match |
+| `is_present` | Check if the variable exists in step data (`true`/`false`) |
+
+Each rule must have exactly one condition. Rules are evaluated in order; the first match wins. If no rule matches and no `default` is set, the engine returns an error.
+
+---
+
+### Pass State
+
+The `pass` state injects data into step data and immediately transitions:
+
+```yaml
+states:
+  set_defaults:
+    type: pass
+    data:
+      merge_method: squash
+      cleanup_branch: true
+    next: coding
+```
+
+This is useful for workflow parameterization — setting values that downstream actions can read — without writing a custom action.
 
 ---
 
@@ -337,10 +464,25 @@ states:
 
 **System prompts** can be inline strings or `file:./path` references (relative to repo root).
 
-**After-hooks** run shell commands on the host after a state completes via the `after` field. Hook failures are logged but don't block the workflow. Hooks receive environment variables: `PLURAL_REPO_PATH`, `PLURAL_BRANCH`, `PLURAL_SESSION_ID`, `PLURAL_ISSUE_ID`, `PLURAL_ISSUE_TITLE`, `PLURAL_ISSUE_URL`, `PLURAL_PR_URL`, `PLURAL_WORKTREE`, `PLURAL_PROVIDER`.
+**Hooks** run shell commands on the host at specific points in a state's lifecycle. Hooks receive environment variables: `PLURAL_REPO_PATH`, `PLURAL_BRANCH`, `PLURAL_SESSION_ID`, `PLURAL_ISSUE_ID`, `PLURAL_ISSUE_TITLE`, `PLURAL_ISSUE_URL`, `PLURAL_PR_URL`, `PLURAL_WORKTREE`, `PLURAL_PROVIDER`.
+
+| Hook | When | On failure |
+|------|------|------------|
+| `before` | Before the step executes | **Blocks** the step |
+| `after` | After the step completes | Logged, does not block |
 
 ```yaml
 states:
+  coding:
+    type: task
+    action: ai.code
+    before:                      # Runs before Claude starts; failure blocks the step
+      - run: "make deps"
+    after:                       # Runs after coding completes; failure is logged only
+      - run: "make lint"
+    next: open_pr
+    error: failed
+
   merge:
     type: task
     action: github.merge
