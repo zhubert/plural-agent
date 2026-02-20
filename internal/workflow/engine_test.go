@@ -953,3 +953,207 @@ func TestGetRetryCount(t *testing.T) {
 		})
 	}
 }
+
+func TestEngine_ProcessStep_ChoiceEquals(t *testing.T) {
+	cfg := &Config{
+		Start: "check",
+		States: map[string]*State{
+			"check": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "ci_status", Equals: "passing", Next: "merge"},
+					{Variable: "ci_status", Equals: "failing", Next: "fix_ci"},
+				},
+				Default: "wait_more",
+			},
+			"merge":     {Type: StateTypeSucceed},
+			"fix_ci":    {Type: StateTypeSucceed},
+			"wait_more": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	// Test matching first rule
+	view := &WorkItemView{
+		CurrentStep: "check",
+		Phase:       "idle",
+		StepData:    map[string]any{"ci_status": "passing"},
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "merge" {
+		t.Errorf("expected merge, got %q", result.NewStep)
+	}
+
+	// Test matching second rule
+	view.StepData = map[string]any{"ci_status": "failing"}
+	result, err = engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "fix_ci" {
+		t.Errorf("expected fix_ci, got %q", result.NewStep)
+	}
+}
+
+func TestEngine_ProcessStep_ChoiceDefault(t *testing.T) {
+	cfg := &Config{
+		Start: "check",
+		States: map[string]*State{
+			"check": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "status", Equals: "done", Next: "finish"},
+				},
+				Default: "continue",
+			},
+			"finish":   {Type: StateTypeSucceed},
+			"continue": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	// No matching rule — should use default
+	view := &WorkItemView{
+		CurrentStep: "check",
+		Phase:       "idle",
+		StepData:    map[string]any{"status": "pending"},
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "continue" {
+		t.Errorf("expected continue (default), got %q", result.NewStep)
+	}
+}
+
+func TestEngine_ProcessStep_ChoiceNoMatchNoDefault(t *testing.T) {
+	cfg := &Config{
+		Start: "check",
+		States: map[string]*State{
+			"check": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "status", Equals: "done", Next: "finish"},
+				},
+			},
+			"finish": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	view := &WorkItemView{
+		CurrentStep: "check",
+		Phase:       "idle",
+		StepData:    map[string]any{"status": "pending"},
+	}
+	_, err := engine.ProcessStep(context.Background(), view)
+	if err == nil {
+		t.Fatal("expected error when no rule matches and no default")
+	}
+}
+
+func TestEngine_ProcessStep_ChoiceNotEquals(t *testing.T) {
+	cfg := &Config{
+		Start: "check",
+		States: map[string]*State{
+			"check": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "pr_closed", NotEquals: true, Next: "continue"},
+				},
+				Default: "abort",
+			},
+			"continue": {Type: StateTypeSucceed},
+			"abort":    {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	// pr_closed is false, so not_equals true → matches
+	view := &WorkItemView{
+		CurrentStep: "check",
+		Phase:       "idle",
+		StepData:    map[string]any{"pr_closed": false},
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "continue" {
+		t.Errorf("expected continue, got %q", result.NewStep)
+	}
+}
+
+func TestEngine_ProcessStep_ChoiceIsPresent(t *testing.T) {
+	boolTrue := true
+	boolFalse := false
+
+	cfg := &Config{
+		Start: "check",
+		States: map[string]*State{
+			"check": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "pr_url", IsPresent: &boolTrue, Next: "has_pr"},
+					{Variable: "pr_url", IsPresent: &boolFalse, Next: "no_pr"},
+				},
+			},
+			"has_pr": {Type: StateTypeSucceed},
+			"no_pr":  {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	// Variable present
+	view := &WorkItemView{
+		CurrentStep: "check",
+		Phase:       "idle",
+		StepData:    map[string]any{"pr_url": "https://github.com/test/pr/1"},
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "has_pr" {
+		t.Errorf("expected has_pr, got %q", result.NewStep)
+	}
+
+	// Variable not present
+	view.StepData = map[string]any{}
+	result, err = engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "no_pr" {
+		t.Errorf("expected no_pr, got %q", result.NewStep)
+	}
+}
+
+func TestValuesEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b any
+		want bool
+	}{
+		{"string match", "hello", "hello", true},
+		{"string mismatch", "hello", "world", false},
+		{"bool match", true, true, true},
+		{"bool mismatch", true, false, false},
+		{"int match", 42, 42, true},
+		{"int vs float64", 42, float64(42), true},
+		{"int mismatch", 42, 43, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := valuesEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("valuesEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}

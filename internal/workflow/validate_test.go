@@ -375,6 +375,101 @@ func TestValidate(t *testing.T) {
 			wantFields: []string{"states.c.params.body"},
 		},
 		{
+			name: "valid choice state",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "status", Equals: "done", Next: "done"},
+					}, Default: "wait"},
+					"done": {Type: StateTypeSucceed},
+					"wait": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "choice state no choices",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Default: "done"},
+					"done":  {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.check.choices"},
+		},
+		{
+			name: "choice rule missing variable",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Equals: "x", Next: "done"},
+					}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.check.choices[0].variable"},
+		},
+		{
+			name: "choice rule missing next",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "x", Equals: "y"},
+					}},
+				},
+			},
+			wantFields: []string{"states.check.choices[0].next"},
+		},
+		{
+			name: "choice rule no condition",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "x", Next: "done"},
+					}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.check.choices[0]"},
+		},
+		{
+			name: "choice rule references non-existent state",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "x", Equals: "y", Next: "nonexistent"},
+					}},
+				},
+			},
+			wantFields: []string{"states.check.choices[0].next"},
+		},
+		{
+			name: "choice default references non-existent state",
+			cfg: &Config{
+				Start:  "check",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"check": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "x", Equals: "y", Next: "done"},
+					}, Default: "nonexistent"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.check.default"},
+		},
+		{
 			name: "retry with zero max_attempts",
 			cfg: &Config{
 				Start:  "t",

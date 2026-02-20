@@ -140,6 +140,51 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateCIParams(prefix, state.Params)...)
 		}
 
+	case StateTypeChoice:
+		// Choice states require at least one choice rule
+		if len(state.Choices) == 0 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".choices",
+				Message: "at least one choice rule is required for choice states",
+			})
+		}
+		for i, rule := range state.Choices {
+			rulePrefix := fmt.Sprintf("%s.choices[%d]", prefix, i)
+			if rule.Variable == "" {
+				errs = append(errs, ValidationError{
+					Field:   rulePrefix + ".variable",
+					Message: "variable is required for choice rules",
+				})
+			}
+			if rule.Next == "" {
+				errs = append(errs, ValidationError{
+					Field:   rulePrefix + ".next",
+					Message: "next is required for choice rules",
+				})
+			} else if _, ok := allStates[rule.Next]; !ok {
+				errs = append(errs, ValidationError{
+					Field:   rulePrefix + ".next",
+					Message: fmt.Sprintf("references non-existent state %q", rule.Next),
+				})
+			}
+			// Must have at least one condition
+			if rule.Equals == nil && rule.NotEquals == nil && rule.IsPresent == nil {
+				errs = append(errs, ValidationError{
+					Field:   rulePrefix,
+					Message: "choice rule must have at least one condition (equals, not_equals, or is_present)",
+				})
+			}
+		}
+		// Validate default state reference if present
+		if state.Default != "" {
+			if _, ok := allStates[state.Default]; !ok {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".default",
+					Message: fmt.Sprintf("references non-existent state %q", state.Default),
+				})
+			}
+		}
+
 	case StateTypeSucceed, StateTypeFail:
 		// Terminal states must not have next
 		if state.Next != "" {

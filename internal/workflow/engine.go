@@ -99,6 +99,9 @@ func (e *Engine) ProcessStep(ctx context.Context, item *WorkItemView) (*StepResu
 	case StateTypeWait:
 		return e.processWaitState(ctx, item, state)
 
+	case StateTypeChoice:
+		return e.processChoiceState(item, state)
+
 	default:
 		return nil, fmt.Errorf("unsupported state type %q", state.Type)
 	}
@@ -223,6 +226,79 @@ func (e *Engine) processWaitState(ctx context.Context, item *WorkItemView, state
 		Data:     data,
 		Hooks:    state.After,
 	}, nil
+}
+
+// processChoiceState evaluates choice rules against step data and transitions accordingly.
+func (e *Engine) processChoiceState(item *WorkItemView, state *State) (*StepResult, error) {
+	for _, rule := range state.Choices {
+		if evaluateChoiceRule(rule, item.StepData) {
+			return &StepResult{
+				NewStep:  rule.Next,
+				NewPhase: "idle",
+				Hooks:    state.After,
+			}, nil
+		}
+	}
+
+	// No rule matched — use default
+	if state.Default != "" {
+		return &StepResult{
+			NewStep:  state.Default,
+			NewPhase: "idle",
+			Hooks:    state.After,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("choice state %q: no rule matched and no default defined", item.CurrentStep)
+}
+
+// evaluateChoiceRule checks if a single choice rule matches against step data.
+func evaluateChoiceRule(rule ChoiceRule, data map[string]any) bool {
+	val, exists := lookupVariable(rule.Variable, data)
+
+	// Handle is_present check
+	if rule.IsPresent != nil {
+		return exists == *rule.IsPresent
+	}
+
+	if !exists {
+		// Variable doesn't exist — only not_equals can match
+		if rule.NotEquals != nil {
+			return true // non-existent != any value
+		}
+		return false
+	}
+
+	// Handle equals
+	if rule.Equals != nil {
+		return valuesEqual(val, rule.Equals)
+	}
+
+	// Handle not_equals
+	if rule.NotEquals != nil {
+		return !valuesEqual(val, rule.NotEquals)
+	}
+
+	return false
+}
+
+// lookupVariable retrieves a value from step data by key.
+func lookupVariable(key string, data map[string]any) (any, bool) {
+	if data == nil {
+		return nil, false
+	}
+	val, ok := data[key]
+	return val, ok
+}
+
+// valuesEqual compares two values for equality, handling type coercion
+// between numeric types (int vs float64 from JSON unmarshaling).
+func valuesEqual(a, b any) bool {
+	// Direct equality
+	if fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b) {
+		return true
+	}
+	return false
 }
 
 // AdvanceAfterAsync is called when an async action (e.g., Claude worker) completes.

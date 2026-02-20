@@ -13,6 +13,7 @@ type StateType string
 const (
 	StateTypeTask    StateType = "task"
 	StateTypeWait    StateType = "wait"
+	StateTypeChoice  StateType = "choice"
 	StateTypeSucceed StateType = "succeed"
 	StateTypeFail    StateType = "fail"
 )
@@ -46,7 +47,19 @@ type State struct {
 	TimeoutNext string         `yaml:"timeout_next,omitempty"`
 	Retry       []RetryConfig  `yaml:"retry,omitempty"`
 	Catch       []CatchConfig  `yaml:"catch,omitempty"`
+	Choices     []ChoiceRule   `yaml:"choices,omitempty"`
+	Default     string         `yaml:"default,omitempty"`
 	After       []HookConfig   `yaml:"after,omitempty"`
+}
+
+// ChoiceRule defines a conditional branch in a choice state.
+// The rule evaluates a variable from step data against a condition.
+type ChoiceRule struct {
+	Variable    string `yaml:"variable"`              // Step data key to evaluate
+	Equals      any    `yaml:"equals,omitempty"`      // Exact equality comparison
+	NotEquals   any    `yaml:"not_equals,omitempty"`   // Inequality comparison
+	IsPresent   *bool  `yaml:"is_present,omitempty"`   // Check if variable exists in data
+	Next        string `yaml:"next"`                  // State to transition to if matched
 }
 
 // RetryConfig defines retry behavior for a state on failure.
@@ -125,6 +138,7 @@ var ValidEvents = map[string]bool{
 var ValidStateTypes = map[StateType]bool{
 	StateTypeTask:    true,
 	StateTypeWait:    true,
+	StateTypeChoice:  true,
 	StateTypeSucceed: true,
 	StateTypeFail:    true,
 }
