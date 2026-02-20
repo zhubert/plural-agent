@@ -36,14 +36,15 @@ type SettingsConfig struct {
 
 // State represents a single node in the workflow graph.
 type State struct {
-	Type    StateType      `yaml:"type"`
-	Action  string         `yaml:"action,omitempty"`
-	Event   string         `yaml:"event,omitempty"`
-	Params  map[string]any `yaml:"params,omitempty"`
-	Next    string         `yaml:"next,omitempty"`
-	Error   string         `yaml:"error,omitempty"`
-	Timeout *Duration      `yaml:"timeout,omitempty"`
-	After   []HookConfig   `yaml:"after,omitempty"`
+	Type       StateType      `yaml:"type"`
+	Action     string         `yaml:"action,omitempty"`
+	Event      string         `yaml:"event,omitempty"`
+	Params     map[string]any `yaml:"params,omitempty"`
+	Next       string         `yaml:"next,omitempty"`
+	Error      string         `yaml:"error,omitempty"`
+	Timeout    *Duration      `yaml:"timeout,omitempty"`
+	TimeoutNext string        `yaml:"timeout_next,omitempty"`
+	After      []HookConfig   `yaml:"after,omitempty"`
 }
 
 // SourceConfig defines where issues come from.

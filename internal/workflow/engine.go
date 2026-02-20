@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 )
 
 // EventChecker checks whether an external event has fired.
@@ -24,6 +25,7 @@ type WorkItemView struct {
 	StepData      map[string]any
 	FeedbackRounds int
 	CommentsAddressed int
+	StepEnteredAt time.Time
 
 	// Extra is an opaque map for passing implementation-specific data.
 	Extra map[string]any
@@ -158,6 +160,37 @@ func (e *Engine) processTaskState(ctx context.Context, item *WorkItemView, state
 func (e *Engine) processWaitState(ctx context.Context, item *WorkItemView, state *State) (*StepResult, error) {
 	if e.eventChecker == nil {
 		return nil, fmt.Errorf("no event checker configured")
+	}
+
+	// Enforce timeout if configured and StepEnteredAt is set
+	if state.Timeout != nil && !item.StepEnteredAt.IsZero() {
+		elapsed := time.Since(item.StepEnteredAt)
+		if elapsed >= state.Timeout.Duration {
+			e.logger.Info("wait state timed out",
+				"state", item.CurrentStep,
+				"timeout", state.Timeout.Duration,
+				"elapsed", elapsed,
+			)
+
+			// Use timeout_next edge if available, otherwise fall back to error edge
+			if state.TimeoutNext != "" {
+				return &StepResult{
+					NewStep:  state.TimeoutNext,
+					NewPhase: "idle",
+					Data:     map[string]any{"timeout": true, "timeout_elapsed": elapsed.String()},
+					Hooks:    state.After,
+				}, nil
+			}
+			if state.Error != "" {
+				return &StepResult{
+					NewStep:  state.Error,
+					NewPhase: "idle",
+					Data:     map[string]any{"timeout": true, "timeout_elapsed": elapsed.String()},
+					Hooks:    state.After,
+				}, nil
+			}
+			return nil, fmt.Errorf("wait state %q timed out after %s with no timeout_next or error edge", item.CurrentStep, elapsed)
+		}
 	}
 
 	params := NewParamHelper(state.Params)

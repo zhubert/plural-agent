@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 )
 
 // mockAction is a test action that returns a preset result.
@@ -429,6 +430,145 @@ func TestEngine_ProcessStep_WaitEventCheckError(t *testing.T) {
 	}
 	if result.NewPhase != "idle" {
 		t.Errorf("expected phase 'idle', got %q", result.NewPhase)
+	}
+}
+
+func TestEngine_ProcessStep_WaitTimeout_ErrorEdge(t *testing.T) {
+	checker := &mockEventChecker{fired: false}
+
+	cfg := &Config{
+		Start: "wait",
+		States: map[string]*State{
+			"wait":   {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{1 * time.Hour}, Next: "done", Error: "failed"},
+			"done":   {Type: StateTypeSucceed},
+			"failed": {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+
+	// StepEnteredAt is 2 hours ago — should timeout
+	view := &WorkItemView{
+		CurrentStep:   "wait",
+		Phase:         "idle",
+		StepEnteredAt: time.Now().Add(-2 * time.Hour),
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "failed" {
+		t.Errorf("expected failed on timeout, got %q", result.NewStep)
+	}
+	if result.Data["timeout"] != true {
+		t.Error("expected timeout=true in data")
+	}
+}
+
+func TestEngine_ProcessStep_WaitTimeout_TimeoutNextEdge(t *testing.T) {
+	checker := &mockEventChecker{fired: false}
+
+	cfg := &Config{
+		Start: "wait",
+		States: map[string]*State{
+			"wait":  {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{1 * time.Hour}, TimeoutNext: "nudge", Next: "done", Error: "failed"},
+			"nudge": {Type: StateTypeSucceed},
+			"done":  {Type: StateTypeSucceed},
+			"failed": {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+
+	view := &WorkItemView{
+		CurrentStep:   "wait",
+		Phase:         "idle",
+		StepEnteredAt: time.Now().Add(-2 * time.Hour),
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should use timeout_next over error edge
+	if result.NewStep != "nudge" {
+		t.Errorf("expected nudge on timeout, got %q", result.NewStep)
+	}
+}
+
+func TestEngine_ProcessStep_WaitTimeout_NoEdge(t *testing.T) {
+	checker := &mockEventChecker{fired: false}
+
+	cfg := &Config{
+		Start: "wait",
+		States: map[string]*State{
+			"wait": {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{1 * time.Hour}, Next: "done"},
+			"done": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+
+	view := &WorkItemView{
+		CurrentStep:   "wait",
+		Phase:         "idle",
+		StepEnteredAt: time.Now().Add(-2 * time.Hour),
+	}
+	_, err := engine.ProcessStep(context.Background(), view)
+	if err == nil {
+		t.Fatal("expected error when timeout with no timeout_next or error edge")
+	}
+}
+
+func TestEngine_ProcessStep_WaitTimeout_NotExpired(t *testing.T) {
+	checker := &mockEventChecker{fired: false}
+
+	cfg := &Config{
+		Start: "wait",
+		States: map[string]*State{
+			"wait":   {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{2 * time.Hour}, Next: "done", Error: "failed"},
+			"done":   {Type: StateTypeSucceed},
+			"failed": {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+
+	// StepEnteredAt is only 30 minutes ago — should NOT timeout
+	view := &WorkItemView{
+		CurrentStep:   "wait",
+		Phase:         "idle",
+		StepEnteredAt: time.Now().Add(-30 * time.Minute),
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should stay in current state (event not fired, not timed out)
+	if result.NewStep != "wait" {
+		t.Errorf("expected to stay on wait, got %q", result.NewStep)
+	}
+}
+
+func TestEngine_ProcessStep_WaitTimeout_ZeroEnteredAt(t *testing.T) {
+	checker := &mockEventChecker{fired: false}
+
+	cfg := &Config{
+		Start: "wait",
+		States: map[string]*State{
+			"wait":   {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{1 * time.Hour}, Next: "done", Error: "failed"},
+			"done":   {Type: StateTypeSucceed},
+			"failed": {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+
+	// Zero StepEnteredAt should skip timeout check
+	view := &WorkItemView{
+		CurrentStep: "wait",
+		Phase:       "idle",
+	}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "wait" {
+		t.Errorf("expected to stay on wait (no entered_at), got %q", result.NewStep)
 	}
 }
 

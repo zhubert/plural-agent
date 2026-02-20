@@ -48,6 +48,7 @@ type WorkItem struct {
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 	CompletedAt       *time.Time      `json:"completed_at,omitempty"`
+	StepEnteredAt     time.Time       `json:"step_entered_at"`
 }
 
 // ConsumesSlot returns true if the work item currently consumes a concurrency slot.
@@ -166,9 +167,13 @@ func (s *DaemonState) AdvanceWorkItem(id, newStep, newPhase string) error {
 		return fmt.Errorf("work item not found: %s", id)
 	}
 
+	now := time.Now()
+	if item.CurrentStep != newStep {
+		item.StepEnteredAt = now
+	}
 	item.CurrentStep = newStep
 	item.Phase = newPhase
-	item.UpdatedAt = time.Now()
+	item.UpdatedAt = now
 
 	return nil
 }
@@ -223,10 +228,12 @@ func (s *DaemonState) AddWorkItem(item *WorkItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := time.Now()
 	item.State = WorkItemQueued
 	item.Phase = "idle"
-	item.CreatedAt = time.Now()
-	item.UpdatedAt = time.Now()
+	item.CreatedAt = now
+	item.UpdatedAt = now
+	item.StepEnteredAt = now
 	if item.StepData == nil {
 		item.StepData = make(map[string]any)
 	}

@@ -375,6 +375,44 @@ func TestValidate(t *testing.T) {
 			wantFields: []string{"states.c.params.body"},
 		},
 		{
+			name: "timeout_next without timeout",
+			cfg: &Config{
+				Start:  "w",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"w":     {Type: StateTypeWait, Event: "ci.complete", TimeoutNext: "nudge", Next: "done"},
+					"nudge": {Type: StateTypeSucceed},
+					"done":  {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.w.timeout_next"},
+		},
+		{
+			name: "timeout_next references non-existent state",
+			cfg: &Config{
+				Start:  "w",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"w":    {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{Duration: 3600000000000}, TimeoutNext: "nonexistent", Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.w.timeout_next"},
+		},
+		{
+			name: "valid timeout_next with timeout",
+			cfg: &Config{
+				Start:  "w",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"w":     {Type: StateTypeWait, Event: "ci.complete", Timeout: &Duration{Duration: 3600000000000}, TimeoutNext: "nudge", Next: "done"},
+					"nudge": {Type: StateTypeSucceed},
+					"done":  {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
 			name: "valid settings",
 			cfg: &Config{
 				Start:  "s",

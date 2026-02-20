@@ -83,6 +83,7 @@ func (d *Daemon) workItemView(item *daemonstate.WorkItem) *workflow.WorkItemView
 		StepData:          item.StepData,
 		FeedbackRounds:    item.FeedbackRounds,
 		CommentsAddressed: item.CommentsAddressed,
+		StepEnteredAt:     item.StepEnteredAt,
 	}
 }
 

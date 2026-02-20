@@ -127,6 +127,14 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			})
 		}
 
+		// timeout_next requires timeout
+		if state.TimeoutNext != "" && state.Timeout == nil {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".timeout_next",
+				Message: "timeout_next requires timeout to be set",
+			})
+		}
+
 		// Validate params for ci.complete event
 		if state.Event == "ci.complete" {
 			errs = append(errs, validateCIParams(prefix, state.Params)...)
@@ -156,6 +164,14 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, ValidationError{
 				Field:   prefix + ".error",
 				Message: fmt.Sprintf("references non-existent state %q", state.Error),
+			})
+		}
+	}
+	if state.TimeoutNext != "" {
+		if _, ok := allStates[state.TimeoutNext]; !ok {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".timeout_next",
+				Message: fmt.Sprintf("references non-existent state %q", state.TimeoutNext),
 			})
 		}
 	}

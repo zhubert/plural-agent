@@ -42,6 +42,9 @@ func GenerateMermaid(cfg *Config) string {
 			if state.Next != "" {
 				sb.WriteString(fmt.Sprintf("    %s --> %s : %s\n", name, state.Next, label))
 			}
+			if state.TimeoutNext != "" {
+				sb.WriteString(fmt.Sprintf("    %s --> %s : timeout\n", name, state.TimeoutNext))
+			}
 			if state.Error != "" {
 				sb.WriteString(fmt.Sprintf("    %s --> %s : error\n", name, state.Error))
 			}
