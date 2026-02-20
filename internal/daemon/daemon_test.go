@@ -931,3 +931,85 @@ func TestDaemon_SaveConfig_IncrementOnFailure(t *testing.T) {
 		t.Errorf("expected configSaveFailures=2 after second failure, got %d", d.configSaveFailures)
 	}
 }
+
+func TestDaemon_CollectCompletedWorkers_WorkerError(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-err")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-err",
+		IssueRef:    config.IssueRef{Source: "github", ID: "50"},
+		SessionID:   "sess-err",
+		Branch:      "feature-sess-err",
+		CurrentStep: "coding",
+	})
+	d.state.AdvanceWorkItem("item-err", "coding", "async_pending")
+	d.state.GetWorkItem("item-err").State = daemonstate.WorkItemCoding
+
+	// Create a done worker WITH an error (simulating API 500)
+	mock := worker.NewDoneWorkerWithError(fmt.Errorf("API error detected in response stream"))
+	d.workers["item-err"] = mock
+
+	ctx := context.Background()
+	d.collectCompletedWorkers(ctx)
+
+	// Worker should be removed
+	if _, ok := d.workers["item-err"]; ok {
+		t.Error("expected done worker to be removed")
+	}
+
+	// Item should be marked as failed (engine follows error edge to "failed" state)
+	item := d.state.GetWorkItem("item-err")
+	if !item.IsTerminal() {
+		t.Errorf("expected terminal state after worker error, got step=%s phase=%s state=%s",
+			item.CurrentStep, item.Phase, item.State)
+	}
+	if item.State != daemonstate.WorkItemFailed {
+		t.Errorf("expected failed state, got %s", item.State)
+	}
+}
+
+func TestDaemon_CollectCompletedWorkers_FeedbackError(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-fb-err")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-fb-err",
+		IssueRef:    config.IssueRef{Source: "github", ID: "60"},
+		SessionID:   "sess-fb-err",
+		Branch:      "feature-sess-fb-err",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-fb-err", "await_review", "addressing_feedback")
+
+	// Create a done worker WITH an error during feedback
+	mock := worker.NewDoneWorkerWithError(fmt.Errorf("API error"))
+	d.workers["item-fb-err"] = mock
+
+	ctx := context.Background()
+	d.collectCompletedWorkers(ctx)
+
+	// Worker should be removed
+	if _, ok := d.workers["item-fb-err"]; ok {
+		t.Error("expected done worker to be removed")
+	}
+
+	// Item should be back to idle phase (skipped push due to error),
+	// NOT marked as terminal — it should just go back to waiting for review
+	item := d.state.GetWorkItem("item-fb-err")
+	if item.Phase != "idle" {
+		t.Errorf("expected idle phase after failed feedback, got %s", item.Phase)
+	}
+	if item.CurrentStep != "await_review" {
+		t.Errorf("expected await_review step, got %s", item.CurrentStep)
+	}
+	if item.IsTerminal() {
+		t.Error("expected non-terminal state — failed feedback should not kill the work item")
+	}
+}
