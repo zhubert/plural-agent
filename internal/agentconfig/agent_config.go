@@ -63,6 +63,21 @@ func WithMaxConcurrent(max int) AgentConfigOption {
 	return func(c *AgentConfig) { c.maxConcurrent = max }
 }
 
+// WithMaxTurns sets the max autonomous turns per session.
+func WithMaxTurns(max int) AgentConfigOption {
+	return func(c *AgentConfig) { c.maxTurns = max }
+}
+
+// WithMaxDuration sets the max autonomous duration in minutes per session.
+func WithMaxDuration(max int) AgentConfigOption {
+	return func(c *AgentConfig) { c.maxDurationMin = max }
+}
+
+// WithMergeMethod sets the merge method (rebase, squash, or merge).
+func WithMergeMethod(method string) AgentConfigOption {
+	return func(c *AgentConfig) { c.mergeMethod = method }
+}
+
 // NewAgentConfig creates a new AgentConfig with defaults, then applies options.
 func NewAgentConfig(opts ...AgentConfigOption) *AgentConfig {
 	c := &AgentConfig{

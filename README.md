@@ -44,27 +44,22 @@ For complex issues, Claude can delegate subtasks to child sessions via MCP tools
 
 ```bash
 # Agent daemon
-plural-agent agent --repo owner/repo              # Required: repo to poll
-plural-agent agent --repo owner/repo --once       # Single tick, then exit
-plural-agent agent --repo owner/repo --auto-merge # Auto-merge after review + CI (default)
-plural-agent agent --repo owner/repo --no-auto-merge
-plural-agent agent --repo owner/repo --max-concurrent 5
-plural-agent agent --repo owner/repo --max-turns 80
-plural-agent agent --repo owner/repo --max-duration 45
-plural-agent agent --repo owner/repo --merge-method squash
-plural-agent agent --repo owner/repo --auto-address-pr-comments
+plural-agent --repo owner/repo        # Required: repo to poll
+plural-agent --repo owner/repo --once # Single tick, then exit
 
 # Cleanup
-plural-agent agent clean                          # Remove daemon state and lock files
-plural-agent agent clean -y                       # Clean without confirmation
+plural-agent clean                    # Remove daemon state and lock files
+plural-agent clean -y                 # Clean without confirmation
 
 # General
-plural-agent --version                            # Show version
-plural-agent --debug                              # Debug logging (default: on)
-plural-agent -q / --quiet                         # Info-level logging only
+plural-agent --version                # Show version
+plural-agent --debug                  # Debug logging (default: on)
+plural-agent -q / --quiet             # Info-level logging only
 ```
 
 If `--repo` is not specified and the current directory is inside a git repository, that repository is used as the default.
+
+Behavior (max turns, duration, merge method, auto-merge, etc.) is configured via `.plural/workflow.yaml` — see [Workflow Configuration](#workflow-configuration) below.
 
 ## Workflow Configuration
 
@@ -470,7 +465,7 @@ states:
     error: failed
 ```
 
-**Override precedence**: CLI flag > `.plural/workflow.yaml` > `~/.plural/config.json` > defaults.
+**Override precedence**: `.plural/workflow.yaml` settings > `~/.plural/config.json` > defaults.
 
 **System prompts** can be inline strings or `file:./path` references (relative to repo root).
 
@@ -514,9 +509,25 @@ source:
     team: ""                 # linear: team ID
 ```
 
+**Agent-level settings** can be configured in the `settings:` block:
+
+```yaml
+settings:
+  max_concurrent: 3         # Max sessions running at once
+  max_turns: 50             # Default max turns for ai.code states
+  max_duration: 30          # Default max duration (minutes) for ai.code states
+  auto_merge: true          # Whether to auto-merge after CI passes
+  merge_method: rebase      # rebase | squash | merge
+  container_image: ""       # Override Docker image for sessions
+  branch_prefix: ""         # Branch name prefix
+  cleanup_merged: true      # Delete branch/worktree after merge
+```
+
+These settings act as repo-level defaults. Per-state params (e.g., `max_turns` on `ai.code`, `method` on `github.merge`) take precedence over settings.
+
 ## Configuration
 
-These can also be set via `~/.plural/config.json`:
+Defaults can also be set via `~/.plural/config.json`:
 
 | Setting | JSON Key | Default |
 |---------|----------|---------|
@@ -524,7 +535,8 @@ These can also be set via `~/.plural/config.json`:
 | Max turns per session | `auto_max_turns` | `50` |
 | Max duration (minutes) | `auto_max_duration_min` | `30` |
 | Merge method | `auto_merge_method` | `rebase` |
-| Auto-address PR comments | `auto_address_pr_comments` | `false` |
+
+Workflow settings (`.plural/workflow.yaml`) take precedence over `config.json`.
 
 Graceful shutdown: `SIGINT`/`SIGTERM` once to finish current work, twice to force exit.
 

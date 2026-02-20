@@ -28,18 +28,18 @@ The daemon is stoppable and restartable without losing track of in-flight work.
 State is persisted to ~/.plural/daemon-state.json.
 
 If --repo is not specified and the current directory is inside a git repository,
-that repository is used as the default. Auto-merge is enabled by default;
-use --no-auto-merge to disable.
+that repository is used as the default.
+
+Behavior is configured via .plural/workflow.yaml in your repository. Settings such
+as max_turns, max_duration, merge_method, and auto_merge can all be specified there.
 
 All sessions are containerized (container = sandbox).
 
 Examples:
-  plural-agent                                    # Use current git repo as default
-  plural-agent --repo owner/repo                  # Run daemon (long-running, auto-merge on)
-  plural-agent --repo owner/repo --once           # Process one tick and exit
-  plural-agent --repo /path/to/repo               # Use filesystem path instead
-  plural-agent --repo owner/repo --no-auto-merge  # Disable auto-merge
-  plural-agent --repo owner/repo --max-turns 100`,
+  plural-agent                          # Use current git repo as default
+  plural-agent --repo owner/repo        # Run daemon (long-running)
+  plural-agent --repo owner/repo --once # Process one tick and exit
+  plural-agent --repo /path/to/repo     # Use filesystem path instead`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

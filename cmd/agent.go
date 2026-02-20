@@ -20,31 +20,14 @@ import (
 )
 
 var (
-	agentOnce                  bool
-	agentRepo                  string
-	agentMaxConcurrent         int
-	agentMaxTurns              int
-	agentMaxDuration           int
-	agentAutoAddressPRComments bool
-	agentAutoBroadcastPR       bool
-	agentAutoMerge             bool
-	agentNoAutoMerge           bool
-	agentMergeMethod           string
+	agentOnce bool
+	agentRepo string
 )
-
 
 func init() {
 	rootCmd.RunE = runAgent
 	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
-	rootCmd.Flags().IntVar(&agentMaxConcurrent, "max-concurrent", 0, "Override max concurrent sessions (0 = use config)")
-	rootCmd.Flags().IntVar(&agentMaxTurns, "max-turns", 0, "Override max autonomous turns per session (0 = use config default of 50)")
-	rootCmd.Flags().IntVar(&agentMaxDuration, "max-duration", 0, "Override max autonomous duration in minutes (0 = use config default of 30)")
-	rootCmd.Flags().BoolVar(&agentAutoAddressPRComments, "auto-address-pr-comments", false, "Auto-address PR review comments")
-	rootCmd.Flags().BoolVar(&agentAutoBroadcastPR, "auto-broadcast-pr", false, "Auto-create PRs when broadcast group completes")
-	rootCmd.Flags().BoolVar(&agentAutoMerge, "auto-merge", false, "Auto-merge PRs after review approval and CI pass (default: true)")
-	rootCmd.Flags().BoolVar(&agentNoAutoMerge, "no-auto-merge", false, "Disable auto-merge")
-	rootCmd.Flags().StringVar(&agentMergeMethod, "merge-method", "", "Merge method: rebase, squash, or merge (default: rebase)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -112,6 +95,15 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if wfCfg.Settings.CleanupMerged != nil {
 			cfgOpts = append(cfgOpts, agentconfig.WithCleanupMerged(*wfCfg.Settings.CleanupMerged))
 		}
+		if wfCfg.Settings.MaxTurns > 0 {
+			cfgOpts = append(cfgOpts, agentconfig.WithMaxTurns(wfCfg.Settings.MaxTurns))
+		}
+		if wfCfg.Settings.MaxDuration > 0 {
+			cfgOpts = append(cfgOpts, agentconfig.WithMaxDuration(wfCfg.Settings.MaxDuration))
+		}
+		if wfCfg.Settings.MergeMethod != "" {
+			cfgOpts = append(cfgOpts, agentconfig.WithMergeMethod(wfCfg.Settings.MergeMethod))
+		}
 	}
 	cfg := agentconfig.NewAgentConfig(cfgOpts...)
 
@@ -127,27 +119,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		opts = append(opts, daemon.WithOnce(true))
 	}
 	opts = append(opts, daemon.WithRepoFilter(agentRepo))
-	if agentMaxConcurrent > 0 {
-		opts = append(opts, daemon.WithMaxConcurrent(agentMaxConcurrent))
-	}
-	if agentMaxTurns > 0 {
-		opts = append(opts, daemon.WithMaxTurns(agentMaxTurns))
-	}
-	if agentMaxDuration > 0 {
-		opts = append(opts, daemon.WithMaxDuration(agentMaxDuration))
-	}
-	if agentAutoAddressPRComments {
-		opts = append(opts, daemon.WithAutoAddressPRComments(true))
-	}
-	if agentAutoBroadcastPR {
-		opts = append(opts, daemon.WithAutoBroadcastPR(true))
-	}
-	// Auto-merge is on by default for daemon; --no-auto-merge disables it
-	if agentNoAutoMerge {
-		opts = append(opts, daemon.WithAutoMerge(false))
-	}
-	if agentMergeMethod != "" {
-		opts = append(opts, daemon.WithMergeMethod(agentMergeMethod))
+	// Auto-merge is on by default; workflow settings can disable it
+	if wfCfg.Settings != nil && wfCfg.Settings.AutoMerge != nil {
+		opts = append(opts, daemon.WithAutoMerge(*wfCfg.Settings.AutoMerge))
 	}
 
 	// Create daemon
