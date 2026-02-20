@@ -70,6 +70,39 @@ func TestNewAgentConfig_Options(t *testing.T) {
 	}
 }
 
+func TestNewAgentConfig_WorkflowSettingsOptions(t *testing.T) {
+	c := NewAgentConfig(
+		WithMaxTurns(80),
+		WithMaxDuration(45),
+		WithMergeMethod("squash"),
+	)
+
+	if c.GetAutoMaxTurns() != 80 {
+		t.Errorf("maxTurns: got %d, want 80", c.GetAutoMaxTurns())
+	}
+	if c.GetAutoMaxDurationMin() != 45 {
+		t.Errorf("maxDurationMin: got %d, want 45", c.GetAutoMaxDurationMin())
+	}
+	if c.GetAutoMergeMethod() != "squash" {
+		t.Errorf("mergeMethod: got %q, want squash", c.GetAutoMergeMethod())
+	}
+}
+
+func TestNewAgentConfig_WorkflowSettingsOptions_DoNotOverrideDefaults(t *testing.T) {
+	// When workflow settings are not specified, defaults should still apply.
+	c := NewAgentConfig()
+
+	if c.GetAutoMaxTurns() != DefaultMaxTurns {
+		t.Errorf("maxTurns: got %d, want default %d", c.GetAutoMaxTurns(), DefaultMaxTurns)
+	}
+	if c.GetAutoMaxDurationMin() != DefaultMaxDurationMin {
+		t.Errorf("maxDurationMin: got %d, want default %d", c.GetAutoMaxDurationMin(), DefaultMaxDurationMin)
+	}
+	if c.GetAutoMergeMethod() != DefaultMergeMethod {
+		t.Errorf("mergeMethod: got %q, want default %q", c.GetAutoMergeMethod(), DefaultMergeMethod)
+	}
+}
+
 func TestAgentConfig_SessionCRUD(t *testing.T) {
 	c := NewAgentConfig()
 

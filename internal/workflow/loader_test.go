@@ -173,6 +173,82 @@ func TestLoadAndMerge_NoFile(t *testing.T) {
 	}
 }
 
+func TestLoad_SettingsBlock(t *testing.T) {
+	dir := t.TempDir()
+	pluralDir := filepath.Join(dir, ".plural")
+	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	autoMerge := false
+	_ = autoMerge // used in yaml below
+
+	yamlContent := `
+workflow: test-flow
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+settings:
+  max_turns: 80
+  max_duration: 45
+  auto_merge: false
+  merge_method: squash
+  max_concurrent: 5
+  container_image: custom-image:latest
+  branch_prefix: agent/
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    next: done
+    error: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Settings == nil {
+		t.Fatal("expected non-nil settings")
+	}
+	if cfg.Settings.MaxTurns != 80 {
+		t.Errorf("MaxTurns: got %d, want 80", cfg.Settings.MaxTurns)
+	}
+	if cfg.Settings.MaxDuration != 45 {
+		t.Errorf("MaxDuration: got %d, want 45", cfg.Settings.MaxDuration)
+	}
+	if cfg.Settings.AutoMerge == nil {
+		t.Fatal("AutoMerge: expected non-nil")
+	}
+	if *cfg.Settings.AutoMerge != false {
+		t.Errorf("AutoMerge: got %v, want false", *cfg.Settings.AutoMerge)
+	}
+	if cfg.Settings.MergeMethod != "squash" {
+		t.Errorf("MergeMethod: got %q, want squash", cfg.Settings.MergeMethod)
+	}
+	if cfg.Settings.MaxConcurrent != 5 {
+		t.Errorf("MaxConcurrent: got %d, want 5", cfg.Settings.MaxConcurrent)
+	}
+	if cfg.Settings.ContainerImage != "custom-image:latest" {
+		t.Errorf("ContainerImage: got %q, want custom-image:latest", cfg.Settings.ContainerImage)
+	}
+	if cfg.Settings.BranchPrefix != "agent/" {
+		t.Errorf("BranchPrefix: got %q, want agent/", cfg.Settings.BranchPrefix)
+	}
+}
+
 func TestLoadAndMerge_PartialFile(t *testing.T) {
 	dir := t.TempDir()
 	pluralDir := filepath.Join(dir, ".plural")
