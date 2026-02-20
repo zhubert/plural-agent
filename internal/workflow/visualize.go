@@ -48,6 +48,15 @@ func GenerateMermaid(cfg *Config) string {
 			if state.Error != "" {
 				sb.WriteString(fmt.Sprintf("    %s --> %s : error\n", name, state.Error))
 			}
+
+		case StateTypeChoice:
+			for _, rule := range state.Choices {
+				label := formatChoiceLabel(rule)
+				sb.WriteString(fmt.Sprintf("    %s --> %s : %s\n", name, rule.Next, label))
+			}
+			if state.Default != "" {
+				sb.WriteString(fmt.Sprintf("    %s --> %s : default\n", name, state.Default))
+			}
 		}
 
 		// Add note for params
@@ -58,6 +67,23 @@ func GenerateMermaid(cfg *Config) string {
 	}
 
 	return sb.String()
+}
+
+// formatChoiceLabel creates a human-readable label for a choice rule.
+func formatChoiceLabel(rule ChoiceRule) string {
+	if rule.Equals != nil {
+		return fmt.Sprintf("%s == %v", rule.Variable, rule.Equals)
+	}
+	if rule.NotEquals != nil {
+		return fmt.Sprintf("%s != %v", rule.Variable, rule.NotEquals)
+	}
+	if rule.IsPresent != nil {
+		if *rule.IsPresent {
+			return fmt.Sprintf("%s exists", rule.Variable)
+		}
+		return fmt.Sprintf("%s not exists", rule.Variable)
+	}
+	return rule.Variable
 }
 
 // formatStateNote creates a note string from a state's params.
