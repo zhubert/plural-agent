@@ -15,6 +15,27 @@ import (
 	"github.com/zhubert/plural-core/session"
 )
 
+// DefaultCodingSystemPrompt is the system prompt used for daemon-managed coding sessions
+// when no custom system_prompt is configured in the workflow. It tells Claude to focus on
+// coding and explicitly NOT attempt remote git operations (push, PR creation, etc.)
+// since those are handled by the daemon workflow.
+const DefaultCodingSystemPrompt = `You are an autonomous coding agent working on a task.
+
+FOCUS: Write code, tests, and commit your changes locally.
+
+DO NOT:
+- Push branches or create pull requests — the system handles this automatically after you finish
+- Run "git push", "gh pr create", or any remote git operations
+- Look for or use push_branch, create_pr, or similar tools
+- Attempt to find git credentials or authenticate with GitHub
+
+WORKFLOW:
+1. Read and understand the task
+2. Implement the changes with clean, well-tested code
+3. Run tests to verify your changes work
+4. Commit your changes locally with a clear commit message
+5. Stop when the implementation is complete — the system will handle pushing and PR creation`
+
 // codingAction implements the ai.code action.
 type codingAction struct {
 	daemon *Daemon
@@ -167,7 +188,8 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 
 	sess.Autonomous = true
 	sess.Containerized = params.Bool("containerized", true)
-	sess.IsSupervisor = params.Bool("supervisor", true)
+	sess.IsSupervisor = params.Bool("supervisor", false)
+	sess.DaemonManaged = true
 	sess.IssueRef = &config.IssueRef{
 		Source: item.IssueRef.Source,
 		ID:     item.IssueRef.ID,
@@ -192,6 +214,10 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	codingPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, repoPath)
 	if err != nil {
 		log.Warn("failed to resolve coding system prompt", "error", err)
+	}
+
+	if codingPrompt == "" {
+		codingPrompt = DefaultCodingSystemPrompt
 	}
 
 	// Start worker, applying any per-session limits from workflow params

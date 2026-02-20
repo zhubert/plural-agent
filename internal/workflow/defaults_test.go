@@ -41,8 +41,8 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	if !p.Bool("containerized", false) {
 		t.Error("coding containerized: expected true")
 	}
-	if !p.Bool("supervisor", false) {
-		t.Error("coding supervisor: expected true")
+	if p.Bool("supervisor", true) {
+		t.Error("coding supervisor: expected false")
 	}
 
 	// Review params

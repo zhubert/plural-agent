@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,5 +247,93 @@ func TestDaemon_CodingParamsDefaultsWhenAbsent(t *testing.T) {
 	maxDuration := params.Duration("max_duration", 0)
 	if maxDuration != 0 {
 		t.Errorf("expected 0 when max_duration absent, got %v", maxDuration)
+	}
+}
+
+func TestDefaultWorkflowConfig_SupervisorFalse(t *testing.T) {
+	// The default workflow config should have supervisor: false for coding state
+	wfCfg := workflow.DefaultConfig()
+	codingState := wfCfg.States["coding"]
+	if codingState == nil {
+		t.Fatal("expected coding state in default workflow config")
+	}
+
+	params := workflow.NewParamHelper(codingState.Params)
+	supervisor := params.Bool("supervisor", true) // pass true as default to test param value
+	if supervisor {
+		t.Error("default workflow config should have supervisor: false for coding state")
+	}
+}
+
+func TestSupervisorParamDefaultsFalseWhenAbsent(t *testing.T) {
+	// When supervisor is absent from params, it should default to false
+	params := workflow.NewParamHelper(map[string]any{
+		"containerized": true,
+	})
+
+	supervisor := params.Bool("supervisor", false)
+	if supervisor {
+		t.Error("supervisor should default to false when absent from params")
+	}
+}
+
+func TestSupervisorExplicitOptIn(t *testing.T) {
+	// Explicit supervisor: true should still work as opt-in
+	params := workflow.NewParamHelper(map[string]any{
+		"supervisor": true,
+	})
+
+	supervisor := params.Bool("supervisor", false)
+	if !supervisor {
+		t.Error("explicit supervisor: true should be respected")
+	}
+}
+
+func TestDefaultCodingSystemPrompt_Applied(t *testing.T) {
+	// The DefaultCodingSystemPrompt should be non-empty and contain key instructions
+	if DefaultCodingSystemPrompt == "" {
+		t.Fatal("DefaultCodingSystemPrompt should not be empty")
+	}
+
+	if !strings.Contains(DefaultCodingSystemPrompt, "autonomous coding agent") {
+		t.Error("DefaultCodingSystemPrompt should identify as autonomous coding agent")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "DO NOT") {
+		t.Error("DefaultCodingSystemPrompt should contain DO NOT instructions")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "git push") {
+		t.Error("DefaultCodingSystemPrompt should mention git push as forbidden")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "create pull requests") {
+		t.Error("DefaultCodingSystemPrompt should mention PR creation as forbidden")
+	}
+}
+
+func TestDefaultCodingSystemPrompt_NotAppliedWhenCustomSet(t *testing.T) {
+	// Simulate the logic: when a custom prompt is set, DefaultCodingSystemPrompt is NOT used
+	customPrompt := "My custom coding instructions"
+	codingPrompt := customPrompt
+
+	// This mirrors the logic in startCoding
+	if codingPrompt == "" {
+		codingPrompt = DefaultCodingSystemPrompt
+	}
+
+	if codingPrompt != customPrompt {
+		t.Errorf("expected custom prompt %q, got %q", customPrompt, codingPrompt)
+	}
+}
+
+func TestDefaultCodingSystemPrompt_AppliedWhenEmpty(t *testing.T) {
+	// When no custom prompt is configured, DefaultCodingSystemPrompt should be applied
+	codingPrompt := ""
+
+	// This mirrors the logic in startCoding
+	if codingPrompt == "" {
+		codingPrompt = DefaultCodingSystemPrompt
+	}
+
+	if codingPrompt != DefaultCodingSystemPrompt {
+		t.Error("expected DefaultCodingSystemPrompt to be applied when no custom prompt is set")
 	}
 }
