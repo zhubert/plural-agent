@@ -423,7 +423,7 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem,
 func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
 	if customPrompt != "" {
-		runner.SetCustomSystemPrompt(customPrompt)
+		runner.SetSystemPrompt(customPrompt)
 	}
 	w := worker.NewSessionWorker(d, sess, runner, initialMsg)
 
