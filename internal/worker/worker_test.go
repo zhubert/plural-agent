@@ -299,10 +299,12 @@ func TestIsAPIErrorContent(t *testing.T) {
 		content string
 		want    bool
 	}{
-		{"API Error 500", `API Error: 500 {"type":"error"}`, true},
-		{"API error lowercase", `API error: 429 rate limited`, true},
+		{"API Error 500 with JSON", `API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, true},
+		{"API error lowercase with JSON", `API error: 429 {"type":"error","error":{"type":"rate_limit_error"}}`, true},
+		{"API Error with spaced JSON", `API Error: 500 {"type": "error", "message": "fail"}`, true},
+		{"API Error without JSON structure", `API Error: The user encountered a 500`, false},
 		{"normal content", "Here is the code I wrote", false},
-		{"error in middle", "The API Error: 500 happened", false},
+		{"error in middle", `The API Error: 500 {"type":"error"} happened`, false},
 		{"empty", "", false},
 	}
 	for _, tt := range tests {

@@ -227,6 +227,7 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 			// Feedback addressing completed — push changes (skip if worker failed)
 			if exitErr != nil {
 				d.logger.Warn("skipping push after failed feedback session", "workItem", workItemID, "error", exitErr)
+				d.state.SetErrorMessage(item.ID, fmt.Sprintf("feedback session failed: %v", exitErr))
 				item.Phase = "idle"
 				item.UpdatedAt = time.Now()
 			} else {

@@ -417,10 +417,15 @@ func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 }
 
 // isAPIErrorContent returns true if the streamed text content looks like an
-// API error response (e.g., "API Error: 500 {...}").
+// API error response (e.g., "API Error: 500 {"type":"error",...}").
+// We require both the "API Error:" prefix AND a JSON error structure
+// to avoid false positives on normal text that happens to mention API errors.
 func isAPIErrorContent(content string) bool {
-	return strings.HasPrefix(content, "API Error:") ||
-		strings.HasPrefix(content, "API error:")
+	if !strings.HasPrefix(content, "API Error:") && !strings.HasPrefix(content, "API error:") {
+		return false
+	}
+	return strings.Contains(content, `"type":"error"`) ||
+		strings.Contains(content, `"type": "error"`)
 }
 
 // handleDone handles completion of a streaming response.

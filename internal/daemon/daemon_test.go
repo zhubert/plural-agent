@@ -1012,4 +1012,8 @@ func TestDaemon_CollectCompletedWorkers_FeedbackError(t *testing.T) {
 	if item.IsTerminal() {
 		t.Error("expected non-terminal state — failed feedback should not kill the work item")
 	}
+	// Error message should be persisted for operator visibility
+	if item.ErrorMessage == "" {
+		t.Error("expected error message to be set after failed feedback")
+	}
 }
