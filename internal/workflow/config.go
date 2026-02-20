@@ -34,6 +34,10 @@ type SettingsConfig struct {
 	BranchPrefix   string `yaml:"branch_prefix,omitempty"`
 	MaxConcurrent  int    `yaml:"max_concurrent,omitempty"`
 	CleanupMerged  *bool  `yaml:"cleanup_merged,omitempty"`
+	MaxTurns       int    `yaml:"max_turns,omitempty"`
+	MaxDuration    int    `yaml:"max_duration,omitempty"` // minutes
+	AutoMerge      *bool  `yaml:"auto_merge,omitempty"`
+	MergeMethod    string `yaml:"merge_method,omitempty"`
 }
 
 // State represents a single node in the workflow graph.
