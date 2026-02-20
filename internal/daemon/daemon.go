@@ -211,16 +211,27 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 			continue
 		}
 
-		d.logger.Info("worker completed", "workItem", workItemID, "step", item.CurrentStep, "phase", item.Phase)
+		exitErr := w.ExitError()
+		if exitErr != nil {
+			d.logger.Warn("worker completed with error", "workItem", workItemID, "step", item.CurrentStep, "phase", item.Phase, "error", exitErr)
+		} else {
+			d.logger.Info("worker completed", "workItem", workItemID, "step", item.CurrentStep, "phase", item.Phase)
+		}
 
 		switch item.Phase {
 		case "async_pending":
 			// Main async action completed (e.g., coding)
-			d.handleAsyncComplete(ctx, item)
+			d.handleAsyncComplete(ctx, item, exitErr)
 
 		case "addressing_feedback":
-			// Feedback addressing completed — push changes
-			d.handleFeedbackComplete(ctx, item)
+			// Feedback addressing completed — push changes (skip if worker failed)
+			if exitErr != nil {
+				d.logger.Warn("skipping push after failed feedback session", "workItem", workItemID, "error", exitErr)
+				item.Phase = "idle"
+				item.UpdatedAt = time.Now()
+			} else {
+				d.handleFeedbackComplete(ctx, item)
+			}
 		}
 
 		delete(d.workers, workItemID)
@@ -228,7 +239,8 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 }
 
 // handleAsyncComplete handles the completion of an async action.
-func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.WorkItem) {
+// exitErr is non-nil when the worker exited due to an error (API error, etc.).
+func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.WorkItem, exitErr error) {
 	log := d.logger.With("workItem", item.ID, "step", item.CurrentStep)
 
 	sess := d.config.GetSession(item.SessionID)
@@ -282,7 +294,8 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 
 	// Normal async completion — advance via engine
 	view := d.workItemView(item)
-	result, err := engine.AdvanceAfterAsync(view, true)
+	success := exitErr == nil
+	result, err := engine.AdvanceAfterAsync(view, success)
 	if err != nil {
 		log.Error("failed to advance after async", "error", err)
 		d.state.SetErrorMessage(item.ID, err.Error())

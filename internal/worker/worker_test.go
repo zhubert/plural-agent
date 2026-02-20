@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
+	"github.com/zhubert/plural-core/mcp"
 )
 
 func TestNewSessionWorker(t *testing.T) {
@@ -205,4 +207,164 @@ func TestSessionWorker_SetStartTime(t *testing.T) {
 	if w.startTime != past {
 		t.Error("expected start time to be set")
 	}
+}
+
+func TestSessionWorker_ExitError_NilOnSuccess(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = true
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1", PRCreated: true}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.QueueResponse(
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "All done"},
+		claude.ResponseChunk{Done: true},
+	)
+
+	w := NewSessionWorker(h, sess, runner, "Do something")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w.Start(ctx)
+	w.Wait()
+
+	if w.ExitError() != nil {
+		t.Errorf("expected nil ExitError, got %v", w.ExitError())
+	}
+}
+
+func TestSessionWorker_ExitError_SetOnChunkError(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.QueueResponse(
+		claude.ResponseChunk{Error: fmt.Errorf("connection failed")},
+	)
+
+	w := NewSessionWorker(h, sess, runner, "Do something")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w.Start(ctx)
+	w.Wait()
+
+	if w.ExitError() == nil {
+		t.Fatal("expected ExitError to be set")
+	}
+	if w.ExitError().Error() != "claude error: connection failed" {
+		t.Errorf("unexpected error: %v", w.ExitError())
+	}
+}
+
+func TestSessionWorker_ExitError_APIErrorInStream(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = true
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1", PRCreated: true}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	// Simulate an API 500 error emitted as text content
+	runner.QueueResponse(
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "Working on the task..."},
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: `API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`},
+		claude.ResponseChunk{Done: true},
+	)
+
+	w := NewSessionWorker(h, sess, runner, "Do something")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w.Start(ctx)
+	w.Wait()
+
+	if w.ExitError() == nil {
+		t.Fatal("expected ExitError to be set for API error in stream")
+	}
+	if w.ExitError().Error() != "API error detected in response stream" {
+		t.Errorf("unexpected error: %v", w.ExitError())
+	}
+}
+
+func TestIsAPIErrorContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"API Error 500", `API Error: 500 {"type":"error"}`, true},
+		{"API error lowercase", `API error: 429 rate limited`, true},
+		{"normal content", "Here is the code I wrote", false},
+		{"error in middle", "The API Error: 500 happened", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAPIErrorContent(tt.content); got != tt.want {
+				t.Errorf("isAPIErrorContent(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewDoneWorkerWithError(t *testing.T) {
+	err := fmt.Errorf("something broke")
+	w := NewDoneWorkerWithError(err)
+
+	if !w.Done() {
+		t.Error("expected Done() to be true")
+	}
+	if w.ExitError() != err {
+		t.Errorf("expected error %v, got %v", err, w.ExitError())
+	}
+}
+
+func TestSessionWorker_HandleCreatePR_DaemonManaged(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = true
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	// Call handleCreatePR — should be rejected in daemon-managed mode.
+	// SendCreatePRResponse is non-blocking so this won't hang.
+	w.handleCreatePR(mcp.CreatePRRequest{ID: 1, Title: "My PR"})
+
+	// Verify the session was NOT marked as PR created
+	updated := h.cfg.GetSession("s1")
+	if updated != nil && updated.PRCreated {
+		t.Error("expected session NOT to be marked as PR created in daemon-managed mode")
+	}
+}
+
+func TestSessionWorker_HandlePushBranch_DaemonManaged(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = true
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	// Call handlePushBranch — should be rejected in daemon-managed mode.
+	// SendPushBranchResponse is non-blocking so this won't hang.
+	w.handlePushBranch(mcp.PushBranchRequest{ID: 1, CommitMessage: "push changes"})
+
+	// If we got here without hanging, the rejection worked.
+	// No further state to verify since push doesn't mark any session fields.
 }

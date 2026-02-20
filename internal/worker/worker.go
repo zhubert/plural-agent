@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,9 @@ type SessionWorker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	once   sync.Once
+
+	exitErr         error // Set when the worker exits due to an error
+	apiErrorInStream bool  // Set when an API error is detected in streamed content
 }
 
 // NewSessionWorker creates a new session worker.
@@ -54,6 +58,17 @@ func NewSessionWorker(host Host, sess *config.Session, runner claude.RunnerInter
 func NewDoneWorker() *SessionWorker {
 	w := &SessionWorker{
 		done: make(chan struct{}),
+	}
+	close(w.done)
+	return w
+}
+
+// NewDoneWorkerWithError creates a SessionWorker that is already done with an error.
+// Used by tests in other packages that need a completed-with-error worker.
+func NewDoneWorkerWithError(err error) *SessionWorker {
+	w := &SessionWorker{
+		done:    make(chan struct{}),
+		exitErr: err,
 	}
 	close(w.done)
 	return w
@@ -92,6 +107,11 @@ func (w *SessionWorker) CheckLimits() bool {
 // HasActiveChildren checks if any child sessions are still running.
 func (w *SessionWorker) HasActiveChildren() bool {
 	return w.hasActiveChildren()
+}
+
+// ExitError returns the error that caused the worker to exit, or nil if it completed normally.
+func (w *SessionWorker) ExitError() error {
+	return w.exitErr
 }
 
 // Start begins the worker's goroutine.
@@ -179,6 +199,15 @@ func (w *SessionWorker) run() {
 
 		if err := w.processOneResponse(responseChan); err != nil {
 			log.Info("worker stopping", "reason", err.Error())
+			w.exitErr = err
+			return
+		}
+
+		// Check if the response contained an API error (e.g., 500 errors
+		// emitted as streamed text rather than as chunk.Error)
+		if w.apiErrorInStream {
+			w.exitErr = fmt.Errorf("API error detected in response stream")
+			log.Warn("worker stopping due to API error in stream")
 			return
 		}
 
@@ -371,6 +400,13 @@ func (w *SessionWorker) safeChanGetReviewComments() <-chan mcp.GetReviewComments
 func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 	// Just log text chunks at debug level for now
 	if chunk.Type == claude.ChunkTypeText && chunk.Content != "" {
+		// Detect API errors emitted as text content (e.g., 500 errors from
+		// the Anthropic API that the runner surfaces as text rather than
+		// as chunk.Error).
+		if isAPIErrorContent(chunk.Content) {
+			w.apiErrorInStream = true
+		}
+
 		// Log first 100 chars of content for debugging
 		preview := chunk.Content
 		if len(preview) > 100 {
@@ -378,6 +414,13 @@ func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 		}
 		w.host.Logger().Debug("streaming", "sessionID", w.sessionID, "content", preview)
 	}
+}
+
+// isAPIErrorContent returns true if the streamed text content looks like an
+// API error response (e.g., "API Error: 500 {...}").
+func isAPIErrorContent(content string) bool {
+	return strings.HasPrefix(content, "API Error:") ||
+		strings.HasPrefix(content, "API error:")
 }
 
 // handleDone handles completion of a streaming response.
@@ -628,6 +671,18 @@ func (w *SessionWorker) handleMergeChild(req mcp.MergeChildRequest) {
 // handleCreatePR handles a create_pr MCP tool call.
 func (w *SessionWorker) handleCreatePR(req mcp.CreatePRRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
+
+	// In daemon-managed mode, the daemon's workflow handles PR creation.
+	// Reject Claude's attempt to create a PR to avoid duplicates.
+	if w.host.DaemonManaged() {
+		log.Warn("rejecting create_pr in daemon-managed mode")
+		w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
+			ID:    req.ID,
+			Error: "PR creation is managed by the daemon workflow. Do not create PRs directly — just make your code changes and commit them.",
+		})
+		return
+	}
+
 	sess := w.host.Config().GetSession(w.sessionID)
 	if sess == nil {
 		w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
@@ -698,6 +753,18 @@ func (w *SessionWorker) handleCreatePR(req mcp.CreatePRRequest) {
 // handlePushBranch handles a push_branch MCP tool call.
 func (w *SessionWorker) handlePushBranch(req mcp.PushBranchRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
+
+	// In daemon-managed mode, the daemon's workflow handles pushing.
+	// Reject Claude's attempt to push to avoid conflicts.
+	if w.host.DaemonManaged() {
+		log.Warn("rejecting push_branch in daemon-managed mode")
+		w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
+			ID:    req.ID,
+			Error: "Branch pushing is managed by the daemon workflow. Do not push directly — just make your code changes and commit them.",
+		})
+		return
+	}
+
 	sess := w.host.Config().GetSession(w.sessionID)
 	if sess == nil {
 		w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
