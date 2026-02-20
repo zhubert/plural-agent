@@ -194,8 +194,14 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 		log.Warn("failed to resolve coding system prompt", "error", err)
 	}
 
-	// Start worker with custom system prompt
-	d.startWorkerWithPrompt(ctx, item, sess, initialMsg, codingPrompt)
+	// Start worker, applying any per-session limits from workflow params
+	w := d.createWorkerWithPrompt(item, sess, initialMsg, codingPrompt)
+	maxTurns := params.Int("max_turns", 0)
+	maxDuration := params.Duration("max_duration", 0)
+	if maxTurns > 0 || maxDuration > 0 {
+		w.SetLimits(maxTurns, maxDuration)
+	}
+	w.Start(ctx)
 
 	log.Info("started coding", "sessionID", sess.ID, "branch", sess.Branch)
 	return nil
@@ -385,8 +391,9 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem,
 	return d.gitService.CommentOnIssue(commentCtx, repoPath, issueNum, body)
 }
 
-// startWorkerWithPrompt creates and starts a session worker with an optional custom system prompt.
-func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) {
+// createWorkerWithPrompt creates a session worker with an optional custom system prompt
+// but does not start it. The caller is responsible for calling w.Start(ctx).
+func (d *Daemon) createWorkerWithPrompt(item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
 	if customPrompt != "" {
 		runner.SetCustomSystemPrompt(customPrompt)
@@ -397,6 +404,12 @@ func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item *daemonstate.Wo
 	d.workers[item.ID] = w
 	d.mu.Unlock()
 
+	return w
+}
+
+// startWorkerWithPrompt creates and starts a session worker with an optional custom system prompt.
+func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) {
+	w := d.createWorkerWithPrompt(item, sess, initialMsg, customPrompt)
 	w.Start(ctx)
 }
 

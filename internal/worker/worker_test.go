@@ -159,6 +159,73 @@ func TestSessionWorker_CheckLimits(t *testing.T) {
 	})
 }
 
+func TestSessionWorker_SetLimits(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.maxTurns = 50
+	h.maxDuration = 30 // 30 minutes
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	t.Run("zero values fall back to host defaults", func(t *testing.T) {
+		w.SetLimits(0, 0)
+		w.SetTurns(2)
+		w.SetStartTime(time.Now())
+		if w.CheckLimits() {
+			t.Error("expected false - under host limits (50 turns)")
+		}
+	})
+
+	t.Run("override max turns", func(t *testing.T) {
+		w.SetLimits(2, 0) // 2 turn override
+		w.SetTurns(2)     // at the limit
+		w.SetStartTime(time.Now())
+		if !w.CheckLimits() {
+			t.Error("expected true when override turn limit hit")
+		}
+	})
+
+	t.Run("override max turns under limit", func(t *testing.T) {
+		w.SetLimits(5, 0)
+		w.SetTurns(2)
+		w.SetStartTime(time.Now())
+		if w.CheckLimits() {
+			t.Error("expected false - under override turn limit")
+		}
+	})
+
+	t.Run("override max duration", func(t *testing.T) {
+		w.SetLimits(0, 5*time.Minute)
+		w.SetTurns(0)
+		w.SetStartTime(time.Now().Add(-10 * time.Minute)) // elapsed past limit
+		if !w.CheckLimits() {
+			t.Error("expected true when override duration limit exceeded")
+		}
+	})
+
+	t.Run("override max duration under limit", func(t *testing.T) {
+		w.SetLimits(0, 60*time.Minute)
+		w.SetTurns(0)
+		w.SetStartTime(time.Now())
+		if w.CheckLimits() {
+			t.Error("expected false - under override duration limit")
+		}
+	})
+
+	t.Run("both overrides set", func(t *testing.T) {
+		w.SetLimits(3, 10*time.Minute)
+		w.SetTurns(3) // at turn limit
+		w.SetStartTime(time.Now())
+		if !w.CheckLimits() {
+			t.Error("expected true when override turn limit hit with both set")
+		}
+	})
+}
+
 func TestSessionWorker_HandleStreaming(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)

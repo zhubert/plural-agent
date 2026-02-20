@@ -38,6 +38,10 @@ type SessionWorker struct {
 
 	exitErr         error // Set when the worker exits due to an error
 	apiErrorInStream bool  // Set when an API error is detected in streamed content
+
+	// Per-session limit overrides (zero = use host defaults)
+	overrideMaxTurns    int
+	overrideMaxDuration time.Duration
 }
 
 // NewSessionWorker creates a new session worker.
@@ -97,6 +101,13 @@ func (w *SessionWorker) SetTurns(n int) {
 // SetStartTime sets the worker start time (for testing).
 func (w *SessionWorker) SetStartTime(t time.Time) {
 	w.startTime = t
+}
+
+// SetLimits overrides the per-session turn and duration limits.
+// Must be called before Start. Zero values fall back to host defaults.
+func (w *SessionWorker) SetLimits(maxTurns int, maxDuration time.Duration) {
+	w.overrideMaxTurns = maxTurns
+	w.overrideMaxDuration = maxDuration
 }
 
 // CheckLimits returns true if the session has hit its turn or duration limit.
@@ -496,7 +507,14 @@ func (w *SessionWorker) handleCompletion() bool {
 // checkLimits returns true if the session has hit its turn or duration limit.
 func (w *SessionWorker) checkLimits() bool {
 	maxTurns := w.host.MaxTurns()
+	if w.overrideMaxTurns > 0 {
+		maxTurns = w.overrideMaxTurns
+	}
+
 	maxDuration := time.Duration(w.host.MaxDuration()) * time.Minute
+	if w.overrideMaxDuration > 0 {
+		maxDuration = w.overrideMaxDuration
+	}
 
 	if w.turns >= maxTurns {
 		w.host.Logger().Warn("turn limit reached",

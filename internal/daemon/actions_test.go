@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/zhubert/plural-agent/internal/daemonstate"
 	"github.com/zhubert/plural-agent/internal/workflow"
@@ -207,5 +208,43 @@ func TestCommentIssueAction_Execute_GhError(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected error when gh CLI fails")
+	}
+}
+
+func TestDaemon_CodingParamsExtractsLimits(t *testing.T) {
+	// Verify that max_turns and max_duration params on the coding state
+	// are correctly read by the ParamHelper, matching the startCoding logic.
+	wfCfg := workflow.DefaultConfig()
+	wfCfg.States["coding"].Params["max_turns"] = 10
+	wfCfg.States["coding"].Params["max_duration"] = "5m"
+
+	params := workflow.NewParamHelper(wfCfg.States["coding"].Params)
+
+	maxTurns := params.Int("max_turns", 0)
+	if maxTurns != 10 {
+		t.Errorf("expected max_turns=10, got %d", maxTurns)
+	}
+
+	maxDuration := params.Duration("max_duration", 0)
+	if maxDuration != 5*time.Minute {
+		t.Errorf("expected max_duration=5m, got %v", maxDuration)
+	}
+}
+
+func TestDaemon_CodingParamsDefaultsWhenAbsent(t *testing.T) {
+	// When max_turns and max_duration are not in params, defaults are returned.
+	params := workflow.NewParamHelper(map[string]any{
+		"containerized": true,
+		"supervisor":    true,
+	})
+
+	maxTurns := params.Int("max_turns", 0)
+	if maxTurns != 0 {
+		t.Errorf("expected 0 when max_turns absent, got %d", maxTurns)
+	}
+
+	maxDuration := params.Duration("max_duration", 0)
+	if maxDuration != 0 {
+		t.Errorf("expected 0 when max_duration absent, got %v", maxDuration)
 	}
 }
