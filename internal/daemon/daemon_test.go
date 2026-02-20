@@ -1057,7 +1057,7 @@ func TestDaemon_NotifyWorkerDone_NonBlocking(t *testing.T) {
 	select {
 	case <-done:
 		// success — did not block
-	case <-time.After(1 * time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Fatal("notifyWorkerDone blocked when channel was full")
 	}
 }
@@ -1109,7 +1109,7 @@ func TestDaemon_WorkerDone_CreateWorkerNotifies(t *testing.T) {
 	select {
 	case <-d.workerDone:
 		// success — notification received
-	case <-time.After(2 * time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Fatal("expected workerDone signal after worker completed")
 	}
 }

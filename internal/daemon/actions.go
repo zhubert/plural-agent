@@ -195,7 +195,7 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	}
 
 	// Start worker, applying any per-session limits from workflow params
-	w := d.createWorkerWithPrompt(item, sess, initialMsg, codingPrompt)
+	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, codingPrompt)
 	maxTurns := params.Int("max_turns", 0)
 	maxDuration := params.Duration("max_duration", 0)
 	if maxTurns > 0 || maxDuration > 0 {
@@ -393,7 +393,8 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem,
 
 // createWorkerWithPrompt creates a session worker with an optional custom system prompt
 // but does not start it. The caller is responsible for calling w.Start(ctx).
-func (d *Daemon) createWorkerWithPrompt(item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
+// ctx is used to cancel the notification goroutine on shutdown.
+func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
 	if customPrompt != "" {
 		runner.SetCustomSystemPrompt(customPrompt)
@@ -406,7 +407,11 @@ func (d *Daemon) createWorkerWithPrompt(item *daemonstate.WorkItem, sess *config
 
 	go func() {
 		w.Wait()
-		d.notifyWorkerDone()
+		select {
+		case <-ctx.Done():
+		default:
+			d.notifyWorkerDone()
+		}
 	}()
 
 	return w
@@ -414,7 +419,7 @@ func (d *Daemon) createWorkerWithPrompt(item *daemonstate.WorkItem, sess *config
 
 // startWorkerWithPrompt creates and starts a session worker with an optional custom system prompt.
 func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) {
-	w := d.createWorkerWithPrompt(item, sess, initialMsg, customPrompt)
+	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, customPrompt)
 	w.Start(ctx)
 }
 
