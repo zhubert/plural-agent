@@ -263,7 +263,7 @@
 
         .workflow-heading {
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 2.5rem;
         }
 
         .workflow-heading h2 {
@@ -278,7 +278,7 @@
         }
 
         .workflow-body {
-            max-width: 680px;
+            max-width: 800px;
             margin: 0 auto;
         }
 
@@ -293,6 +293,170 @@
         .workflow-desc code {
             color: var(--secondary);
             font-family: inherit;
+        }
+
+        /* State diagram */
+        .state-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            margin-bottom: 2.5rem;
+            overflow-x: auto;
+            padding: 1rem 0;
+        }
+
+        .state-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            flex-shrink: 0;
+        }
+
+        .state-box {
+            padding: 0.5rem 0.85rem;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            white-space: nowrap;
+            border: 1px solid var(--border-light);
+            background: var(--bg-elevated);
+            color: var(--text);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .state-box:hover {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary-glow);
+        }
+
+        .state-type {
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            font-weight: 400;
+        }
+
+        .state-box.state-task { border-left: 3px solid var(--primary); }
+        .state-box.state-wait { border-left: 3px solid var(--accent); }
+        .state-box.state-terminal { border-left: 3px solid var(--secondary); }
+
+        .state-arrow {
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            padding: 0 0.4rem;
+            flex-shrink: 0;
+            user-select: none;
+        }
+
+        .state-error-branch {
+            text-align: center;
+            margin-top: -0.5rem;
+            margin-bottom: 2rem;
+            font-size: 0.68rem;
+            color: var(--text-dim);
+        }
+
+        .state-error-branch code {
+            font-family: inherit;
+            color: #F87171;
+        }
+
+        /* YAML block */
+        .yaml-block {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 1.25rem 1.5rem;
+            overflow-x: auto;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .yaml-block pre {
+            margin: 0;
+            font-size: 0.75rem;
+            line-height: 1.7;
+            color: var(--text-muted);
+        }
+
+        .yaml-block .yk { color: #7C3AED; }
+        .yaml-block .yv { color: var(--text); }
+        .yaml-block .yc { color: var(--text-dim); font-style: italic; }
+        .yaml-block .ys { color: var(--secondary); }
+        .yaml-block .ya { color: var(--accent); }
+
+        .yaml-label {
+            position: absolute;
+            top: 0.6rem;
+            right: 0.8rem;
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* Customization grid */
+        .customize-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .customize-item {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+        }
+
+        .customize-item h4 {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.3rem;
+        }
+
+        .customize-item p {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .customize-item code {
+            color: var(--secondary);
+            font-family: inherit;
+            font-size: 0.7rem;
+        }
+
+        /* CLI tools row */
+        .cli-tools {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .cli-tool {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+            padding: 0.55rem 1rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .cli-tool code {
+            color: var(--text);
+            font-family: inherit;
+        }
+
+        .cli-tool .cli-desc {
+            color: var(--text-dim);
         }
 
         /* -- Install -- */
@@ -469,6 +633,26 @@
                 margin-bottom: 0.15rem;
             }
 
+            .state-diagram {
+                flex-wrap: wrap;
+                gap: 0.25rem 0;
+                justify-content: center;
+            }
+
+            .state-arrow {
+                padding: 0 0.2rem;
+                font-size: 0.65rem;
+            }
+
+            .customize-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cli-tools {
+                flex-direction: column;
+                align-items: center;
+            }
+
             .steps {
                 grid-template-columns: 1fr;
                 gap: 1.5rem;
@@ -628,13 +812,114 @@
         <section class="workflow">
             <div class="workflow-heading">
                 <h2>configurable workflow</h2>
-                <p>define your pipeline as a state machine</p>
+                <p>define your pipeline as a step function</p>
             </div>
             <div class="workflow-body">
-                <p class="workflow-desc">drop a <code>.plural/workflow.yaml</code> in your repo to customize the agent's behavior. define states, actions, events, and transitions. the agent uses sensible defaults when no config is present.</p>
-                <div class="command-block">
-                    <button class="copy-btn" onclick="copyCommand(this, 'plural-agent agent --repo owner/repo')">copy</button>
-                    <code><span class="prompt">$</span> plural-agent agent --repo owner/repo</code>
+                <p class="workflow-desc">drop a <code>.plural/workflow.yaml</code> in your repo. define states, actions, events, and transitions &mdash; or let the defaults handle it.</p>
+
+                <!-- State diagram -->
+                <div class="state-diagram">
+                    <div class="state-node">
+                        <div class="state-box state-task">coding</div>
+                        <span class="state-type">ai.code</span>
+                    </div>
+                    <span class="state-arrow">&rarr;</span>
+                    <div class="state-node">
+                        <div class="state-box state-task">open_pr</div>
+                        <span class="state-type">github.create_pr</span>
+                    </div>
+                    <span class="state-arrow">&rarr;</span>
+                    <div class="state-node">
+                        <div class="state-box state-wait">await_review</div>
+                        <span class="state-type">pr.reviewed</span>
+                    </div>
+                    <span class="state-arrow">&rarr;</span>
+                    <div class="state-node">
+                        <div class="state-box state-wait">await_ci</div>
+                        <span class="state-type">ci.complete</span>
+                    </div>
+                    <span class="state-arrow">&rarr;</span>
+                    <div class="state-node">
+                        <div class="state-box state-task">merge</div>
+                        <span class="state-type">github.merge</span>
+                    </div>
+                    <span class="state-arrow">&rarr;</span>
+                    <div class="state-node">
+                        <div class="state-box state-terminal">done</div>
+                        <span class="state-type">succeed</span>
+                    </div>
+                </div>
+                <p class="state-error-branch">any state can transition to <code>failed</code> on error</p>
+
+                <!-- YAML config -->
+                <div class="yaml-block">
+                    <span class="yaml-label">.plural/workflow.yaml</span>
+                    <pre><span class="yk">source:</span>
+  <span class="yk">provider:</span> <span class="yv">github</span>            <span class="yc"># github | asana | linear</span>
+  <span class="yk">filter:</span>
+    <span class="yk">label:</span> <span class="yv">queued</span>
+
+<span class="yk">states:</span>
+  <span class="yk">coding:</span>
+    <span class="yk">type:</span> <span class="ys">task</span>
+    <span class="yk">action:</span> <span class="ya">ai.code</span>
+    <span class="yk">params:</span>
+      <span class="yk">max_turns:</span> <span class="yv">50</span>
+      <span class="yk">max_duration:</span> <span class="yv">30m</span>
+      <span class="yk">system_prompt:</span> <span class="yv">file:.plural/prompt.md</span>
+    <span class="yk">after:</span>
+      <span class="yv">- run: "make lint"</span>
+    <span class="yk">next:</span> <span class="yv">open_pr</span>
+    <span class="yk">error:</span> <span class="yv">failed</span>
+
+  <span class="yk">await_review:</span>
+    <span class="yk">type:</span> <span class="ys">wait</span>
+    <span class="yk">event:</span> <span class="ya">pr.reviewed</span>
+    <span class="yk">params:</span>
+      <span class="yk">auto_address:</span> <span class="yv">true</span>
+      <span class="yk">max_feedback_rounds:</span> <span class="yv">3</span>
+
+  <span class="yk">merge:</span>
+    <span class="yk">type:</span> <span class="ys">task</span>
+    <span class="yk">action:</span> <span class="ya">github.merge</span>
+    <span class="yk">params:</span>
+      <span class="yk">method:</span> <span class="yv">squash</span>            <span class="yc"># rebase | squash | merge</span></pre>
+                </div>
+
+                <!-- Customization callouts -->
+                <div class="customize-grid">
+                    <div class="customize-item">
+                        <h4>custom prompts</h4>
+                        <p>inject system prompts inline or via <code>file:</code> paths. separate prompts for the coding phase and review phase.</p>
+                    </div>
+                    <div class="customize-item">
+                        <h4>after-hooks</h4>
+                        <p>run shell commands after any state. hooks receive <code>$PLURAL_BRANCH</code>, <code>$PLURAL_PR_URL</code>, and more via env vars.</p>
+                    </div>
+                    <div class="customize-item">
+                        <h4>CI failure policy</h4>
+                        <p>choose <code>retry</code>, <code>abandon</code>, or <code>notify</code> when CI fails. configure timeout per wait state.</p>
+                    </div>
+                    <div class="customize-item">
+                        <h4>add or reorder states</h4>
+                        <p>insert a <code>github.comment_issue</code> step, remove auto-merge, or rearrange the graph entirely.</p>
+                    </div>
+                </div>
+
+                <!-- CLI tools -->
+                <div class="cli-tools">
+                    <div class="cli-tool">
+                        <code>workflow init</code>
+                        <span class="cli-desc">scaffold config</span>
+                    </div>
+                    <div class="cli-tool">
+                        <code>workflow validate</code>
+                        <span class="cli-desc">check for errors</span>
+                    </div>
+                    <div class="cli-tool">
+                        <code>workflow visualize</code>
+                        <span class="cli-desc">emit mermaid diagram</span>
+                    </div>
                 </div>
             </div>
         </section>
