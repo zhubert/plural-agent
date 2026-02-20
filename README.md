@@ -300,23 +300,23 @@ Both sync and async actions (like `ai.code`) support retry/catch.
 
 ### Choice State
 
-The `choice` state type evaluates rules against step data and branches conditionally:
+The `choice` state type evaluates rules against step data and branches conditionally. The variables you reference must be keys that were set in step data by a preceding action, event, pass state, or timeout (see [Step Data Reference](#step-data-reference) below).
 
 ```yaml
 states:
-  check_ci_result:
+  check_result:
     type: choice
     choices:
-      - variable: ci_status       # Step data key
-        equals: passing           # Condition
-        next: merge
-      - variable: ci_status
-        equals: failing
-        next: fix_ci
-      - variable: pr_closed
+      - variable: ci_passed             # Set by ci.complete event
         equals: true
-        next: failed
-    default: await_ci             # Fallback if no rule matches
+        next: merge
+      - variable: pr_merged_externally  # Set by pr.reviewed event
+        equals: true
+        next: done
+      - variable: timeout               # Set when a wait state times out
+        equals: true
+        next: retry_coding
+    default: await_ci                   # Fallback if no rule matches
 ```
 
 **Conditions:**
@@ -346,6 +346,57 @@ states:
 ```
 
 This is useful for workflow parameterization — setting values that downstream actions can read — without writing a custom action.
+
+---
+
+### Step Data Reference
+
+Step data is a key-value map that accumulates as a work item moves through the workflow. Actions, events, pass states, and timeouts all write into it. Choice states read from it. Here's every key that can be set automatically:
+
+#### From actions
+
+| Key | Set by | Type | Description |
+|-----|--------|------|-------------|
+| `pr_url` | `github.create_pr` | string | URL of the created pull request |
+
+#### From events
+
+Event data is only written to step data **when the event fires** (i.e., the wait state advances). Data returned by non-fired polls is discarded.
+
+**`pr.reviewed`** — fires on approval or external merge:
+
+| Key | Type | When set | Description |
+|-----|------|----------|-------------|
+| `review_approved` | bool | PR was approved | Always `true` |
+| `pr_merged_externally` | bool | PR was merged outside the daemon | Always `true` |
+
+**`ci.complete`** — fires when CI passes (or no checks configured):
+
+| Key | Type | When set | Description |
+|-----|------|----------|-------------|
+| `ci_passed` | bool | CI passed or no checks | Always `true` |
+
+#### From timeouts
+
+When a `wait` state exceeds its `timeout` duration:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `timeout` | bool | Always `true` |
+| `timeout_elapsed` | string | How long the wait lasted (e.g., `"2h1m30s"`) |
+
+#### From pass states
+
+A `pass` state writes whatever is in its `data` map — these are user-defined.
+
+#### Internal keys
+
+These are managed by the engine and should not be set manually:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `_retry_count` | int | Current retry attempt count (reset to 0 on success) |
+| `_caught_error` | string | Error message when a `catch` rule matches |
 
 ---
 

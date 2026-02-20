@@ -106,13 +106,13 @@ states:
   # check_result:
   #   type: choice
   #   choices:
-  #     - variable: ci_status    # Step data key to evaluate
-  #       equals: passing        # Condition: equals, not_equals, or is_present
+  #     - variable: ci_passed        # Step data key set by ci.complete event
+  #       equals: true               # Condition: equals, not_equals, or is_present
   #       next: merge
-  #     - variable: ci_status
-  #       equals: failing
-  #       next: fix_ci
-  #   default: await_ci          # Fallback if no rule matches
+  #     - variable: pr_merged_externally  # Step data key set by pr.reviewed event
+  #       equals: true
+  #       next: done
+  #   default: await_ci              # Fallback if no rule matches
 
   # --- Example: pass state (data injection) ---
   # set_defaults:
