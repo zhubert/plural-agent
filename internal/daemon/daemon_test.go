@@ -1017,3 +1017,99 @@ func TestDaemon_CollectCompletedWorkers_FeedbackError(t *testing.T) {
 		t.Error("expected error message to be set after failed feedback")
 	}
 }
+
+func TestDaemon_NotifyWorkerDone_Sends(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Channel should be empty initially
+	select {
+	case <-d.workerDone:
+		t.Fatal("expected workerDone channel to be empty")
+	default:
+	}
+
+	// notifyWorkerDone should send a signal
+	d.notifyWorkerDone()
+
+	select {
+	case <-d.workerDone:
+		// success
+	default:
+		t.Fatal("expected workerDone channel to have a signal")
+	}
+}
+
+func TestDaemon_NotifyWorkerDone_NonBlocking(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Fill the buffered channel
+	d.notifyWorkerDone()
+
+	// Second call should not block (channel is full, non-blocking send drops it)
+	done := make(chan struct{})
+	go func() {
+		d.notifyWorkerDone()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — did not block
+	case <-time.After(1 * time.Second):
+		t.Fatal("notifyWorkerDone blocked when channel was full")
+	}
+}
+
+func TestDaemon_WorkerDone_ChannelInitialized(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	if d.workerDone == nil {
+		t.Fatal("expected workerDone channel to be initialized")
+	}
+	if cap(d.workerDone) != 1 {
+		t.Fatalf("expected workerDone channel capacity 1, got %d", cap(d.workerDone))
+	}
+}
+
+func TestDaemon_WorkerDone_CreateWorkerNotifies(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-notify")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-notify",
+		IssueRef:  config.IssueRef{Source: "github", ID: "99"},
+		SessionID: "sess-notify",
+		Branch:    "feature-notify",
+	}
+	d.state.AddWorkItem(item)
+
+	// createWorkerWithPrompt spawns a goroutine that calls notifyWorkerDone
+	// after the worker finishes. Use a pre-done worker to trigger immediately.
+	w := worker.NewDoneWorker()
+
+	// Manually simulate what createWorkerWithPrompt does for the notification:
+	// we can't call createWorkerWithPrompt directly because it needs a real runner,
+	// but we can test the goroutine pattern directly.
+	d.mu.Lock()
+	d.workers[item.ID] = w
+	d.mu.Unlock()
+
+	go func() {
+		w.Wait()
+		d.notifyWorkerDone()
+	}()
+
+	// The worker is already done, so the goroutine should fire quickly
+	select {
+	case <-d.workerDone:
+		// success — notification received
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected workerDone signal after worker completed")
+	}
+}

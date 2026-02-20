@@ -37,6 +37,7 @@ type Daemon struct {
 	workflowConfigs map[string]*workflow.Config // keyed by repo path
 	engines        map[string]*workflow.Engine  // keyed by repo path
 	mu             sync.Mutex
+	workerDone     chan struct{} // buffered(1); workers signal when done to wake the main loop
 	logger         *slog.Logger
 
 	// Config save tracking
@@ -114,6 +115,7 @@ func New(cfg agentconfig.Config, gitSvc *git.GitService, sessSvc *session.Sessio
 		sessionMgr:         manager.NewSessionManager(cfg, gitSvc),
 		issueRegistry:      registry,
 		workers:            make(map[string]*worker.SessionWorker),
+		workerDone:         make(chan struct{}, 1),
 		logger:             logger,
 		autoMerge:          true, // Auto-merge is default for daemon
 		pollInterval:       defaultPollInterval,
@@ -182,7 +184,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			d.tick(ctx)
+		case <-d.workerDone:
+			d.tick(ctx)
 		}
+	}
+}
+
+// notifyWorkerDone signals the main loop that a worker has completed.
+// Uses a non-blocking send so it never blocks if the channel is already full.
+func (d *Daemon) notifyWorkerDone() {
+	select {
+	case d.workerDone <- struct{}{}:
+	default:
 	}
 }
 

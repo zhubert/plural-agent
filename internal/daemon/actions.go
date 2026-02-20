@@ -404,6 +404,11 @@ func (d *Daemon) createWorkerWithPrompt(item *daemonstate.WorkItem, sess *config
 	d.workers[item.ID] = w
 	d.mu.Unlock()
 
+	go func() {
+		w.Wait()
+		d.notifyWorkerDone()
+	}()
+
 	return w
 }
 
