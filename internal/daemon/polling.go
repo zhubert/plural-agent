@@ -89,6 +89,10 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 					Title:  issue.Title,
 					URL:    issue.URL,
 				},
+				StepData: map[string]any{},
+			}
+			if issue.Body != "" {
+				item.StepData["issue_body"] = issue.Body
 			}
 
 			d.state.AddWorkItem(item)

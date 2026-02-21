@@ -45,17 +45,24 @@ func FormatPRCommentsPrompt(comments []git.PRReviewComment) string {
 }
 
 // FormatInitialMessage formats the initial message for a coding session based on the issue provider.
-func FormatInitialMessage(ref config.IssueRef) string {
+// The optional body parameter contains the issue description/body text.
+func FormatInitialMessage(ref config.IssueRef, body string) string {
 	provider := issues.Source(ref.Source)
 
+	var header string
 	switch provider {
 	case issues.SourceGitHub:
-		return fmt.Sprintf("GitHub Issue #%s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("GitHub Issue #%s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
 	case issues.SourceAsana:
-		return fmt.Sprintf("Asana Task: %s\n\n%s", ref.Title, ref.URL)
+		header = fmt.Sprintf("Asana Task: %s\n\n%s", ref.Title, ref.URL)
 	case issues.SourceLinear:
-		return fmt.Sprintf("Linear Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("Linear Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
 	default:
-		return fmt.Sprintf("Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
 	}
+
+	if body != "" {
+		return header + "\n\n" + body
+	}
+	return header
 }

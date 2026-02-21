@@ -213,7 +213,8 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	item.UpdatedAt = time.Now()
 
 	// Build initial message using provider-aware formatting
-	initialMsg := worker.FormatInitialMessage(item.IssueRef)
+	issueBody, _ := item.StepData["issue_body"].(string)
+	initialMsg := worker.FormatInitialMessage(item.IssueRef, issueBody)
 
 	// Resolve coding system prompt from workflow config
 	systemPrompt := params.String("system_prompt", "")

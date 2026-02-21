@@ -122,12 +122,19 @@ func TestFormatInitialMessage(t *testing.T) {
 	tests := []struct {
 		name     string
 		ref      config.IssueRef
+		body     string
 		contains []string
 	}{
 		{
-			name:     "GitHub issue",
+			name:     "GitHub issue without body",
 			ref:      config.IssueRef{Source: "github", ID: "42", Title: "Fix the bug", URL: "https://github.com/owner/repo/issues/42"},
 			contains: []string{"GitHub Issue #42", "Fix the bug", "https://github.com/owner/repo/issues/42"},
+		},
+		{
+			name:     "GitHub issue with body",
+			ref:      config.IssueRef{Source: "github", ID: "42", Title: "Fix the bug", URL: "https://github.com/owner/repo/issues/42"},
+			body:     "The login page crashes when submitting empty form",
+			contains: []string{"GitHub Issue #42", "Fix the bug", "https://github.com/owner/repo/issues/42", "The login page crashes when submitting empty form"},
 		},
 		{
 			name:     "Asana task",
@@ -140,6 +147,12 @@ func TestFormatInitialMessage(t *testing.T) {
 			contains: []string{"Linear Issue ENG-123", "Add tests", "https://linear.app/team/issue/ENG-123"},
 		},
 		{
+			name:     "Linear issue with body",
+			ref:      config.IssueRef{Source: "linear", ID: "ENG-123", Title: "Add tests", URL: "https://linear.app/team/issue/ENG-123"},
+			body:     "We need unit tests for the auth module",
+			contains: []string{"Linear Issue ENG-123", "Add tests", "https://linear.app/team/issue/ENG-123", "We need unit tests for the auth module"},
+		},
+		{
 			name:     "unknown provider",
 			ref:      config.IssueRef{Source: "jira", ID: "PROJ-1", Title: "Migrate DB", URL: "https://jira.example.com/1"},
 			contains: []string{"Issue PROJ-1", "Migrate DB", "https://jira.example.com/1"},
@@ -148,7 +161,7 @@ func TestFormatInitialMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatInitialMessage(tt.ref)
+			result := FormatInitialMessage(tt.ref, tt.body)
 			for _, s := range tt.contains {
 				if !strings.Contains(result, s) {
 					t.Errorf("expected %q in result, got: %s", s, result)
@@ -156,4 +169,24 @@ func TestFormatInitialMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormatInitialMessage_BodyPlacement(t *testing.T) {
+	ref := config.IssueRef{Source: "github", ID: "10", Title: "Test", URL: "https://github.com/owner/repo/issues/10"}
+
+	t.Run("empty body produces no trailing content", func(t *testing.T) {
+		result := FormatInitialMessage(ref, "")
+		expected := "GitHub Issue #10: Test\n\nhttps://github.com/owner/repo/issues/10"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("body appears after URL", func(t *testing.T) {
+		result := FormatInitialMessage(ref, "Detailed description here")
+		expected := "GitHub Issue #10: Test\n\nhttps://github.com/owner/repo/issues/10\n\nDetailed description here"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
 }

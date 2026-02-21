@@ -49,6 +49,9 @@ func TestFetchIssuesForProvider_GitHub(t *testing.T) {
 	if issues[0].Title != "Bug 1" {
 		t.Errorf("expected title 'Bug 1', got %s", issues[0].Title)
 	}
+	if issues[0].Body != "Fix it" {
+		t.Errorf("expected body 'Fix it', got %s", issues[0].Body)
+	}
 }
 
 func TestFetchIssuesForProvider_GitHub_CustomLabel(t *testing.T) {
@@ -95,6 +98,55 @@ func TestFetchIssuesForProvider_UnknownProvider(t *testing.T) {
 	_, err := d.fetchIssuesForProvider(context.Background(), "/test/repo", wfCfg)
 	if err == nil {
 		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestPollForNewIssues_StoresBodyInStepData(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	type ghIssue struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		URL    string `json:"url"`
+	}
+	issuesJSON, _ := json.Marshal([]ghIssue{
+		{Number: 5, Title: "Add feature", Body: "Please add dark mode support", URL: "https://github.com/owner/repo/issues/5"},
+		{Number: 6, Title: "No body issue", Body: "", URL: "https://github.com/owner/repo/issues/6"},
+	})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: issuesJSON,
+	})
+	// Mock remote URL for repo filter matching
+	mockExec.AddPrefixMatch("git", []string{"remote", "get-url"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "owner/repo"
+	d.maxConcurrent = 10
+
+	d.pollForNewIssues(context.Background())
+
+	// Check that issue body is stored in StepData
+	item5 := d.state.GetWorkItem("/test/repo-5")
+	if item5 == nil {
+		t.Fatal("expected work item for issue 5")
+	}
+	body, ok := item5.StepData["issue_body"].(string)
+	if !ok || body != "Please add dark mode support" {
+		t.Errorf("expected issue body in StepData, got %q (ok=%v)", body, ok)
+	}
+
+	// Issue with empty body should not have issue_body in StepData
+	item6 := d.state.GetWorkItem("/test/repo-6")
+	if item6 == nil {
+		t.Fatal("expected work item for issue 6")
+	}
+	if _, ok := item6.StepData["issue_body"]; ok {
+		t.Error("expected no issue_body in StepData for issue with empty body")
 	}
 }
 
