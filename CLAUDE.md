@@ -53,99 +53,53 @@ tail -f ~/.plural/logs/stream-*.log    # Raw Claude stream messages (per-session
 ### Package Structure
 
 ```
-main.go                    Entry point, calls cmd.Execute()
-cmd/                       CLI commands (Cobra)
-  agent.go                 Agent daemon command and flag handling
-  clean.go                 Daemon state cleanup subcommand
-  mcp_server.go            MCP server for permission prompts (internal)
-  root.go                  Root command, version template
-  util.go                  Shared CLI helpers
-  workflow.go              Workflow management subcommands (init, validate, visualize)
+main.go              Entry point, calls cmd.Execute()
+cmd/                  CLI commands (Cobra): agent, clean, mcp_server, workflow
 internal/
-  agentconfig/             Shared config interface (leaf package)
-    config.go              Config interface — decouples agent/daemon from concrete config
-  daemonstate/             Daemon state persistence (leaf package)
-    state.go               DaemonState, WorkItem, WorkItemState types and methods
-    lock.go                DaemonLock, AcquireLock, ClearLocks file-based locking
-  worker/                  Session worker and helpers
-    host.go                Host interface — abstraction for Agent/Daemon
-    worker.go              SessionWorker — manages a single session's lifecycle
-    auto_merge.go          Auto-merge logic (poll for review + CI, then merge)
-    helpers.go             TrimURL, FormatPRCommentsPrompt, FormatInitialMessage
-  workflow/                Workflow engine and configuration
-    actions.go             Action string constants
-    config.go              WorkflowConfig, StateConfig, Source, Settings types
-    defaults.go            DefaultConfig() — built-in default state machine
-    engine.go              Engine — evaluates states, drives transitions
-    hooks.go               RunBeforeHooks, RunHooks — shell hook execution
-    init.go                WriteTemplate — generates .plural/workflow.yaml scaffold
-    loader.go              Load, LoadAndMerge — YAML parsing and merge with defaults
-    params.go              Param extraction helpers for actions/events
-    prompt.go              Prompt formatting for workflow-driven sessions
-    validate.go            Validate — structural validation of workflow configs
-    visualize.go           GenerateMermaid — mermaid diagram generation
-  agent/                   Headless autonomous agent
-    agent.go               Agent struct, options, New, Run, polling, Host impl
-    issue_poller.go        Issue polling abstraction (GitHub label-based)
-  daemon/                  Persistent orchestrator
-    daemon.go              Daemon struct, options, New, Run loop
-    host.go                Host interface implementation for Daemon
-    lifecycle.go           Worker lifecycle and graceful shutdown helpers
-    actions.go             Workflow action handlers (coding, PR, merge, labels, comments, reviews)
-    events.go              Workflow event handlers (PR reviewed, CI complete, PR mergeable)
-    polling.go             Issue polling across providers (GitHub, Asana, Linear)
-    recovery.go            State recovery on daemon restart
+  agentconfig/        Config interface (leaf package, no internal deps)
+  daemonstate/        Daemon state persistence and file-based locking (leaf package)
+  worker/             SessionWorker — manages a single session's lifecycle
+  workflow/           Workflow engine, config, validation, and visualization
+  daemon/             Persistent orchestrator: polling, actions, events, recovery
 ```
 
-Import graph (no cycles):
+Import hierarchy (no cycles):
 ```
-cmd/agent.go     → daemon, agentconfig, workflow
-cmd/clean.go     → daemonstate
-cmd/workflow.go  → workflow
-daemon/          → worker, daemonstate, agentconfig, workflow
-agent/           → worker, agentconfig
-worker/          → agentconfig
-workflow/        → (leaf, depends only on plural-core)
-daemonstate/     → (leaf)
-agentconfig/     → (leaf)
+cmd       → daemon, agentconfig, workflow
+daemon    → worker, daemonstate, agentconfig, workflow
+worker    → agentconfig
+workflow  → (leaf, depends only on plural-core)
 ```
 
 ### Key Dependencies
 
-- `github.com/zhubert/plural-core` — shared library with config, git, session, claude, MCP, workflow, and issue provider packages
+- `github.com/zhubert/plural-core` — shared library (config, git, session, claude, MCP, issue providers)
 - `github.com/spf13/cobra` — CLI framework
 - `gopkg.in/yaml.v3` — YAML parsing for workflow configs
 
 ### Key Patterns
 
-- **Functional options**: `daemon.Option` and `agent.Option` configure Daemon and Agent via `With*()` functions
-- **Interface-based config**: `agentconfig.Config` interface decouples agent/daemon from `config.Config` for testability
-- **Host interface**: `worker.Host` abstracts Agent/Daemon so SessionWorker doesn't depend on either
+- **Functional options**: `daemon.Option` configures Daemon via `With*()` functions
+- **Interface-based config**: `agentconfig.Config` interface decouples daemon from concrete config
+- **Host interface**: `worker.Host` abstracts the daemon so SessionWorker doesn't depend on it directly
 - **Worker goroutines**: Each session gets a `SessionWorker` with its own goroutine and select loop
 - **State machine**: Daemon uses `workflow.Engine` for configurable state machines per repo
 - **Graceful shutdown**: Context cancellation with SIGINT/SIGTERM handling; second signal force-exits
-- **Daemon lock**: File-based lock with stale PID detection prevents multiple daemon instances for the same repo
-- **Cycle detection**: Workflow validation detects cycles in state graphs via DFS
+- **Daemon lock**: File-based lock with stale PID detection prevents multiple instances per repo
 
 ### Container Mode
 
-All agent sessions are containerized — the container IS the sandbox. Claude runs with `--dangerously-skip-permissions` inside Docker. Interactive prompts (like MCP tool calls) route through the MCP server over TCP.
-
-Auth: `ANTHROPIC_API_KEY`, macOS keychain `anthropic_api_key`, `CLAUDE_CODE_OAUTH_TOKEN`, or `~/.claude/.credentials.json` (from `claude login`).
+All sessions are containerized — the container IS the sandbox. Claude runs with `--dangerously-skip-permissions` inside Docker. Interactive prompts route through the MCP server over TCP.
 
 ### Workflow Configuration
 
-Per-repo workflow config via `.plural/workflow.yaml`. The daemon loads workflow configs at startup, keyed by repo path. Override chain: CLI flag > workflow yaml > config.json > default.
+Per-repo workflow config via `.plural/workflow.yaml`. Override chain: CLI flag > workflow yaml > config.json > default.
 
-**State types**: `task` (execute action), `wait` (poll event with timeout enforcement), `choice` (conditional branch on step data), `pass` (inject data), `succeed`/`fail` (terminal).
+**State types**: `task` (execute action), `wait` (poll event with timeout), `choice` (conditional branch), `pass` (inject data), `succeed`/`fail` (terminal).
 
-**Error recovery**: Task states support `retry` (max_attempts, interval, exponential backoff) and `catch` (route specific errors to recovery states). Retry count tracked in `_retry_count` step data key.
+**Error recovery**: Task states support `retry` (max_attempts, interval, backoff) and `catch` (route errors to recovery states).
 
-**Timeouts**: Wait states with `timeout` are enforced at runtime. `timeout_next` provides a dedicated timeout transition edge; otherwise falls back to `error` edge. `StepEnteredAt` on WorkItem tracks when a step was entered.
-
-**Hooks**: `before` hooks run before step execution (failure blocks the step). `after` hooks run after completion (fire-and-forget). Both use `RunBeforeHooks()`/`RunHooks()` in `workflow/hooks.go`.
-
-Key files: `daemon/daemon.go` (main loop), `daemon/actions.go` (action execution), `daemon/events.go` (event handling), `daemon/polling.go` (issue fetching).
+**Hooks**: `before` hooks run before step execution (failure blocks the step). `after` hooks run after completion (fire-and-forget).
 
 ---
 
@@ -153,9 +107,9 @@ Key files: `daemon/daemon.go` (main loop), `daemon/actions.go` (action execution
 
 ### Adding a New Daemon Action
 
-1. Define the action string in `workflow/` (e.g., `ai.code`, `github.create_pr`)
+1. Define the action string in `internal/workflow/actions.go`
 2. Add handler in `internal/daemon/actions.go`
-3. Wire it into the workflow engine's action dispatch in `daemon.go:buildActionRegistry()`
+3. Wire it into the action dispatch in `daemon.go:buildActionRegistry()`
 4. Add tests in `internal/daemon/actions_test.go`
 
 ### Adding a New CLI Flag
@@ -174,7 +128,3 @@ Key files: `daemon/daemon.go` (main loop), `daemon/actions.go` (action execution
 ./scripts/release.sh major            # v0.0.3 -> v1.0.0
 ./scripts/release.sh patch --dry-run  # Dry run
 ```
-
-## License
-
-MIT License
