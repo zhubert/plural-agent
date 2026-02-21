@@ -529,6 +529,22 @@ coding ──► open_pr ──► await_review ──► await_ci ──► mer
 | `done` | succeed | -- | -- | -- |
 | `failed` | fail | -- | -- | -- |
 
+```mermaid
+stateDiagram-v2
+    [*] --> coding
+    coding --> open_pr : ai.code
+    coding --> failed : error
+    open_pr --> await_review : github.create_pr
+    open_pr --> failed : error
+    await_review --> await_ci : pr.reviewed
+    await_review --> failed : error
+    await_ci --> merge : ci.complete (timeout: 2h0m0s)
+    await_ci --> failed : error
+    merge --> done : github.merge
+    done --> [*]
+    failed --> [*]
+```
+
 **Fast-path shortcuts:** If the Claude session itself creates a PR (via MCP tools during coding), the daemon detects this and skips `open_pr`, advancing directly to `await_review`. If the session also merges, it skips straight to `done`.
 
 ---
