@@ -417,14 +417,47 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem,
 	return d.gitService.CommentOnIssue(commentCtx, repoPath, issueNum, body)
 }
 
+// configureRunner explicitly configures a runner for daemon use.
+// The daemon makes all policy decisions here rather than relying on SessionManager.
+func (d *Daemon) configureRunner(runner claude.RunnerInterface, sess *config.Session, customPrompt string) {
+	// Tools: compose the container tool set for daemon sessions
+	runner.SetAllowedTools(claude.ComposeTools(
+		claude.ToolSetBase,
+		claude.ToolSetContainerShell,
+		claude.ToolSetWeb,
+		claude.ToolSetProductivity,
+	))
+
+	// Container mode
+	if sess.Containerized {
+		runner.SetContainerized(true, d.config.GetContainerImage())
+	}
+
+	// Supervisor mode (if workflow config enables it)
+	if sess.IsSupervisor {
+		runner.SetSupervisor(true)
+	}
+
+	// No host tools — daemon manages push/PR/merge via workflow actions
+	// (intentionally omitted: runner.SetHostTools)
+
+	// Headless: no streaming chunks needed for autonomous sessions
+	if sess.Autonomous {
+		runner.SetDisableStreamingChunks(true)
+	}
+
+	// System prompt
+	if customPrompt != "" {
+		runner.SetSystemPrompt(customPrompt)
+	}
+}
+
 // createWorkerWithPrompt creates a session worker with an optional custom system prompt
 // but does not start it. The caller is responsible for calling w.Start(ctx).
 // ctx is used to cancel the notification goroutine on shutdown.
 func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
-	if customPrompt != "" {
-		runner.SetSystemPrompt(customPrompt)
-	}
+	d.configureRunner(runner, sess, customPrompt)
 	w := worker.NewSessionWorker(d, sess, runner, initialMsg)
 
 	d.mu.Lock()
