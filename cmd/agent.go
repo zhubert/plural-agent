@@ -38,18 +38,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check that a container runtime is available (required for agent mode).
-	// Either Docker or Colima (which provides the docker CLI) will satisfy this.
-	dockerCheck := cli.Check(cli.Prerequisite{
-		Name:        "docker",
-		Required:    true,
-		Description: "Docker or Colima (required for agent mode)",
-		InstallURL:  "https://docs.docker.com/get-docker/",
-	})
-	if !dockerCheck.Found {
+	// Either docker or colima on PATH satisfies this requirement.
+	if !hasContainerRuntime() {
 		return fmt.Errorf("a container runtime is required for agent mode.\nInstall Docker: https://docs.docker.com/get-docker/\nInstall Colima: https://github.com/abiosoft/colima")
 	}
 
-	// Verify Docker daemon is actually running (not just binary present)
+	// Verify a container runtime daemon is actually running (not just binary present)
 	if err := checkDockerDaemon(); err != nil {
 		return err
 	}

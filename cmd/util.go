@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+// lookPathFunc is the function used to look up binaries on PATH.
+// Overridden in tests to control behavior.
+var lookPathFunc = exec.LookPath
+
+// hasContainerRuntime checks whether a container runtime binary (docker or colima)
+// is available on PATH. Returns true if either is found.
+func hasContainerRuntime() bool {
+	if _, err := lookPathFunc("docker"); err == nil {
+		return true
+	}
+	if _, err := lookPathFunc("colima"); err == nil {
+		return true
+	}
+	return false
+}
+
 // checkDockerDaemon verifies a container runtime daemon is reachable, not just
 // that the binary exists. This catches the case where Docker/Colima is installed
 // but not running, which would otherwise cause silent per-session failures.
@@ -23,10 +39,6 @@ func checkDockerDaemon() error {
 	}
 	return nil
 }
-
-// lookPathFunc is the function used to look up binaries on PATH.
-// Overridden in tests to control behavior.
-var lookPathFunc = exec.LookPath
 
 // runtimeStartHint returns a help message suggesting how to start a container runtime.
 // It checks whether colima is installed to tailor the suggestion.

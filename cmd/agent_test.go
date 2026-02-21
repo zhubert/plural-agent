@@ -126,6 +126,53 @@ func TestCheckDockerDaemon(t *testing.T) {
 	}
 }
 
+func TestHasContainerRuntime(t *testing.T) {
+	tests := []struct {
+		name      string
+		available map[string]bool
+		want      bool
+	}{
+		{
+			name:      "docker only",
+			available: map[string]bool{"docker": true},
+			want:      true,
+		},
+		{
+			name:      "colima only",
+			available: map[string]bool{"colima": true},
+			want:      true,
+		},
+		{
+			name:      "both docker and colima",
+			available: map[string]bool{"docker": true, "colima": true},
+			want:      true,
+		},
+		{
+			name:      "neither",
+			available: map[string]bool{},
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := lookPathFunc
+			defer func() { lookPathFunc = orig }()
+
+			lookPathFunc = func(name string) (string, error) {
+				if tt.available[name] {
+					return "/usr/local/bin/" + name, nil
+				}
+				return "", fmt.Errorf("not found")
+			}
+
+			if got := hasContainerRuntime(); got != tt.want {
+				t.Errorf("hasContainerRuntime() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeStartHint_ColimaInstalled(t *testing.T) {
 	// Save and restore the original lookPathFunc.
 	orig := lookPathFunc
