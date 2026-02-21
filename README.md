@@ -190,6 +190,42 @@ Posts a comment on the source issue. No-op for non-GitHub issues.
 |-------|------|---------|-------------|
 | `body` | string | *(required)* | Comment body, inline or `file:.plural/templates/comment.md` |
 
+#### `github.comment_pr`
+
+Posts a comment on the pull request. Requires an active session with a PR.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `body` | string | *(required)* | Comment body, inline or `file:.plural/templates/comment.md` |
+
+#### `github.add_label`
+
+Adds a label to the source issue. No-op for non-GitHub issues.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `label` | string | *(required)* | Label name to add |
+
+#### `github.remove_label`
+
+Removes a label from the source issue. No-op for non-GitHub issues.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `label` | string | *(required)* | Label name to remove |
+
+#### `github.close_issue`
+
+Closes the source GitHub issue. No-op for non-GitHub issues. No configurable params.
+
+#### `github.request_review`
+
+Requests a review on the pull request. Requires an active session with a PR.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `reviewer` | string | *(required)* | GitHub username to request review from |
+
 ---
 
 ### Events
@@ -228,6 +264,22 @@ Polls CI check status on the PR. This event fires **only when CI passes** (or wh
 | `on_failure` | string | `retry` | Behavior on CI failure: `retry`, `abandon`, or `notify` |
 
 > **Note:** `abandon` and `notify` are currently structural -- they log the failure and set metadata but do not yet trigger distinct behavior (e.g., closing the PR or sending a notification). In practice all three options keep the item in the wait state.
+
+#### `pr.mergeable`
+
+A convenience event that combines PR approval and CI status into a single check. Fires when **both** conditions are met: the PR is approved and CI passes. This lets you replace separate `await_review` + `await_ci` states with a single wait state when you don't need to handle them independently.
+
+Checks in order:
+1. **PR closed?** Returns metadata `pr_closed: true` (does not fire)
+2. **PR merged externally?** Fires with `pr_merged_externally: true`
+3. **Review approved?** Blocks until approved (configurable via `require_review`)
+4. **CI passing?** Blocks until CI passes (configurable via `require_ci`)
+5. Both approved and CI passing — fires with `review_approved: true, ci_passed: true`
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `require_review` | bool | `true` | Require PR approval before merging |
+| `require_ci` | bool | `true` | Require CI to pass before merging |
 
 ---
 
@@ -383,6 +435,16 @@ Event data is only written to step data **when the event fires** (i.e., the wait
 |-----|------|----------|-------------|
 | `ci_passed` | bool | CI passed or no checks | Always `true` |
 
+**`pr.mergeable`** — fires when both approved and CI passes:
+
+| Key | Type | When set | Description |
+|-----|------|----------|-------------|
+| `review_approved` | bool | PR was approved | Always `true` |
+| `ci_passed` | bool | CI passed | Always `true` |
+| `pr_merged_externally` | bool | PR was merged outside the daemon | Always `true` |
+| `pr_closed` | bool | PR was closed (event does not fire) | Always `true` |
+| `ci_failed` | bool | CI failed (event does not fire) | Always `true` |
+
 #### From timeouts
 
 When a `wait` state exceeds its `timeout` duration:
@@ -511,6 +573,56 @@ states:
     error: failed
 ```
 
+Use `pr.mergeable` to combine review + CI into a single wait state:
+```yaml
+states:
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    next: merge
+    error: failed
+```
+
+Add labels to track workflow progress:
+```yaml
+states:
+  coding:
+    type: task
+    action: ai.code
+    next: label_in_review
+    error: failed
+
+  label_in_review:
+    type: task
+    action: github.add_label
+    params:
+      label: in-review
+    next: open_pr
+    error: failed
+```
+
+Request a specific reviewer after opening a PR:
+```yaml
+states:
+  open_pr:
+    type: task
+    action: github.create_pr
+    next: request_reviewer
+    error: failed
+
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: senior-dev
+    next: await_review
+    error: failed
+```
+
 Use a custom system prompt for coding:
 ```yaml
 states:
@@ -605,7 +717,7 @@ All data lives in `~/.plural/` by default. Supports XDG Base Directory Specifica
 | Purpose | Default | XDG |
 |---------|---------|-----|
 | Config | `~/.plural/config.json` | `$XDG_CONFIG_HOME/plural/` |
-| Daemon state | `~/.plural/daemon-state.json` | `$XDG_DATA_HOME/plural/` |
+| Daemon state | `~/.plural/daemon-state-<hash>.json` | `$XDG_DATA_HOME/plural/` |
 | Logs | `~/.plural/logs/` | `$XDG_STATE_HOME/plural/` |
 
 ## Build from Source

@@ -91,8 +91,8 @@ internal/
     daemon.go              Daemon struct, options, New, Run loop
     host.go                Host interface implementation for Daemon
     lifecycle.go           Worker lifecycle and graceful shutdown helpers
-    actions.go             Workflow action handlers (coding, PR creation, merge)
-    events.go              Workflow event handlers (PR reviewed, CI complete)
+    actions.go             Workflow action handlers (coding, PR, merge, labels, comments, reviews)
+    events.go              Workflow event handlers (PR reviewed, CI complete, PR mergeable)
     polling.go             Issue polling across providers (GitHub, Asana, Linear)
     recovery.go            State recovery on daemon restart
 ```
@@ -124,7 +124,8 @@ agentconfig/     → (leaf)
 - **Worker goroutines**: Each session gets a `SessionWorker` with its own goroutine and select loop
 - **State machine**: Daemon uses `workflow.Engine` for configurable state machines per repo
 - **Graceful shutdown**: Context cancellation with SIGINT/SIGTERM handling; second signal force-exits
-- **Daemon lock**: File-based lock prevents multiple daemon instances for the same repo
+- **Daemon lock**: File-based lock with stale PID detection prevents multiple daemon instances for the same repo
+- **Cycle detection**: Workflow validation detects cycles in state graphs via DFS
 
 ### Container Mode
 
