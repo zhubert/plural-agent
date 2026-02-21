@@ -55,5 +55,6 @@ brews:
     dependencies:
       - name: git
       - name: docker
+        type: recommended
     install: |
       bin.install "plural-agent"
