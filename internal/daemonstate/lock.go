@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 
 	"github.com/zhubert/plural-core/paths"
 )
@@ -43,7 +46,15 @@ func AcquireLock(repoPath string) (*DaemonLock, error) {
 			// Check if the lock file is stale (process that created it is gone)
 			data, readErr := os.ReadFile(fp)
 			if readErr == nil {
-				return nil, fmt.Errorf("daemon lock already held (PID: %s). Remove %s if the process is not running", string(data), fp)
+				pidStr := strings.TrimSpace(string(data))
+				if pid, parseErr := strconv.Atoi(pidStr); parseErr == nil {
+					if !processAlive(pid) {
+						// Stale lock — owning process is dead. Remove and retry.
+						os.Remove(fp)
+						return AcquireLock(repoPath)
+					}
+				}
+				return nil, fmt.Errorf("daemon lock already held (PID: %s). Remove %s if the process is not running", pidStr, fp)
 			}
 			return nil, fmt.Errorf("daemon lock already held at %s", fp)
 		}
@@ -85,6 +96,17 @@ func ClearLocks() (int, error) {
 		removed++
 	}
 	return removed, nil
+}
+
+// processAlive returns true if a process with the given PID is running.
+// Uses signal 0 which checks for process existence without sending a signal.
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 // FindLocks returns the paths of all daemon lock files.

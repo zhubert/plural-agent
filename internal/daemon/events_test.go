@@ -606,3 +606,269 @@ func TestCheckPRReviewed_AutoAddressDisabled(t *testing.T) {
 		t.Error("expected fired=false when auto_address disabled")
 	}
 }
+
+func TestCheckPRMergeable_PRClosed(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "CLOSED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for closed PR")
+	}
+	if data == nil || data["pr_closed"] != true {
+		t.Error("expected pr_closed=true in data")
+	}
+}
+
+func TestCheckPRMergeable_PRMergedExternally(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true for merged PR")
+	}
+	if data == nil || data["pr_merged_externally"] != true {
+		t.Error("expected pr_merged_externally=true in data")
+	}
+}
+
+func TestCheckPRMergeable_NotApproved(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Both GetPRState and CheckPRReviewDecision use "gh pr view" prefix,
+	// so the same mock response is returned for both calls.
+	// Use a combined JSON that satisfies both parsers: state=OPEN, no approved reviews.
+	prViewJSON, _ := json.Marshal(struct {
+		State   string        `json:"state"`
+		Reviews []interface{} `json:"reviews"`
+	}{State: "OPEN", Reviews: []interface{}{}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when review not approved")
+	}
+}
+
+func TestCheckPRMergeable_CIPending(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is OPEN and review is approved
+	type review struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	}
+	r := review{State: "APPROVED"}
+	r.Author.Login = "reviewer1"
+	prViewJSON, _ := json.Marshal(struct {
+		State   string   `json:"state"`
+		Reviews []review `json:"reviews"`
+	}{State: "OPEN", Reviews: []review{r}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	// CI is pending
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "PENDING"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when CI is pending")
+	}
+}
+
+func TestCheckPRMergeable_CIFailing(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is OPEN and review is approved
+	type review struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	}
+	r := review{State: "APPROVED"}
+	r.Author.Login = "reviewer1"
+	prViewJSON, _ := json.Marshal(struct {
+		State   string   `json:"state"`
+		Reviews []review `json:"reviews"`
+	}{State: "OPEN", Reviews: []review{r}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	// CI is failing
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "FAILURE"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when CI is failing")
+	}
+	if data == nil || data["ci_failed"] != true {
+		t.Error("expected ci_failed=true in data")
+	}
+}
+
+func TestCheckPRMergeable_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "nonexistent",
+		Branch:      "feature-1",
+		CurrentStep: "await_mergeable",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when session not found")
+	}
+}

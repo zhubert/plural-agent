@@ -628,6 +628,58 @@ func TestValidate(t *testing.T) {
 			},
 			wantFields: nil,
 		},
+		{
+			name: "cycle detection: simple A→B→A",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a": {Type: StateTypeTask, Action: "ai.code", Next: "b"},
+					"b": {Type: StateTypeTask, Action: "ai.code", Next: "a"},
+				},
+			},
+			wantFields: []string{"states"},
+		},
+		{
+			name: "cycle detection: A→B→C→A",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a": {Type: StateTypeTask, Action: "ai.code", Next: "b"},
+					"b": {Type: StateTypeTask, Action: "ai.code", Next: "c"},
+					"c": {Type: StateTypeTask, Action: "ai.code", Next: "a"},
+				},
+			},
+			wantFields: []string{"states"},
+		},
+		{
+			name: "no cycle: valid linear flow",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a":    {Type: StateTypeTask, Action: "ai.code", Next: "b"},
+					"b":    {Type: StateTypeTask, Action: "ai.code", Next: "c"},
+					"c":    {Type: StateTypeTask, Action: "ai.code", Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "no cycle: error edge to fail state",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a":      {Type: StateTypeTask, Action: "ai.code", Next: "done", Error: "failed"},
+					"done":   {Type: StateTypeSucceed},
+					"failed": {Type: StateTypeFail},
+				},
+			},
+			wantFields: nil,
+		},
 	}
 
 	for _, tt := range tests {

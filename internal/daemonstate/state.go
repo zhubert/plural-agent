@@ -1,6 +1,7 @@
 package daemonstate
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -77,15 +78,21 @@ type DaemonState struct {
 
 const stateVersion = 2
 
-// StateFilePath returns the path to the daemon state file.
-func StateFilePath() string {
+// StateFilePath returns the path to the daemon state file for a given repo.
+// Each repo gets its own state file keyed by a hash of the repo path,
+// preventing multiple daemons for different repos from clobbering each other.
+func StateFilePath(repoPath string) string {
 	dir, err := paths.DataDir()
 	if err != nil {
 		// Fall back to home dir
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".plural")
 	}
-	return filepath.Join(dir, "daemon-state.json")
+	if repoPath == "" {
+		return filepath.Join(dir, "daemon-state.json")
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(repoPath)))
+	return filepath.Join(dir, fmt.Sprintf("daemon-state-%s.json", hash[:12]))
 }
 
 // NewDaemonState creates a new empty daemon state for the given repo.
@@ -95,14 +102,14 @@ func NewDaemonState(repoPath string) *DaemonState {
 		RepoPath:  repoPath,
 		WorkItems: make(map[string]*WorkItem),
 		StartedAt: time.Now(),
-		filePath:  StateFilePath(),
+		filePath:  StateFilePath(repoPath),
 	}
 }
 
 // LoadDaemonState loads daemon state from disk.
 // Returns a new empty state if the file doesn't exist.
 func LoadDaemonState(repoPath string) (*DaemonState, error) {
-	fp := StateFilePath()
+	fp := StateFilePath(repoPath)
 
 	data, err := os.ReadFile(fp)
 	if err != nil {
@@ -353,19 +360,31 @@ func (s *DaemonState) SetErrorMessage(id, msg string) {
 	}
 }
 
-// StateExists returns true if the daemon state file exists on disk.
+// StateExists returns true if any daemon state file exists on disk.
 func StateExists() bool {
-	fp := StateFilePath()
-	_, err := os.Stat(fp)
-	return err == nil
+	dir, err := paths.DataDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".plural")
+	}
+	// Check for both legacy and per-repo state files
+	matches, _ := filepath.Glob(filepath.Join(dir, "daemon-state*.json"))
+	return len(matches) > 0
 }
 
-// ClearState removes the daemon state file from disk.
-// Returns nil if the file doesn't exist.
+// ClearState removes all daemon state files from disk.
+// Returns nil if no files exist.
 func ClearState() error {
-	fp := StateFilePath()
-	if err := os.Remove(fp); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove daemon state: %w", err)
+	dir, err := paths.DataDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".plural")
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "daemon-state*.json"))
+	for _, match := range matches {
+		if err := os.Remove(match); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove daemon state %s: %w", match, err)
+		}
 	}
 	return nil
 }

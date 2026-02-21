@@ -778,3 +778,411 @@ func TestParseWorktreeForBranch(t *testing.T) {
 		})
 	}
 }
+
+// --- addLabelAction tests ---
+
+func TestAddLabelAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &addLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "in-progress"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestAddLabelAction_Execute_NonGitHubIssue(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "asana", ID: "task-abc"},
+	})
+
+	action := &addLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "in-progress"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success (no-op) for non-github issue, got error: %v", result.Error)
+	}
+}
+
+func TestAddLabelAction_Execute_InvalidIssueNumber(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "not-a-number"},
+	})
+
+	action := &addLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "in-progress"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for invalid issue number")
+	}
+	if result.Error == nil {
+		t.Error("expected error for invalid issue number")
+	}
+}
+
+func TestAddLabelAction_Execute_EmptyLabel(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &addLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": ""})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for empty label parameter")
+	}
+	if result.Error == nil {
+		t.Error("expected error for empty label parameter")
+	}
+}
+
+func TestAddLabelAction_Execute_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock `gh issue edit --add-label` to succeed
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+	cfg.Repos = []string{"/test/repo"}
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &addLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "in-progress"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify gh issue edit --add-label was called
+	calls := mockExec.GetCalls()
+	found := false
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 4 &&
+			c.Args[0] == "issue" && c.Args[1] == "edit" &&
+			c.Args[2] == "42" && c.Args[3] == "--add-label" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected gh issue edit --add-label to be called")
+	}
+}
+
+// --- removeLabelAction tests ---
+
+func TestRemoveLabelAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &removeLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "queued"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestRemoveLabelAction_Execute_NonGitHubIssue(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "linear", ID: "LIN-123"},
+	})
+
+	action := &removeLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "queued"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success (no-op) for non-github issue, got error: %v", result.Error)
+	}
+}
+
+func TestRemoveLabelAction_Execute_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock `gh issue edit --remove-label` to succeed
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+	cfg.Repos = []string{"/test/repo"}
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &removeLabelAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"label": "queued"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify gh issue edit --remove-label was called
+	calls := mockExec.GetCalls()
+	found := false
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 4 &&
+			c.Args[0] == "issue" && c.Args[1] == "edit" &&
+			c.Args[2] == "42" && c.Args[3] == "--remove-label" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected gh issue edit --remove-label to be called")
+	}
+}
+
+// --- closeIssueAction tests ---
+
+func TestCloseIssueAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &closeIssueAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestCloseIssueAction_Execute_NonGitHubIssue(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "asana", ID: "task-xyz"},
+	})
+
+	action := &closeIssueAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success (no-op) for non-github issue, got error: %v", result.Error)
+	}
+}
+
+// --- requestReviewAction tests ---
+
+func TestRequestReviewAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &requestReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"reviewer": "octocat"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestRequestReviewAction_Execute_MissingReviewerParam(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+	})
+
+	action := &requestReviewAction{daemon: d}
+	// No reviewer param provided
+	params := workflow.NewParamHelper(map[string]any{})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing reviewer parameter")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing reviewer parameter")
+	}
+}
+
+// --- commentPRAction tests ---
+
+func TestCommentPRAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &commentPRAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "LGTM"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestCommentPRAction_Execute_EmptyBody(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+	})
+
+	action := &commentPRAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": ""})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for empty comment body")
+	}
+	if result.Error == nil {
+		t.Error("expected error for empty comment body")
+	}
+}

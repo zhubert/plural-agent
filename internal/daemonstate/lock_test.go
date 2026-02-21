@@ -1,6 +1,7 @@
 package daemonstate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,37 @@ func TestLockFilePath_Deterministic(t *testing.T) {
 	path3 := LockFilePath("/other/repo")
 	if path1 == path3 {
 		t.Error("expected different paths for different repos")
+	}
+}
+
+func TestAcquireLock_StaleLockCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-stale")
+
+	// Manually create a lock file with a PID that doesn't exist
+	fp := LockFilePath(repoPath)
+	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+		t.Fatalf("failed to create lock directory: %v", err)
+	}
+	if err := os.WriteFile(fp, []byte("999999999"), 0o644); err != nil {
+		t.Fatalf("failed to write stale lock file: %v", err)
+	}
+
+	// AcquireLock should detect the stale lock, remove it, and succeed
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("expected AcquireLock to succeed after stale lock cleanup, got: %v", err)
+	}
+	defer lock.Release()
+
+	// Verify the lock file exists and contains our current PID
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("failed to read lock file: %v", err)
+	}
+	pidStr := strings.TrimSpace(string(data))
+	expectedPID := fmt.Sprintf("%d", os.Getpid())
+	if pidStr != expectedPID {
+		t.Errorf("expected lock file to contain PID %s, got %s", expectedPID, pidStr)
 	}
 }

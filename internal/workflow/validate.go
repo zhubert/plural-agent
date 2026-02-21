@@ -44,6 +44,9 @@ func Validate(cfg *Config) []ValidationError {
 		errs = append(errs, validateState(name, state, cfg.States)...)
 	}
 
+	// Cycle detection
+	errs = append(errs, detectCycles(cfg)...)
+
 	// Provider validation
 	errs = append(errs, validateSource(cfg)...)
 
@@ -103,6 +106,16 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 		// Validate params for github.comment_issue action
 		if state.Action == "github.comment_issue" {
 			errs = append(errs, validateCommentIssueParams(prefix, state.Params)...)
+		}
+
+		// Validate params for github.comment_pr action
+		if state.Action == "github.comment_pr" {
+			errs = append(errs, validateCommentIssueParams(prefix, state.Params)...)
+		}
+
+		// Validate params for github.add_label and github.remove_label actions
+		if state.Action == "github.add_label" || state.Action == "github.remove_label" {
+			errs = append(errs, validateLabelParams(prefix, state.Params)...)
 		}
 
 	case StateTypeWait:
@@ -342,6 +355,37 @@ func validateCommentIssueParams(prefix string, params map[string]any) []Validati
 	return errs
 }
 
+// validateLabelParams validates params for github.add_label and github.remove_label actions.
+func validateLabelParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	if params == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.label",
+			Message: "label is required for label actions",
+		})
+		return errs
+	}
+
+	label, ok := params["label"]
+	if !ok || label == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.label",
+			Message: "label is required for label actions",
+		})
+		return errs
+	}
+
+	if s, ok := label.(string); ok && s == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.label",
+			Message: "label must not be empty",
+		})
+	}
+
+	return errs
+}
+
 // validateCIParams validates params for ci.complete events.
 func validateCIParams(prefix string, params map[string]any) []ValidationError {
 	var errs []ValidationError
@@ -425,6 +469,100 @@ func validateSettings(s *SettingsConfig) []ValidationError {
 			Message: "max_concurrent must not be negative",
 		})
 	}
+	return errs
+}
+
+// detectCycles performs DFS-based cycle detection on the state graph.
+// Only non-terminal forward edges (next, error, timeout_next) are checked;
+// retry loops (which stay on the same step) are intentional and excluded.
+func detectCycles(cfg *Config) []ValidationError {
+	var errs []ValidationError
+	if len(cfg.States) == 0 || cfg.Start == "" {
+		return errs
+	}
+
+	// Build adjacency list from all transition edges
+	edges := make(map[string][]string)
+	for name, state := range cfg.States {
+		var targets []string
+		if state.Next != "" {
+			targets = append(targets, state.Next)
+		}
+		if state.Error != "" {
+			targets = append(targets, state.Error)
+		}
+		if state.TimeoutNext != "" {
+			targets = append(targets, state.TimeoutNext)
+		}
+		if state.Default != "" {
+			targets = append(targets, state.Default)
+		}
+		for _, rule := range state.Choices {
+			if rule.Next != "" {
+				targets = append(targets, rule.Next)
+			}
+		}
+		for _, catch := range state.Catch {
+			if catch.Next != "" {
+				targets = append(targets, catch.Next)
+			}
+		}
+		edges[name] = targets
+	}
+
+	// DFS with coloring: 0=white (unvisited), 1=gray (in stack), 2=black (done)
+	color := make(map[string]int)
+	var path []string
+
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		color[node] = 1 // gray
+		path = append(path, node)
+
+		for _, next := range edges[node] {
+			if next == node {
+				continue // self-loops from retry are intentional
+			}
+			switch color[next] {
+			case 1: // back edge → cycle
+				// Find the cycle start in path
+				cycleStart := -1
+				for i, n := range path {
+					if n == next {
+						cycleStart = i
+						break
+					}
+				}
+				cycle := strings.Join(path[cycleStart:], " → ") + " → " + next
+				errs = append(errs, ValidationError{
+					Field:   "states",
+					Message: fmt.Sprintf("cycle detected: %s", cycle),
+				})
+				return true
+			case 0: // unvisited
+				if dfs(next) {
+					return true
+				}
+			}
+		}
+
+		path = path[:len(path)-1]
+		color[node] = 2 // black
+		return false
+	}
+
+	// Start from the start state
+	if _, ok := cfg.States[cfg.Start]; ok {
+		dfs(cfg.Start)
+	}
+
+	// Also check any unreachable states for cycles
+	for name := range cfg.States {
+		if color[name] == 0 {
+			dfs(name)
+		}
+	}
+
 	return errs
 }
 

@@ -133,12 +133,18 @@ var ValidActions = map[string]bool{
 	"github.push":           true,
 	"github.merge":          true,
 	"github.comment_issue":  true,
+	"github.comment_pr":     true,
+	"github.add_label":      true,
+	"github.remove_label":   true,
+	"github.close_issue":    true,
+	"github.request_review": true,
 }
 
 // ValidEvents is the set of recognized event names for wait states.
 var ValidEvents = map[string]bool{
-	"pr.reviewed": true,
-	"ci.complete": true,
+	"pr.reviewed":  true,
+	"ci.complete":  true,
+	"pr.mergeable": true,
 }
 
 // ValidStateTypes is the set of recognized state types.

@@ -150,6 +150,106 @@ func (a *commentIssueAction) Execute(ctx context.Context, ac *workflow.ActionCon
 	return workflow.ActionResult{Success: true}
 }
 
+// commentPRAction implements the github.comment_pr action.
+type commentPRAction struct {
+	daemon *Daemon
+}
+
+// Execute posts a comment on the PR for the work item.
+func (a *commentPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.commentOnPR(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("PR comment failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// addLabelAction implements the github.add_label action.
+type addLabelAction struct {
+	daemon *Daemon
+}
+
+// Execute adds a label to the issue for the work item.
+func (a *addLabelAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.addLabel(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("add label failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// removeLabelAction implements the github.remove_label action.
+type removeLabelAction struct {
+	daemon *Daemon
+}
+
+// Execute removes a label from the issue for the work item.
+func (a *removeLabelAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.removeLabel(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("remove label failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// closeIssueAction implements the github.close_issue action.
+type closeIssueAction struct {
+	daemon *Daemon
+}
+
+// Execute closes the GitHub issue for the work item.
+func (a *closeIssueAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.closeIssue(ctx, item); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("close issue failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// requestReviewAction implements the github.request_review action.
+type requestReviewAction struct {
+	daemon *Daemon
+}
+
+// Execute requests review on the PR for the work item.
+func (a *requestReviewAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.requestReview(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("request review failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // startCoding creates a session and starts a Claude worker for a work item.
 func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) error {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
@@ -273,10 +373,13 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 		return
 	}
 
-	// Mark comments as addressed
-	item.CommentsAddressed += len(comments)
-	item.Phase = "addressing_feedback"
-	item.UpdatedAt = time.Now()
+	// Mark comments as addressed (via state lock)
+	commentCount := len(comments)
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.CommentsAddressed += commentCount
+		it.Phase = "addressing_feedback"
+		it.UpdatedAt = time.Now()
+	})
 
 	// Format comments as a prompt
 	prompt := worker.FormatPRCommentsPrompt(comments)
@@ -590,6 +693,148 @@ func issueFromWorkItem(item *daemonstate.WorkItem) issues.Issue {
 		URL:    item.IssueRef.URL,
 		Source: issues.Source(item.IssueRef.Source),
 	}
+}
+
+// commentOnPR posts a comment on the PR for a work item.
+func (d *Daemon) commentOnPR(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found for work item %s", item.ID)
+	}
+
+	bodyTemplate := params.String("body", "")
+	body, err := workflow.ResolveSystemPrompt(bodyTemplate, sess.RepoPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve comment body: %w", err)
+	}
+	if body == "" {
+		return fmt.Errorf("comment body is empty")
+	}
+
+	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", body, "--repo", sess.RepoPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr comment failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// addLabel adds a label to the issue for a work item.
+func (d *Daemon) addLabel(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	if item.IssueRef.Source != "github" {
+		d.logger.Warn("github.add_label skipped: not a github issue",
+			"workItem", item.ID, "source", item.IssueRef.Source)
+		return nil
+	}
+
+	issueNum, err := strconv.Atoi(item.IssueRef.ID)
+	if err != nil {
+		return fmt.Errorf("invalid github issue number %q: %w", item.IssueRef.ID, err)
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	label := params.String("label", "")
+	if label == "" {
+		return fmt.Errorf("label parameter is required")
+	}
+
+	labelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	return d.gitService.AddIssueLabel(labelCtx, repoPath, issueNum, label)
+}
+
+// removeLabel removes a label from the issue for a work item.
+func (d *Daemon) removeLabel(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	if item.IssueRef.Source != "github" {
+		d.logger.Warn("github.remove_label skipped: not a github issue",
+			"workItem", item.ID, "source", item.IssueRef.Source)
+		return nil
+	}
+
+	issueNum, err := strconv.Atoi(item.IssueRef.ID)
+	if err != nil {
+		return fmt.Errorf("invalid github issue number %q: %w", item.IssueRef.ID, err)
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	label := params.String("label", "")
+	if label == "" {
+		return fmt.Errorf("label parameter is required")
+	}
+
+	labelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	return d.gitService.RemoveIssueLabel(labelCtx, repoPath, issueNum, label)
+}
+
+// closeIssue closes the GitHub issue for a work item.
+func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) error {
+	if item.IssueRef.Source != "github" {
+		d.logger.Warn("github.close_issue skipped: not a github issue",
+			"workItem", item.ID, "source", item.IssueRef.Source)
+		return nil
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	closeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID, "--repo", repoPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh issue close failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// requestReview requests a review on the PR for a work item.
+func (d *Daemon) requestReview(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found for work item %s", item.ID)
+	}
+
+	reviewer := params.String("reviewer", "")
+	if reviewer == "" {
+		return fmt.Errorf("reviewer parameter is required")
+	}
+
+	reviewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer, "--repo", sess.RepoPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-reviewer failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// resolveRepoPath resolves the repo path for a work item, preferring the session's path.
+func (d *Daemon) resolveRepoPath(ctx context.Context, item *daemonstate.WorkItem) string {
+	if item.SessionID != "" {
+		if sess := d.config.GetSession(item.SessionID); sess != nil {
+			return sess.RepoPath
+		}
+	}
+	return d.findRepoPath(ctx)
 }
 
 // saveRunnerMessages saves messages for a session's runner.

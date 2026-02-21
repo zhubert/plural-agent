@@ -30,13 +30,34 @@ func (d *Daemon) recoverFromState(ctx context.Context) {
 			d.recoverAsyncPending(ctx, item, log)
 
 		case "addressing_feedback":
-			// Was addressing feedback — reset to idle for re-polling
+			// Was addressing feedback — reset to idle for re-polling.
+			// Re-stamp StepEnteredAt so timeout enforcement works after recovery.
 			log.Info("was addressing feedback, resetting to idle")
-			d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				now := time.Now()
+				it.Phase = "idle"
+				if it.StepEnteredAt.IsZero() {
+					it.StepEnteredAt = now
+				}
+				it.UpdatedAt = now
+			})
 
 		case "pushing":
-			// Was pushing — reset to idle for re-polling
+			// Was pushing — reset to idle for re-polling.
+			// Re-stamp StepEnteredAt so timeout enforcement works after recovery.
 			log.Info("was pushing, resetting to idle")
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				now := time.Now()
+				it.Phase = "idle"
+				if it.StepEnteredAt.IsZero() {
+					it.StepEnteredAt = now
+				}
+				it.UpdatedAt = now
+			})
+
+		case "retry_pending":
+			// Was waiting to retry — reset to idle so it retries on next tick
+			log.Info("was retry_pending, resetting to idle for immediate retry")
 			d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
 
 		default:
@@ -94,9 +115,11 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 		} else {
 			log.Info("PR exists, advancing to await_review")
 			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				now := time.Now()
 				it.CurrentStep = "await_review"
 				it.Phase = "idle"
-				it.UpdatedAt = time.Now()
+				it.StepEnteredAt = now
+				it.UpdatedAt = now
 			})
 		}
 		return

@@ -202,6 +202,7 @@ func (d *Daemon) notifyWorkerDone() {
 // tick performs one iteration of the daemon event loop.
 func (d *Daemon) tick(ctx context.Context) {
 	d.collectCompletedWorkers(ctx) // Detect finished Claude sessions
+	d.processRetryItems(ctx)       // Re-execute items whose retry delay has elapsed
 	d.processWorkItems(ctx)        // Process active items via engine
 	d.pollForNewIssues(ctx)        // Find new issues (if slots available)
 	d.startQueuedItems(ctx)        // Start coding on queued items
@@ -241,8 +242,10 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 			if exitErr != nil {
 				d.logger.Warn("skipping push after failed feedback session", "workItem", workItemID, "error", exitErr)
 				d.state.SetErrorMessage(item.ID, fmt.Sprintf("feedback session failed: %v", exitErr))
-				item.Phase = "idle"
-				item.UpdatedAt = time.Now()
+				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+					it.Phase = "idle"
+					it.UpdatedAt = time.Now()
+				})
 			} else {
 				d.handleFeedbackComplete(ctx, item)
 			}
@@ -339,6 +342,36 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 // hitting an async task, a wait state, or a terminal state.
 func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkItem, engine *workflow.Engine) {
 	for {
+		// Run before-hooks for the current step (blocking — failure stops execution)
+		beforeHooks := engine.GetBeforeHooks(item.CurrentStep)
+		if len(beforeHooks) > 0 {
+			sess := d.config.GetSession(item.SessionID)
+			if sess != nil {
+				hookCtx := workflow.HookContext{
+					RepoPath:   sess.RepoPath,
+					Branch:     item.Branch,
+					SessionID:  item.SessionID,
+					IssueID:    item.IssueRef.ID,
+					IssueTitle: item.IssueRef.Title,
+					IssueURL:   item.IssueRef.URL,
+					PRURL:      item.PRURL,
+					WorkTree:   sess.WorkTree,
+					Provider:   item.IssueRef.Source,
+				}
+				if err := workflow.RunBeforeHooks(ctx, beforeHooks, hookCtx, d.logger); err != nil {
+					d.logger.Error("before hook failed", "workItem", item.ID, "step", item.CurrentStep, "error", err)
+					state := engine.GetState(item.CurrentStep)
+					if state != nil && state.Error != "" {
+						d.state.AdvanceWorkItem(item.ID, state.Error, "idle")
+						continue // follow error edge
+					}
+					d.state.SetErrorMessage(item.ID, err.Error())
+					d.state.MarkWorkItemTerminal(item.ID, false)
+					return
+				}
+			}
+		}
+
 		view := d.workItemView(item)
 		result, err := engine.ProcessStep(ctx, view)
 		if err != nil {
@@ -377,15 +410,17 @@ func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkIte
 			}
 		}
 
-		// Merge data and apply known fields to the work item
+		// Merge data and apply known fields to the work item (via state lock)
 		if result.Data != nil {
-			for k, v := range result.Data {
-				item.StepData[k] = v
-			}
-			if prURL, ok := result.Data["pr_url"].(string); ok && prURL != "" {
-				item.PRURL = prURL
-				item.UpdatedAt = time.Now()
-			}
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				for k, v := range result.Data {
+					it.StepData[k] = v
+				}
+				if prURL, ok := result.Data["pr_url"].(string); ok && prURL != "" {
+					it.PRURL = prURL
+					it.UpdatedAt = time.Now()
+				}
+			})
 		}
 
 		d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
@@ -428,9 +463,11 @@ func (d *Daemon) handleFeedbackComplete(ctx context.Context, item *daemonstate.W
 	// Back to idle phase for the wait state to continue polling
 	d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
 
-	item.FeedbackRounds++
-	item.UpdatedAt = time.Now()
-	log.Info("pushed feedback changes", "round", item.FeedbackRounds)
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.FeedbackRounds++
+		it.UpdatedAt = time.Now()
+	})
+	log.Info("pushed feedback changes", "round", item.FeedbackRounds+1)
 }
 
 // processWorkItems checks active items via the engine.
@@ -467,8 +504,8 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			continue
 		}
 
-		// Only process pr.reviewed events here
-		if state.Event != "pr.reviewed" {
+		// Only process pr.reviewed and pr.mergeable events here
+		if state.Event != "pr.reviewed" && state.Event != "pr.mergeable" {
 			continue
 		}
 
@@ -544,6 +581,40 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 }
 
 
+// processRetryItems checks for items in retry_pending phase whose delay has elapsed,
+// and re-executes them via the engine.
+func (d *Daemon) processRetryItems(ctx context.Context) {
+	for _, item := range d.state.GetActiveWorkItems() {
+		if item.Phase != "retry_pending" {
+			continue
+		}
+
+		// Check if the retry delay has elapsed
+		if retryAfter, ok := item.StepData["_retry_after"].(string); ok {
+			t, err := time.Parse(time.RFC3339, retryAfter)
+			if err == nil && time.Now().Before(t) {
+				continue // Delay hasn't elapsed yet
+			}
+		}
+
+		sess := d.config.GetSession(item.SessionID)
+		if sess == nil {
+			continue
+		}
+
+		engine := d.getEngine(sess.RepoPath)
+		if engine == nil {
+			continue
+		}
+
+		d.logger.Info("retry delay elapsed, re-executing", "workItem", item.ID, "step", item.CurrentStep)
+
+		// Reset to idle so the engine will re-process the task state
+		d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
+		d.executeSyncChain(ctx, item, engine)
+	}
+}
+
 // getMaxConcurrent returns the effective max concurrent limit.
 func (d *Daemon) getMaxConcurrent() int {
 	if d.maxConcurrent > 0 {
@@ -612,6 +683,11 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("github.push", &pushAction{daemon: d})
 	registry.Register("github.merge", &mergeAction{daemon: d})
 	registry.Register("github.comment_issue", &commentIssueAction{daemon: d})
+	registry.Register("github.comment_pr", &commentPRAction{daemon: d})
+	registry.Register("github.add_label", &addLabelAction{daemon: d})
+	registry.Register("github.remove_label", &removeLabelAction{daemon: d})
+	registry.Register("github.close_issue", &closeIssueAction{daemon: d})
+	registry.Register("github.request_review", &requestReviewAction{daemon: d})
 	return registry
 }
 

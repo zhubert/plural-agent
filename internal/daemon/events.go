@@ -25,6 +25,8 @@ func (c *EventChecker) CheckEvent(ctx context.Context, event string, params *wor
 		return c.checkPRReviewed(ctx, params, item)
 	case "ci.complete":
 		return c.checkCIComplete(ctx, params, item)
+	case "pr.mergeable":
+		return c.checkPRMergeable(ctx, params, item)
 	default:
 		return false, nil, nil
 	}
@@ -178,4 +180,74 @@ func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 	}
 
 	return false, nil, nil
+}
+
+// checkPRMergeable checks if the PR is mergeable — approved review AND CI passing.
+// This is a convenience event that combines pr.reviewed (approval) and ci.complete in one check.
+func (c *EventChecker) checkPRMergeable(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+	d := c.daemon
+	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "pr.mergeable")
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		log.Warn("session not found for work item")
+		return false, nil, nil
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Check PR state
+	prState, err := d.gitService.GetPRState(pollCtx, sess.RepoPath, item.Branch)
+	if err != nil {
+		log.Debug("failed to check PR state", "error", err)
+		return false, nil, nil
+	}
+
+	if prState == git.PRStateClosed {
+		log.Info("PR was closed")
+		return false, map[string]any{"pr_closed": true}, nil
+	}
+
+	if prState == git.PRStateMerged {
+		log.Info("PR was merged externally")
+		return true, map[string]any{"pr_merged_externally": true}, nil
+	}
+
+	// Check review approval
+	reviewDecision, err := d.gitService.CheckPRReviewDecision(pollCtx, sess.RepoPath, item.Branch)
+	if err != nil {
+		log.Debug("failed to check review decision", "error", err)
+		return false, nil, nil
+	}
+
+	requireReview := params.Bool("require_review", true)
+	if requireReview && reviewDecision != git.ReviewApproved {
+		log.Debug("PR not approved yet", "review", reviewDecision)
+		return false, nil, nil
+	}
+
+	// Check CI status
+	requireCI := params.Bool("require_ci", true)
+	if requireCI {
+		ciStatus, err := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
+		if err != nil {
+			log.Debug("failed to check CI status", "error", err)
+			return false, nil, nil
+		}
+		if ciStatus == git.CIStatusPending {
+			log.Debug("CI still pending")
+			return false, nil, nil
+		}
+		if ciStatus == git.CIStatusFailing {
+			log.Warn("CI failed")
+			return false, map[string]any{"ci_failed": true}, nil
+		}
+	}
+
+	log.Info("PR is mergeable")
+	return true, map[string]any{
+		"review_approved": true,
+		"ci_passed":       true,
+	}, nil
 }
