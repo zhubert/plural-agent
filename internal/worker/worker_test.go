@@ -3,14 +3,83 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/zhubert/plural-agent/internal/agentconfig"
 	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
+	"github.com/zhubert/plural-core/git"
+	"github.com/zhubert/plural-core/manager"
 	"github.com/zhubert/plural-core/mcp"
 )
+
+// mockHost implements worker.Host for unit testing.
+type mockHost struct {
+	cfg        *config.Config
+	gitService *git.GitService
+	sessionMgr *manager.SessionManager
+	logger     *slog.Logger
+
+	maxTurns              int
+	maxDuration           int
+	autoMerge             bool
+	mergeMethod           string
+	autoAddressPRComments bool
+
+	cleanupCalled map[string]bool
+}
+
+func newMockHost(mockExec *exec.MockExecutor) *mockHost {
+	cfg := &config.Config{
+		AutoMaxTurns:       50,
+		AutoMaxDurationMin: 30,
+	}
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessMgr := manager.NewSessionManager(cfg, gitSvc)
+	sessMgr.SetSkipMessageLoad(true)
+
+	return &mockHost{
+		cfg:           cfg,
+		gitService:    gitSvc,
+		sessionMgr:    sessMgr,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		maxTurns:      50,
+		maxDuration:   30,
+		autoMerge:     true,
+		mergeMethod:   "rebase",
+		cleanupCalled: make(map[string]bool),
+	}
+}
+
+// Compile-time check that mockHost implements Host.
+var _ Host = (*mockHost)(nil)
+
+func (h *mockHost) Config() agentconfig.Config             { return h.cfg }
+func (h *mockHost) GitService() *git.GitService            { return h.gitService }
+func (h *mockHost) SessionManager() *manager.SessionManager { return h.sessionMgr }
+func (h *mockHost) Logger() *slog.Logger                   { return h.logger }
+func (h *mockHost) MaxTurns() int                          { return h.maxTurns }
+func (h *mockHost) MaxDuration() int                       { return h.maxDuration }
+func (h *mockHost) AutoMerge() bool                        { return h.autoMerge }
+func (h *mockHost) MergeMethod() string                    { return h.mergeMethod }
+func (h *mockHost) AutoAddressPRComments() bool            { return h.autoAddressPRComments }
+
+func (h *mockHost) CreateChildSession(ctx context.Context, supervisorID, taskDescription string) (SessionInfo, error) {
+	return SessionInfo{}, nil
+}
+
+func (h *mockHost) CleanupSession(ctx context.Context, sessionID string) error {
+	h.cleanupCalled[sessionID] = true
+	return nil
+}
+
+func (h *mockHost) SaveRunnerMessages(sessionID string, runner claude.RunnerInterface) {}
+
+func (h *mockHost) IsWorkerRunning(sessionID string) bool { return false }
 
 func TestNewSessionWorker(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
@@ -46,9 +115,8 @@ func TestNewDoneWorker(t *testing.T) {
 func TestSessionWorker_Lifecycle(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)
-	h.daemonManaged = true // Prevent auto-merge from starting
 
-	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1", PRCreated: true}
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
 	h.cfg.AddSession(*sess)
 
 	runner := claude.NewMockRunner("s1", false, nil)
@@ -279,9 +347,8 @@ func TestSessionWorker_SetStartTime(t *testing.T) {
 func TestSessionWorker_ExitError_NilOnSuccess(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)
-	h.daemonManaged = true
 
-	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1", PRCreated: true}
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
 	h.cfg.AddSession(*sess)
 
 	runner := claude.NewMockRunner("s1", false, nil)
@@ -332,9 +399,8 @@ func TestSessionWorker_ExitError_SetOnChunkError(t *testing.T) {
 func TestSessionWorker_ExitError_APIErrorInStream(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)
-	h.daemonManaged = true
 
-	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1", PRCreated: true}
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
 	h.cfg.AddSession(*sess)
 
 	runner := claude.NewMockRunner("s1", false, nil)
@@ -395,52 +461,9 @@ func TestNewDoneWorkerWithError(t *testing.T) {
 	}
 }
 
-func TestSessionWorker_HandleCompletion_DaemonManaged_SkipsPR(t *testing.T) {
+func TestSessionWorker_HandleCreatePR_Rejected(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)
-	h.daemonManaged = true
-
-	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
-	h.cfg.AddSession(*sess)
-
-	runner := claude.NewMockRunner("s1", false, nil)
-	w := NewSessionWorker(h, sess, runner, "test")
-
-	// handleCompletion should NOT call AutoCreatePR in daemon-managed mode
-	result := w.handleCompletion()
-	if result {
-		t.Error("expected handleCompletion to return false (no auto-merge started)")
-	}
-	if h.autoCreatePRCalled["s1"] {
-		t.Error("expected AutoCreatePR NOT to be called in daemon-managed mode")
-	}
-}
-
-func TestSessionWorker_HandleCompletion_NonDaemon_CreatesPR(t *testing.T) {
-	mockExec := exec.NewMockExecutor(nil)
-	h := newMockHost(mockExec)
-	h.daemonManaged = false
-	h.autoMerge = false // Don't start auto-merge goroutine in test
-
-	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
-	h.cfg.AddSession(*sess)
-
-	runner := claude.NewMockRunner("s1", false, nil)
-	w := NewSessionWorker(h, sess, runner, "test")
-
-	result := w.handleCompletion()
-	if result {
-		t.Error("expected handleCompletion to return false (auto-merge disabled)")
-	}
-	if !h.autoCreatePRCalled["s1"] {
-		t.Error("expected AutoCreatePR to be called in non-daemon mode")
-	}
-}
-
-func TestSessionWorker_HandleCreatePR_DaemonManaged(t *testing.T) {
-	mockExec := exec.NewMockExecutor(nil)
-	h := newMockHost(mockExec)
-	h.daemonManaged = true
 
 	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
 	h.cfg.AddSession(*sess)
@@ -449,21 +472,20 @@ func TestSessionWorker_HandleCreatePR_DaemonManaged(t *testing.T) {
 	runner.SetHostTools(true)
 	w := NewSessionWorker(h, sess, runner, "test")
 
-	// Call handleCreatePR — should be rejected in daemon-managed mode.
+	// Call handleCreatePR — should be rejected since the workflow manages PRs.
 	// SendCreatePRResponse is non-blocking so this won't hang.
 	w.handleCreatePR(mcp.CreatePRRequest{ID: 1, Title: "My PR"})
 
 	// Verify the session was NOT marked as PR created
 	updated := h.cfg.GetSession("s1")
 	if updated != nil && updated.PRCreated {
-		t.Error("expected session NOT to be marked as PR created in daemon-managed mode")
+		t.Error("expected session NOT to be marked as PR created")
 	}
 }
 
-func TestSessionWorker_HandlePushBranch_DaemonManaged(t *testing.T) {
+func TestSessionWorker_HandlePushBranch_Rejected(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)
-	h.daemonManaged = true
 
 	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
 	h.cfg.AddSession(*sess)
@@ -472,7 +494,7 @@ func TestSessionWorker_HandlePushBranch_DaemonManaged(t *testing.T) {
 	runner.SetHostTools(true)
 	w := NewSessionWorker(h, sess, runner, "test")
 
-	// Call handlePushBranch — should be rejected in daemon-managed mode.
+	// Call handlePushBranch — should be rejected since the workflow manages pushing.
 	// SendPushBranchResponse is non-blocking so this won't hang.
 	w.handlePushBranch(mcp.PushBranchRequest{ID: 1, CommitMessage: "push changes"})
 

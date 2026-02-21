@@ -27,16 +27,7 @@ func (d *Daemon) MaxTurns() int                          { return d.getMaxTurns(
 func (d *Daemon) MaxDuration() int                       { return d.getMaxDuration() }
 func (d *Daemon) AutoMerge() bool                        { return d.autoMerge }
 func (d *Daemon) MergeMethod() string                    { return d.getMergeMethod() }
-func (d *Daemon) DaemonManaged() bool                    { return true }
 func (d *Daemon) AutoAddressPRComments() bool            { return d.getAutoAddressPRComments() }
-
-func (d *Daemon) AutoCreatePR(ctx context.Context, sessionID string) (string, error) {
-	sess := d.config.GetSession(sessionID)
-	if sess == nil {
-		return "", fmt.Errorf("session not found")
-	}
-	return d.createPR(ctx, &daemonstate.WorkItem{SessionID: sessionID, Branch: sess.Branch})
-}
 
 func (d *Daemon) CreateChildSession(ctx context.Context, supervisorID, taskDescription string) (worker.SessionInfo, error) {
 	// Daemon doesn't directly support child sessions through Host interface;

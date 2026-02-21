@@ -10,9 +10,8 @@ import (
 	"github.com/zhubert/plural-core/manager"
 )
 
-// Host is the interface that SessionWorker and auto-merge use to access
-// their owning agent or daemon. It decouples SessionWorker from concrete types,
-// allowing both Agent and Daemon to satisfy it directly.
+// Host is the interface that SessionWorker uses to access its owning daemon.
+// It decouples SessionWorker from the concrete Daemon type.
 type Host interface {
 	// Config returns the agent configuration.
 	Config() agentconfig.Config
@@ -31,11 +30,9 @@ type Host interface {
 	MaxDuration() int
 	AutoMerge() bool
 	MergeMethod() string
-	DaemonManaged() bool
 	AutoAddressPRComments() bool
 
 	// Operations
-	AutoCreatePR(ctx context.Context, sessionID string) (string, error)
 	CreateChildSession(ctx context.Context, supervisorID, taskDescription string) (SessionInfo, error)
 	CleanupSession(ctx context.Context, sessionID string) error
 	SaveRunnerMessages(sessionID string, runner claude.RunnerInterface)
