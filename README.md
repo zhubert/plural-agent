@@ -18,7 +18,7 @@ Or [build from source](#build-from-source).
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
 - Git
 - GitHub CLI (`gh`)
-- Docker
+- A container runtime: [Docker Desktop](https://docs.docker.com/get-docker/) or [Colima](https://github.com/abiosoft/colima)
 
 ## Quick Start
 

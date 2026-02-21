@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +123,45 @@ func TestCheckDockerDaemon(t *testing.T) {
 		if !containsAny(err.Error(), "not reachable", "Colima", "Docker Desktop") {
 			t.Errorf("expected helpful error message, got: %v", err)
 		}
+	}
+}
+
+func TestRuntimeStartHint_ColimaInstalled(t *testing.T) {
+	// Save and restore the original lookPathFunc.
+	orig := lookPathFunc
+	defer func() { lookPathFunc = orig }()
+
+	lookPathFunc = func(name string) (string, error) {
+		if name == "colima" {
+			return "/usr/local/bin/colima", nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+
+	hint := runtimeStartHint()
+	if !strings.Contains(hint, "colima start") {
+		t.Errorf("expected 'colima start' hint when colima is installed, got: %q", hint)
+	}
+}
+
+func TestRuntimeStartHint_ColimaNotInstalled(t *testing.T) {
+	// Save and restore the original lookPathFunc.
+	orig := lookPathFunc
+	defer func() { lookPathFunc = orig }()
+
+	lookPathFunc = func(name string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
+
+	hint := runtimeStartHint()
+	if !strings.Contains(hint, "Install a container runtime") {
+		t.Errorf("expected install instructions when colima is not installed, got: %q", hint)
+	}
+	if !strings.Contains(hint, "Docker Desktop") {
+		t.Errorf("expected Docker Desktop link in hint, got: %q", hint)
+	}
+	if !strings.Contains(hint, "Colima") {
+		t.Errorf("expected Colima link in hint, got: %q", hint)
 	}
 }
 
