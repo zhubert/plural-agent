@@ -4,7 +4,7 @@ build:
 	go build -o plural-agent .
 
 test:
-	go test -count=1 ./...
+	go test -p=1 -count=1 ./...
 
 clean:
 	go clean -cache

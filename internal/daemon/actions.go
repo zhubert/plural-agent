@@ -36,7 +36,15 @@ WORKFLOW:
 2. Implement the changes with clean, well-tested code
 3. Run tests to verify your changes work
 4. Commit your changes locally with a clear commit message
-5. Stop when the implementation is complete — the system will handle pushing and PR creation`
+5. Stop when the implementation is complete — the system will handle pushing and PR creation
+
+CONTAINER ENVIRONMENT:
+You are running inside a Docker container. The Go toolchain may intermittently segfault
+due to container resource constraints. To mitigate this:
+- For Go projects, always run tests with: go test -p=1 -count=1 ./...
+  The -p=1 flag limits parallel package compilation to reduce memory pressure.
+- If a build or test command fails with a signal (segfault, SIGBUS, signal: killed),
+  retry the command up to 2 times — the failure is likely transient.`
 
 // codingAction implements the ai.code action.
 type codingAction struct {

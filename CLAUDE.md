@@ -8,16 +8,17 @@ Guidance for Claude Code when working with this repository.
 
 - Every new function or method must have corresponding unit tests
 - Every bug fix must include a regression test
-- Run `go test ./...` before considering any task complete
+- Run `go test -p=1 -count=1 ./...` before considering any task complete
 - Aim for high coverage (80%+) on new code
 - Use table-driven tests where appropriate
 - Test edge cases and error conditions, not just happy paths
+- If `go test` fails with a segfault or signal, retry — it may be a transient container issue
 
 ## Build and Run
 
 ```bash
 go build -o plural-agent .       # Build
-go test ./...                    # Test
+go test -p=1 -count=1 ./...     # Test (use -p=1 in containers to avoid Go toolchain segfaults)
 
 ./plural-agent --version         # Show version
 ./plural-agent --debug           # Enable debug logging (on by default)

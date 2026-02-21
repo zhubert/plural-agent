@@ -352,6 +352,23 @@ func TestDefaultCodingSystemPrompt_Applied(t *testing.T) {
 	}
 }
 
+func TestDefaultCodingSystemPrompt_ContainerEnvironment(t *testing.T) {
+	// The system prompt should include container environment guidance
+	// to mitigate Go toolchain segfaults in containerized sessions.
+	if !strings.Contains(DefaultCodingSystemPrompt, "CONTAINER ENVIRONMENT") {
+		t.Error("DefaultCodingSystemPrompt should contain CONTAINER ENVIRONMENT section")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "-p=1") {
+		t.Error("DefaultCodingSystemPrompt should recommend -p=1 for Go test parallelism")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "segfault") {
+		t.Error("DefaultCodingSystemPrompt should mention segfault as a transient failure")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "retry") {
+		t.Error("DefaultCodingSystemPrompt should recommend retrying on transient failures")
+	}
+}
+
 func TestDefaultCodingSystemPrompt_NotAppliedWhenCustomSet(t *testing.T) {
 	// Simulate the logic: when a custom prompt is set, DefaultCodingSystemPrompt is NOT used
 	customPrompt := "My custom coding instructions"
