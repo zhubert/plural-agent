@@ -12,13 +12,6 @@ import (
 	"github.com/zhubert/plural-core/mcp"
 )
 
-// AutoMergeWorkerPollInterval is how often the worker checks for pending
-// messages or merge completion while waiting for auto-merge. The actual
-// auto-merge goroutine polls at 60s intervals — the worker's 15s check
-// just needs to detect pending messages or merge completion promptly.
-// This is a var (not const) so tests can override it.
-var AutoMergeWorkerPollInterval = 15 * time.Second
-
 // SessionWorker manages a single autonomous session's lifecycle.
 // It runs a goroutine with a select loop over all runner channels,
 // replacing the TUI's Bubble Tea listener pattern.
@@ -164,50 +157,7 @@ func (w *SessionWorker) run() {
 	content := []claude.ContentBlock{{Type: claude.ContentTypeText, Text: w.initialMsg}}
 	responseChan := w.runner.SendContent(w.ctx, content)
 
-	autoMergeActive := false // Track if auto-merge goroutine is running
-
 	for {
-		// When auto-merge is active, poll for merge completion and pending
-		// messages WITHOUT calling processOneResponse — there's no active
-		// Claude response to process, so reading the closed channel would
-		// just increment w.turns on every cycle.
-		if autoMergeActive {
-			sess := w.host.Config().GetSession(w.sessionID)
-			if sess == nil {
-				log.Warn("session disappeared during auto-merge")
-				return
-			}
-
-			// Check if auto-merge finished (merged, closed, or failed)
-			if sess.PRMerged {
-				log.Info("auto-merge completed - PR merged successfully")
-				return
-			}
-			if sess.PRClosed {
-				log.Info("auto-merge stopped - PR was closed")
-				return
-			}
-
-			// Check for pending messages (e.g., review comments from auto-merge)
-			pendingMsg := w.host.SessionManager().StateManager().GetPendingMessage(w.sessionID)
-			if pendingMsg != "" {
-				log.Debug("sending pending message during auto-merge")
-				content := []claude.ContentBlock{{Type: claude.ContentTypeText, Text: pendingMsg}}
-				responseChan = w.runner.SendContent(w.ctx, content)
-				autoMergeActive = false
-				// Fall through to processOneResponse below
-			} else {
-				// Still waiting — sleep and continue (no processOneResponse, no turns++)
-				log.Debug("waiting for auto-merge to complete, checking for review comment updates...")
-				select {
-				case <-w.ctx.Done():
-					return
-				case <-time.After(AutoMergeWorkerPollInterval):
-					continue
-				}
-			}
-		}
-
 		if err := w.processOneResponse(responseChan); err != nil {
 			log.Info("worker stopping", "reason", err.Error())
 			w.exitErr = err
@@ -228,7 +178,7 @@ func (w *SessionWorker) run() {
 			return
 		}
 
-		// Check for pending messages (e.g., child completion notifications, auto-merge review comments)
+		// Check for pending messages (e.g., child completion notifications)
 		pendingMsg := w.host.SessionManager().StateManager().GetPendingMessage(w.sessionID)
 		if pendingMsg != "" {
 			log.Debug("sending pending message")
@@ -249,15 +199,9 @@ func (w *SessionWorker) run() {
 			}
 		}
 
-		// Session completed - check if we need to start auto-merge
+		// Session completed
 		log.Info("session completed")
-		autoMergeActive = w.handleCompletion()
-		if autoMergeActive {
-			log.Info("auto-merge started, worker will continue running to handle review comments")
-			continue
-		}
-
-		// No auto-merge needed, worker can exit
+		w.handleCompletion()
 		return
 	}
 }
@@ -458,51 +402,17 @@ func (w *SessionWorker) handleDone() {
 }
 
 // handleCompletion handles full session completion (all turns done, no pending work).
-// Returns true if auto-merge was started and the worker should keep running.
-func (w *SessionWorker) handleCompletion() bool {
-	log := w.host.Logger().With("sessionID", w.sessionID, "branch", w.session.Branch)
+// The daemon's workflow engine handles PR creation, merge, and cleanup.
+func (w *SessionWorker) handleCompletion() {
 	sess := w.host.Config().GetSession(w.sessionID)
 	if sess == nil {
-		return false
-	}
-
-	autoMergeStarted := false
-
-	// For non-supervisor standalone sessions, auto-create PR
-	// Skip when daemon manages lifecycle — the workflow engine handles PR creation via the open_pr step.
-	if !sess.IsSupervisor && sess.SupervisorID == "" && !sess.PRCreated && !w.host.DaemonManaged() {
-		log.Info("auto-creating PR")
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		prURL, err := w.host.AutoCreatePR(ctx, w.sessionID)
-		if err != nil {
-			log.Error("failed to create PR", "error", err)
-			return false
-		}
-		log.Info("PR created", "url", prURL)
-
-		// Start auto-merge if enabled
-		if w.host.AutoMerge() {
-			go w.runAutoMerge()
-			autoMergeStarted = true
-		}
-	}
-
-	// For supervisor sessions, the PR was created via MCP tools.
-	// Check if auto-merge is needed (skip when daemon manages lifecycle).
-	if sess.PRCreated && !sess.PRMerged && !sess.PRClosed &&
-		w.host.AutoMerge() && !w.host.DaemonManaged() {
-		go w.runAutoMerge()
-		autoMergeStarted = true
+		return
 	}
 
 	// Notify supervisor if this is a child session
 	if sess.SupervisorID != "" {
 		w.notifySupervisor(sess.SupervisorID, true)
 	}
-
-	return autoMergeStarted
 }
 
 // checkLimits returns true if the session has hit its turn or duration limit.
@@ -693,136 +603,24 @@ func (w *SessionWorker) handleMergeChild(req mcp.MergeChildRequest) {
 }
 
 // handleCreatePR handles a create_pr MCP tool call.
+// The daemon's workflow handles PR creation, so we reject Claude's attempt.
 func (w *SessionWorker) handleCreatePR(req mcp.CreatePRRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
-
-	// In daemon-managed mode, the daemon's workflow handles PR creation.
-	// Reject Claude's attempt to create a PR to avoid duplicates.
-	if w.host.DaemonManaged() {
-		log.Warn("rejecting create_pr in daemon-managed mode")
-		w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
-			ID:    req.ID,
-			Error: "PR creation is managed by the daemon workflow. Do not create PRs directly — just make your code changes and commit them.",
-		})
-		return
-	}
-
-	sess := w.host.Config().GetSession(w.sessionID)
-	if sess == nil {
-		w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
-			ID:    req.ID,
-			Error: "Session not found",
-		})
-		return
-	}
-
-	log.Info("creating PR via MCP tool", "branch", sess.Branch, "title", req.Title)
-
-	// Save messages to disk before creating PR so the transcript upload
-	// (which reads from disk via loadTranscript) can find them.
-	msgs := w.runner.GetMessagesWithStreaming()
-	var configMsgs []config.Message
-	for _, msg := range msgs {
-		configMsgs = append(configMsgs, config.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-	if err := config.SaveSessionMessages(w.sessionID, configMsgs, config.MaxSessionMessageLines); err != nil {
-		log.Error("failed to save session messages before PR creation", "error", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	resultCh := w.host.GitService().CreatePR(ctx, sess.RepoPath, sess.WorkTree, sess.Branch, sess.BaseBranch, req.Title, sess.GetIssueRef(), w.sessionID)
-
-	var lastErr error
-	var prURL string
-	for result := range resultCh {
-		if result.Error != nil {
-			lastErr = result.Error
-		}
-		if trimmed := TrimURL(result.Output); trimmed != "" {
-			prURL = trimmed
-		}
-	}
-
-	if lastErr != nil {
-		w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
-			ID:    req.ID,
-			Error: fmt.Sprintf("Failed to create PR: %v", lastErr),
-		})
-		return
-	}
-
-	// Mark session as PR created
-	w.host.Config().MarkSessionPRCreated(w.sessionID)
-	if err := w.host.Config().Save(); err != nil {
-		log.Error("failed to save config after PR creation", "error", err)
-	}
-
+	log.Warn("rejecting create_pr — PR creation is managed by the workflow")
 	w.runner.SendCreatePRResponse(mcp.CreatePRResponse{
-		ID:      req.ID,
-		Success: true,
-		PRURL:   prURL,
+		ID:    req.ID,
+		Error: "PR creation is managed by the workflow. Do not create PRs directly — just make your code changes and commit them.",
 	})
-
-	// Start auto-merge if enabled (skip when daemon manages lifecycle)
-	if w.host.AutoMerge() && !w.host.DaemonManaged() {
-		go w.runAutoMerge()
-	}
 }
 
 // handlePushBranch handles a push_branch MCP tool call.
+// The daemon's workflow handles pushing, so we reject Claude's attempt.
 func (w *SessionWorker) handlePushBranch(req mcp.PushBranchRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
-
-	// In daemon-managed mode, the daemon's workflow handles pushing.
-	// Reject Claude's attempt to push to avoid conflicts.
-	if w.host.DaemonManaged() {
-		log.Warn("rejecting push_branch in daemon-managed mode")
-		w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
-			ID:    req.ID,
-			Error: "Branch pushing is managed by the daemon workflow. Do not push directly — just make your code changes and commit them.",
-		})
-		return
-	}
-
-	sess := w.host.Config().GetSession(w.sessionID)
-	if sess == nil {
-		w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
-			ID:    req.ID,
-			Error: "Session not found",
-		})
-		return
-	}
-
-	log.Info("pushing branch via MCP tool", "branch", sess.Branch)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	resultCh := w.host.GitService().PushUpdates(ctx, sess.RepoPath, sess.WorkTree, sess.Branch, req.CommitMessage)
-
-	var lastErr error
-	for result := range resultCh {
-		if result.Error != nil {
-			lastErr = result.Error
-		}
-	}
-
-	if lastErr != nil {
-		w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
-			ID:    req.ID,
-			Error: fmt.Sprintf("Failed to push branch: %v", lastErr),
-		})
-		return
-	}
-
+	log.Warn("rejecting push_branch — branch pushing is managed by the workflow")
 	w.runner.SendPushBranchResponse(mcp.PushBranchResponse{
-		ID:      req.ID,
-		Success: true,
+		ID:    req.ID,
+		Error: "Branch pushing is managed by the workflow. Do not push directly — just make your code changes and commit them.",
 	})
 }
 
@@ -919,7 +717,3 @@ func (w *SessionWorker) notifySupervisor(supervisorID string, testsPassed bool) 
 	state.SetPendingMsg(prompt)
 }
 
-// runAutoMerge runs the auto-merge state machine. See auto_merge.go.
-func (w *SessionWorker) runAutoMerge() {
-	RunAutoMerge(w.ctx, w.host, w.sessionID)
-}
