@@ -3,16 +3,58 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zhubert/plural-agent/internal/daemonstate"
 	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
 	"github.com/zhubert/plural-core/git"
 )
+
+// trackingRunner wraps MockRunner to track Set* calls for configureRunner tests.
+type trackingRunner struct {
+	*claude.MockRunner
+	containerized         bool
+	containerImage        string
+	supervisorEnabled     bool
+	hostToolsEnabled      bool
+	streamingChunksOff    bool
+	systemPrompt          string
+}
+
+func newTrackingRunner(id string) *trackingRunner {
+	return &trackingRunner{
+		MockRunner: claude.NewMockRunner(id, false, nil),
+	}
+}
+
+func (r *trackingRunner) SetContainerized(containerized bool, image string) {
+	r.containerized = containerized
+	r.containerImage = image
+}
+
+func (r *trackingRunner) SetSupervisor(supervisor bool) {
+	r.supervisorEnabled = supervisor
+	r.MockRunner.SetSupervisor(supervisor)
+}
+
+func (r *trackingRunner) SetHostTools(hostTools bool) {
+	r.hostToolsEnabled = hostTools
+	r.MockRunner.SetHostTools(hostTools)
+}
+
+func (r *trackingRunner) SetDisableStreamingChunks(disable bool) {
+	r.streamingChunksOff = disable
+}
+
+func (r *trackingRunner) SetSystemPrompt(prompt string) {
+	r.systemPrompt = prompt
+}
 
 var errGHFailed = fmt.Errorf("gh: command failed")
 
@@ -335,5 +377,185 @@ func TestDefaultCodingSystemPrompt_AppliedWhenEmpty(t *testing.T) {
 
 	if codingPrompt != DefaultCodingSystemPrompt {
 		t.Error("expected DefaultCodingSystemPrompt to be applied when no custom prompt is set")
+	}
+}
+
+func TestConfigureRunner_ToolSelection(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		Containerized: true,
+		Autonomous:    true,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	tools := runner.GetAllowedTools()
+	expected := claude.ComposeTools(
+		claude.ToolSetBase,
+		claude.ToolSetContainerShell,
+		claude.ToolSetWeb,
+		claude.ToolSetProductivity,
+	)
+	if len(tools) != len(expected) {
+		t.Errorf("expected %d tools, got %d", len(expected), len(tools))
+	}
+	for _, tool := range expected {
+		if !slices.Contains(tools, tool) {
+			t.Errorf("missing expected tool %q", tool)
+		}
+	}
+}
+
+func TestConfigureRunner_ContainerMode(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		Containerized: true,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if !runner.containerized {
+		t.Error("expected SetContainerized to be called")
+	}
+}
+
+func TestConfigureRunner_ContainerMode_Disabled(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		Containerized: false,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if runner.containerized {
+		t.Error("expected SetContainerized NOT to be called when Containerized is false")
+	}
+}
+
+func TestConfigureRunner_SupervisorMode(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:           "test-session",
+		IsSupervisor: true,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if !runner.supervisorEnabled {
+		t.Error("expected SetSupervisor(true) to be called when IsSupervisor is true")
+	}
+}
+
+func TestConfigureRunner_SupervisorMode_Disabled(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:           "test-session",
+		IsSupervisor: false,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if runner.supervisorEnabled {
+		t.Error("expected SetSupervisor NOT to be called when IsSupervisor is false")
+	}
+}
+
+func TestConfigureRunner_NoHostTools(t *testing.T) {
+	// Daemon should NEVER set host tools — workflow actions handle push/PR/merge
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		Autonomous:    true,
+		IsSupervisor:  true,
+		DaemonManaged: true,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if runner.hostToolsEnabled {
+		t.Error("daemon configureRunner should NEVER enable host tools")
+	}
+}
+
+func TestConfigureRunner_StreamingDisabled(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:         "test-session",
+		Autonomous: true,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if !runner.streamingChunksOff {
+		t.Error("expected streaming chunks disabled for autonomous sessions")
+	}
+}
+
+func TestConfigureRunner_StreamingNotDisabled_NonAutonomous(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:         "test-session",
+		Autonomous: false,
+	}
+
+	d.configureRunner(runner, sess, "")
+
+	if runner.streamingChunksOff {
+		t.Error("streaming chunks should not be disabled for non-autonomous sessions")
+	}
+}
+
+func TestConfigureRunner_SystemPrompt(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{ID: "test-session"}
+
+	d.configureRunner(runner, sess, "custom prompt")
+
+	if runner.systemPrompt != "custom prompt" {
+		t.Errorf("expected system prompt 'custom prompt', got %q", runner.systemPrompt)
+	}
+}
+
+func TestConfigureRunner_NoSystemPrompt(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{ID: "test-session"}
+
+	d.configureRunner(runner, sess, "")
+
+	if runner.systemPrompt != "" {
+		t.Errorf("expected empty system prompt, got %q", runner.systemPrompt)
 	}
 }
