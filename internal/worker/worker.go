@@ -650,6 +650,9 @@ func (w *SessionWorker) handleGetReviewComments(req mcp.GetReviewCommentsRequest
 		return
 	}
 
+	// Filter out our own transcript comments — they aren't review feedback.
+	comments = FilterTranscriptComments(comments)
+
 	mcpComments := make([]mcp.ReviewComment, len(comments))
 	for i, c := range comments {
 		mcpComments[i] = mcp.ReviewComment{
