@@ -12,7 +12,7 @@ const (
 	DefaultMaxDurationMin = 30
 	DefaultMaxConcurrent  = 3
 	DefaultMergeMethod    = "rebase"
-	DefaultContainerImage = "ghcr.io/zhubert/plural-claude"
+	DefaultContainerImage = ""
 )
 
 // AgentConfig is an in-memory implementation of the Config interface.

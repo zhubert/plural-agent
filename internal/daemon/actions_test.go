@@ -353,19 +353,25 @@ func TestDefaultCodingSystemPrompt_Applied(t *testing.T) {
 }
 
 func TestDefaultCodingSystemPrompt_ContainerEnvironment(t *testing.T) {
-	// The system prompt should include container environment guidance
-	// to mitigate Go toolchain segfaults in containerized sessions.
+	// The system prompt should include container environment guidance.
 	if !strings.Contains(DefaultCodingSystemPrompt, "CONTAINER ENVIRONMENT") {
 		t.Error("DefaultCodingSystemPrompt should contain CONTAINER ENVIRONMENT section")
-	}
-	if !strings.Contains(DefaultCodingSystemPrompt, "-p=1") {
-		t.Error("DefaultCodingSystemPrompt should recommend -p=1 for Go test parallelism")
 	}
 	if !strings.Contains(DefaultCodingSystemPrompt, "segfault") {
 		t.Error("DefaultCodingSystemPrompt should mention segfault as a transient failure")
 	}
 	if !strings.Contains(DefaultCodingSystemPrompt, "retry") {
 		t.Error("DefaultCodingSystemPrompt should recommend retrying on transient failures")
+	}
+}
+
+func TestDefaultCodingSystemPrompt_TwoPhaseTestingInstructions(t *testing.T) {
+	// The system prompt should include two-phase testing guidance.
+	if !strings.Contains(DefaultCodingSystemPrompt, "TWO-PHASE") {
+		t.Error("DefaultCodingSystemPrompt should contain TWO-PHASE testing section")
+	}
+	if !strings.Contains(DefaultCodingSystemPrompt, "CI") {
+		t.Error("DefaultCodingSystemPrompt should reference CI")
 	}
 }
 
@@ -1153,6 +1159,163 @@ func TestCommentPRAction_Execute_WorkItemNotFound(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected error for missing work item")
+	}
+}
+
+// --- fixCIAction tests ---
+
+func TestFixCIAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestFixCIAction_Execute_MaxRoundsExceeded(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"ci_fix_rounds": 3},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded")
+	}
+	if !strings.Contains(result.Error.Error(), "max CI fix rounds exceeded") {
+		t.Errorf("expected 'max CI fix rounds exceeded' error, got: %v", result.Error)
+	}
+}
+
+func TestFixCIAction_Execute_MaxRoundsFloat64(t *testing.T) {
+	// JSON deserialization produces float64 for numbers
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"ci_fix_rounds": float64(3)},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded (float64)")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded (float64)")
+	}
+}
+
+func TestFixCIAction_Execute_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestGetCIFixRounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepData map[string]any
+		expected int
+	}{
+		{"nil step data", nil, 0},
+		{"empty step data", map[string]any{}, 0},
+		{"int value", map[string]any{"ci_fix_rounds": 2}, 2},
+		{"float64 value (JSON)", map[string]any{"ci_fix_rounds": float64(3)}, 3},
+		{"string value (invalid)", map[string]any{"ci_fix_rounds": "2"}, 0},
+		{"zero value", map[string]any{"ci_fix_rounds": 0}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getCIFixRounds(tt.stepData)
+			if got != tt.expected {
+				t.Errorf("expected %d, got %d", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestFormatCIFixPrompt(t *testing.T) {
+	prompt := formatCIFixPrompt(2, "Error: test failed\nexit 1")
+	if !strings.Contains(prompt, "FIX ROUND 2") {
+		t.Error("expected prompt to contain round number")
+	}
+	if !strings.Contains(prompt, "Error: test failed") {
+		t.Error("expected prompt to contain CI logs")
+	}
+	if !strings.Contains(prompt, "DO NOT push") {
+		t.Error("expected prompt to contain push prohibition")
 	}
 }
 

@@ -523,8 +523,10 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR(t *testing.T) {
 	d.recoverFromState(context.Background())
 
 	item := d.state.GetWorkItem("item-1")
-	if item.CurrentStep != "await_review" {
-		t.Errorf("expected await_review (PR exists), got %s", item.CurrentStep)
+	// With the new workflow, await_ci comes before await_review,
+	// so recovery from coding step (not past CI) goes to await_ci.
+	if item.CurrentStep != "await_ci" {
+		t.Errorf("expected await_ci (PR exists, not past CI), got %s", item.CurrentStep)
 	}
 	if item.Phase != "idle" {
 		t.Errorf("expected idle, got %s", item.Phase)
@@ -654,6 +656,82 @@ func TestDaemon_RecoverFromState_AsyncPendingNoBranch(t *testing.T) {
 	item := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected queued (no branch), got %s", item.State)
+	}
+}
+
+func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromAwaitReview(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR exists and is open
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "async_pending")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	// Was at await_review (past CI), should recover to await_review
+	if item.CurrentStep != "await_review" {
+		t.Errorf("expected await_review (was past CI), got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected idle, got %s", item.Phase)
+	}
+}
+
+func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromFixCI(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR exists and is open
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "fix_ci",
+	})
+	d.state.AdvanceWorkItem("item-1", "fix_ci", "async_pending")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	// fix_ci is not past CI, should recover to await_ci
+	if item.CurrentStep != "await_ci" {
+		t.Errorf("expected await_ci (fix_ci is not past CI), got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected idle, got %s", item.Phase)
 	}
 }
 

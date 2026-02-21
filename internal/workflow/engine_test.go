@@ -573,7 +573,8 @@ func TestEngine_ProcessStep_WaitTimeout_ZeroEnteredAt(t *testing.T) {
 }
 
 func TestEngine_FullTraversal(t *testing.T) {
-	// Test a full workflow traversal with sync actions and event checks
+	// Test a full workflow traversal with sync actions and event checks.
+	// New flow: coding → open_pr → await_ci → check_ci_result → await_review → merge → done
 	registry := NewActionRegistry()
 	registry.Register("ai.code", &mockAction{result: ActionResult{Success: true, Async: true}})
 	registry.Register("github.create_pr", &mockAction{result: ActionResult{Success: true, Data: map[string]any{"pr_url": "https://github.com/test/pr/1"}}})
@@ -602,28 +603,30 @@ func TestEngine_FullTraversal(t *testing.T) {
 		t.Errorf("expected open_pr, got %q", result.NewStep)
 	}
 
-	// Phase 3: open_pr (sync)
+	// Phase 3: open_pr (sync) → should advance to await_ci
 	view.CurrentStep = "open_pr"
 	view.Phase = "idle"
 	result, err = engine.ProcessStep(context.Background(), view)
 	if err != nil {
 		t.Fatalf("open_pr step error: %v", err)
 	}
-	if result.NewStep != "await_review" {
-		t.Errorf("expected await_review, got %q", result.NewStep)
-	}
-
-	// Phase 4: await_review (event fired)
-	checker := &mockEventChecker{fired: true, data: map[string]any{"approved": true}}
-	engine2 := NewEngine(cfg, registry, checker, testLogger())
-	view.CurrentStep = "await_review"
-	view.Phase = "idle"
-	result, err = engine2.ProcessStep(context.Background(), view)
-	if err != nil {
-		t.Fatalf("await_review step error: %v", err)
-	}
 	if result.NewStep != "await_ci" {
 		t.Errorf("expected await_ci, got %q", result.NewStep)
+	}
+
+	// Phase 4: await_ci (event fired with ci_passed=true) → check_ci_result → await_review
+	checker := &mockEventChecker{fired: true, data: map[string]any{"ci_passed": true}}
+	engine2 := NewEngine(cfg, registry, checker, testLogger())
+	view.CurrentStep = "await_ci"
+	view.Phase = "idle"
+	view.StepData = map[string]any{}
+	result, err = engine2.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("await_ci step error: %v", err)
+	}
+	// await_ci fires → next is check_ci_result (choice) which evaluates ci_passed=true → await_review
+	if result.NewStep != "check_ci_result" {
+		t.Errorf("expected check_ci_result, got %q", result.NewStep)
 	}
 }
 

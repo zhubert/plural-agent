@@ -432,7 +432,7 @@ func validateCIParams(prefix string, params map[string]any) []ValidationError {
 	if onFailure, ok := params["on_failure"]; ok {
 		if s, ok := onFailure.(string); ok {
 			switch s {
-			case "abandon", "retry", "notify":
+			case "abandon", "retry", "notify", "fix":
 				// valid
 			default:
 				errs = append(errs, ValidationError{
@@ -569,11 +569,22 @@ func detectCycles(cfg *Config) []ValidationError {
 						break
 					}
 				}
-				cycle := strings.Join(path[cycleStart:], " → ") + " → " + next
-				errs = append(errs, ValidationError{
-					Field:   "states",
-					Message: fmt.Sprintf("cycle detected: %s", cycle),
-				})
+				// Allow cycles that pass through a choice state (bounded loops).
+				// Choice states provide conditional exits, making such loops intentional.
+				hasChoice := false
+				for _, n := range path[cycleStart:] {
+					if s, ok := cfg.States[n]; ok && s.Type == StateTypeChoice {
+						hasChoice = true
+						break
+					}
+				}
+				if !hasChoice {
+					cycle := strings.Join(path[cycleStart:], " → ") + " → " + next
+					errs = append(errs, ValidationError{
+						Field:   "states",
+						Message: fmt.Sprintf("cycle detected: %s", cycle),
+					})
+				}
 				return true
 			case 0: // unvisited
 				if dfs(next) {

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	osexec "os/exec"
 	"strconv"
@@ -34,17 +35,19 @@ DO NOT:
 WORKFLOW:
 1. Read and understand the task
 2. Implement the changes with clean, well-tested code
-3. Run tests to verify your changes work
+3. Run relevant tests locally to verify your changes work (quick tests only — the full CI suite runs after push)
 4. Commit your changes locally with a clear commit message
 5. Stop when the implementation is complete — the system will handle pushing and PR creation
 
+TESTING — TWO-PHASE APPROACH:
+- Run relevant unit tests locally to catch obvious issues before committing
+- Do NOT try to run the entire CI pipeline locally — CI handles the full test suite after push
+- If CI fails later, you may be resumed with failure logs to fix specific issues
+
 CONTAINER ENVIRONMENT:
-You are running inside a Docker container. The Go toolchain may intermittently segfault
-due to container resource constraints. To mitigate this:
-- For Go projects, always run tests with: go test -p=1 -count=1 ./...
-  The -p=1 flag limits parallel package compilation to reduce memory pressure.
+You are running inside a Docker container with the project's toolchain pre-installed.
 - If a build or test command fails with a signal (segfault, SIGBUS, signal: killed),
-  retry the command up to 2 times — the failure is likely transient.`
+  retry the command up to 2 times — the failure is likely transient due to container resource constraints.`
 
 // codingAction implements the ai.code action.
 type codingAction struct {
@@ -843,6 +846,163 @@ func (d *Daemon) resolveRepoPath(ctx context.Context, item *daemonstate.WorkItem
 		}
 	}
 	return d.findRepoPath(ctx)
+}
+
+// fixCIAction implements the ai.fix_ci action.
+type fixCIAction struct {
+	daemon *Daemon
+}
+
+// Execute fetches CI failure logs and resumes the coding session to fix CI.
+func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	// Check max rounds
+	maxRounds := ac.Params.Int("max_ci_fix_rounds", 3)
+	rounds := getCIFixRounds(item.StepData)
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max CI fix rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	// Fetch CI failure logs
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	logs, err := fetchCIFailureLogs(ctx, sess.RepoPath, item.Branch)
+	if err != nil {
+		d.logger.Warn("failed to fetch CI logs, proceeding with generic message", "error", err)
+		logs = "(CI failure logs unavailable)"
+	}
+
+	// Increment rounds
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["ci_fix_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
+
+	// Resume session
+	if err := d.startFixCI(ctx, item, sess, rounds+1, logs); err != nil {
+		return workflow.ActionResult{Error: err}
+	}
+
+	return workflow.ActionResult{Success: true, Async: true}
+}
+
+// startFixCI resumes the coding session with CI failure context.
+func (d *Daemon) startFixCI(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, round int, ciLogs string) error {
+	prompt := formatCIFixPrompt(round, ciLogs)
+
+	// Resolve system prompt from workflow config's fix_ci state
+	wfCfg := d.getWorkflowConfig(sess.RepoPath)
+	fixState := wfCfg.States["fix_ci"]
+	systemPrompt := ""
+	if fixState != nil {
+		p := workflow.NewParamHelper(fixState.Params)
+		systemPrompt = p.String("system_prompt", "")
+	}
+
+	resolvedPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, sess.RepoPath)
+	if err != nil {
+		d.logger.Warn("failed to resolve fix_ci system prompt", "error", err)
+	}
+
+	if resolvedPrompt == "" {
+		resolvedPrompt = DefaultCodingSystemPrompt
+	}
+
+	d.startWorkerWithPrompt(ctx, item, sess, prompt, resolvedPrompt)
+	d.logger.Info("started CI fix session", "workItem", item.ID, "round", round)
+	return nil
+}
+
+// formatCIFixPrompt formats CI failure logs into a prompt for Claude.
+func formatCIFixPrompt(round int, ciLogs string) string {
+	return fmt.Sprintf(`CI FAILURE — FIX ROUND %d
+
+The CI pipeline has failed after your changes were pushed. Please analyze the failure logs below and fix the issues.
+
+INSTRUCTIONS:
+1. Read the CI failure logs carefully
+2. Identify the root cause of the failure
+3. Fix the code to resolve the CI failure
+4. Run relevant tests locally to verify your fix
+5. Commit your changes locally — the system will push and re-run CI automatically
+
+DO NOT push or create PRs — the system handles this.
+
+CI FAILURE LOGS:
+%s`, round, ciLogs)
+}
+
+// fetchCIFailureLogs fetches failure logs from the most recent failed CI run.
+func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, error) {
+	fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// Find the most recent failed run
+	listCmd := osexec.CommandContext(fetchCtx, "gh", "run", "list",
+		"--branch", branch,
+		"--status", "failure",
+		"--limit", "1",
+		"--json", "databaseId",
+		"--repo", repoPath,
+	)
+	listOutput, err := listCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to list CI runs: %w", err)
+	}
+
+	var runs []struct {
+		DatabaseID int `json:"databaseId"`
+	}
+	if err := json.Unmarshal(listOutput, &runs); err != nil {
+		return "", fmt.Errorf("failed to parse CI runs: %w", err)
+	}
+	if len(runs) == 0 {
+		return "", fmt.Errorf("no failed CI runs found for branch %s", branch)
+	}
+
+	// Get the failure logs
+	runID := fmt.Sprintf("%d", runs[0].DatabaseID)
+	logCmd := osexec.CommandContext(fetchCtx, "gh", "run", "view", runID,
+		"--log-failed",
+		"--repo", repoPath,
+	)
+	logOutput, err := logCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch CI logs: %w", err)
+	}
+
+	logs := string(logOutput)
+	// Truncate to ~50k chars if too long
+	const maxLogLen = 50000
+	if len(logs) > maxLogLen {
+		logs = logs[:maxLogLen] + "\n\n... (truncated)"
+	}
+
+	return logs, nil
+}
+
+// getCIFixRounds extracts the CI fix round counter from step data.
+func getCIFixRounds(stepData map[string]any) int {
+	v, ok := stepData["ci_fix_rounds"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // saveRunnerMessages saves messages for a session's runner.

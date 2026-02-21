@@ -171,6 +171,9 @@ func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 			return false, map[string]any{"ci_failed": true, "ci_action": "abandon"}, nil
 		case "notify":
 			return false, map[string]any{"ci_failed": true, "ci_action": "notify"}, nil
+		case "fix":
+			log.Warn("CI failed, advancing for fix", "on_failure", onFailure)
+			return true, map[string]any{"ci_passed": false, "ci_failed": true}, nil
 		default: // "retry"
 			return false, map[string]any{"ci_failed": true, "ci_action": "retry"}, nil
 		}

@@ -2,8 +2,15 @@ package workflow
 
 import "time"
 
-// DefaultWorkflowConfig returns a Config with the default state graph
-// (coding → open_pr → await_review → await_ci → merge → done, with a failed terminal state).
+// DefaultWorkflowConfig returns a Config with the default state graph:
+//
+//	coding → open_pr → await_ci → check_ci_result
+//	  → ci_passed=true:  await_review → merge → done
+//	  → ci_failed=true:  fix_ci → push_ci_fix → await_ci (loop)
+//	  → fix_ci error (max rounds): → failed
+//
+// CI is checked before review to avoid wasting reviewer time on failing builds.
+// The fix loop is bounded by max_ci_fix_rounds (default 3).
 func DefaultWorkflowConfig() *Config {
 	return &Config{
 		Workflow: "issue-to-merge",
@@ -33,16 +40,6 @@ func DefaultWorkflowConfig() *Config {
 				Params: map[string]any{
 					"link_issue": true,
 				},
-				Next:  "await_review",
-				Error: "failed",
-			},
-			"await_review": {
-				Type:  StateTypeWait,
-				Event: "pr.reviewed",
-				Params: map[string]any{
-					"auto_address":        true,
-					"max_feedback_rounds": 3,
-				},
 				Next:  "await_ci",
 				Error: "failed",
 			},
@@ -51,7 +48,41 @@ func DefaultWorkflowConfig() *Config {
 				Event:   "ci.complete",
 				Timeout: &Duration{2 * time.Hour},
 				Params: map[string]any{
-					"on_failure": "retry",
+					"on_failure": "fix",
+				},
+				Next:        "check_ci_result",
+				TimeoutNext: "failed",
+				Error:       "failed",
+			},
+			"check_ci_result": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "ci_passed", Equals: true, Next: "await_review"},
+					{Variable: "ci_failed", Equals: true, Next: "fix_ci"},
+				},
+				Default: "failed",
+			},
+			"fix_ci": {
+				Type:   StateTypeTask,
+				Action: "ai.fix_ci",
+				Params: map[string]any{
+					"max_ci_fix_rounds": 3,
+				},
+				Next:  "push_ci_fix",
+				Error: "failed",
+			},
+			"push_ci_fix": {
+				Type:   StateTypeTask,
+				Action: "github.push",
+				Next:   "await_ci",
+				Error:  "failed",
+			},
+			"await_review": {
+				Type:  StateTypeWait,
+				Event: "pr.reviewed",
+				Params: map[string]any{
+					"auto_address":        true,
+					"max_feedback_rounds": 3,
 				},
 				Next:  "merge",
 				Error: "failed",

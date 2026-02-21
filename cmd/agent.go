@@ -107,6 +107,18 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 	cfg := agentconfig.NewAgentConfig(cfgOpts...)
 
+	// Validate container image is configured (BYOC: users must provide their own image)
+	if cfg.GetContainerImage() == "" {
+		return fmt.Errorf(
+			"container_image is required but not configured.\n\n" +
+				"Set it in your .plural/workflow.yaml:\n\n" +
+				"  settings:\n" +
+				"    container_image: ghcr.io/zhubert/plural-claude  # or your custom image\n\n" +
+				"Extend the base image with your toolchain using FROM.\n" +
+				"See https://github.com/zhubert/plural-agent for details.",
+		)
+	}
+
 	// Initialize issue providers (nil configs — Asana/Linear are configured via workflow source, not config.json)
 	githubProvider := issues.NewGitHubProvider(gitSvc)
 	asanaProvider := issues.NewAsanaProvider(cfg)

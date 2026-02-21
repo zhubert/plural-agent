@@ -22,7 +22,7 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	}
 
 	// Verify expected states exist
-	expectedStates := []string{"coding", "open_pr", "await_review", "await_ci", "merge", "done", "failed"}
+	expectedStates := []string{"coding", "open_pr", "await_ci", "check_ci_result", "fix_ci", "push_ci_fix", "await_review", "merge", "done", "failed"}
 	for _, name := range expectedStates {
 		if _, ok := cfg.States[name]; !ok {
 			t.Errorf("expected state %q to exist", name)
@@ -55,11 +55,39 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 		t.Error("review auto_address: expected true")
 	}
 
-	// CI params
+	// CI params — on_failure should be "fix" for the CI fix loop
 	ci := cfg.States["await_ci"]
 	cp := NewParamHelper(ci.Params)
-	if cp.String("on_failure", "") != "retry" {
+	if cp.String("on_failure", "") != "fix" {
 		t.Errorf("ci on_failure: got %q", cp.String("on_failure", ""))
+	}
+
+	// check_ci_result choice state
+	checkCI := cfg.States["check_ci_result"]
+	if checkCI.Type != StateTypeChoice {
+		t.Errorf("check_ci_result type: expected choice, got %s", checkCI.Type)
+	}
+	if len(checkCI.Choices) != 2 {
+		t.Errorf("check_ci_result choices: expected 2, got %d", len(checkCI.Choices))
+	}
+
+	// fix_ci params
+	fixCI := cfg.States["fix_ci"]
+	fp := NewParamHelper(fixCI.Params)
+	if fp.Int("max_ci_fix_rounds", 0) != 3 {
+		t.Error("fix_ci max_ci_fix_rounds: expected 3")
+	}
+
+	// push_ci_fix loops back to await_ci
+	pushCIFix := cfg.States["push_ci_fix"]
+	if pushCIFix.Next != "await_ci" {
+		t.Errorf("push_ci_fix next: expected await_ci, got %s", pushCIFix.Next)
+	}
+
+	// open_pr now goes to await_ci (not await_review)
+	openPR := cfg.States["open_pr"]
+	if openPR.Next != "await_ci" {
+		t.Errorf("open_pr next: expected await_ci, got %s", openPR.Next)
 	}
 
 	// Merge params
@@ -69,7 +97,7 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 		t.Errorf("merge method: got %q", mp.String("method", ""))
 	}
 
-	// Default should pass validation
+	// Default should pass validation (including the choice-gated cycle)
 	errs := Validate(cfg)
 	if len(errs) > 0 {
 		t.Errorf("default config should be valid, got errors: %v", errs)

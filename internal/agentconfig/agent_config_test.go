@@ -319,3 +319,19 @@ func TestAgentConfig_GetSession_ReturnsCopy(t *testing.T) {
 		t.Error("GetSession should return a copy")
 	}
 }
+
+func TestNewAgentConfig_BYOC_EmptyContainerImage(t *testing.T) {
+	// BYOC: default container image should be empty, requiring user configuration
+	c := NewAgentConfig()
+	if c.GetContainerImage() != "" {
+		t.Errorf("expected empty default container image (BYOC), got %q", c.GetContainerImage())
+	}
+}
+
+func TestNewAgentConfig_BYOC_WithContainerImage(t *testing.T) {
+	// User can still configure a container image via options
+	c := NewAgentConfig(WithContainerImage("my-custom:latest"))
+	if c.GetContainerImage() != "my-custom:latest" {
+		t.Errorf("expected my-custom:latest, got %q", c.GetContainerImage())
+	}
+}

@@ -716,6 +716,60 @@ func TestValidate(t *testing.T) {
 			},
 			wantFields: nil,
 		},
+		{
+			name: "valid on_failure fix policy",
+			cfg: &Config{
+				Start:  "ci",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"ci":   {Type: StateTypeWait, Event: "ci.complete", Params: map[string]any{"on_failure": "fix"}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "choice-gated cycle allowed",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a": {Type: StateTypeWait, Event: "ci.complete", Next: "choice"},
+					"choice": {Type: StateTypeChoice, Choices: []ChoiceRule{
+						{Variable: "pass", Equals: true, Next: "done"},
+						{Variable: "fail", Equals: true, Next: "fix"},
+					}, Default: "done"},
+					"fix":  {Type: StateTypeTask, Action: "ai.fix_ci", Next: "push"},
+					"push": {Type: StateTypeTask, Action: "github.push", Next: "a"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil, // Cycle through choice state should be allowed
+		},
+		{
+			name: "cycle without choice state still fails",
+			cfg: &Config{
+				Start:  "a",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"a": {Type: StateTypeTask, Action: "ai.code", Next: "b"},
+					"b": {Type: StateTypeTask, Action: "github.push", Next: "a"},
+				},
+			},
+			wantFields: []string{"states"},
+		},
+		{
+			name: "valid ai.fix_ci action",
+			cfg: &Config{
+				Start:  "fix",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"fix":  {Type: StateTypeTask, Action: "ai.fix_ci", Params: map[string]any{"max_ci_fix_rounds": 3}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
 	}
 
 	for _, tt := range tests {
