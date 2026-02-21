@@ -272,17 +272,20 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 	// Get state definition for after-hooks
 	state := engine.GetState(item.CurrentStep)
 
-	// Check if the worker already created and merged a PR via MCP tools
+	// Safety net: if the session already has a PR created or merged (e.g., Claude
+	// ran `gh pr create` in the container bash, or a race condition), the workflow
+	// engine's open_pr step would fail trying to create a duplicate PR. Handle
+	// these cases gracefully but log a warning — in daemon mode, the worker should
+	// never create or merge PRs; the workflow engine handles those steps via
+	// open_pr and merge actions.
 	if sess != nil && sess.PRMerged {
-		log.Info("PR already created and merged by worker, fast-pathing to completed")
-		// Run current step's after-hooks
+		log.Warn("PR already merged outside workflow, fast-pathing to completed")
 		if state != nil {
 			d.runHooks(ctx, state.After, item, sess)
 		}
 		d.state.AdvanceWorkItem(item.ID, "done", "idle")
 		d.state.MarkWorkItemTerminal(item.ID, true)
 
-		// Run merge hooks if exists
 		mergeState := engine.GetState("merge")
 		if mergeState != nil {
 			d.runHooks(ctx, mergeState.After, item, sess)
@@ -290,14 +293,11 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 		return
 	}
 
-	// Check if the worker already created a PR via MCP tools (but not merged)
 	if sess != nil && sess.PRCreated && item.CurrentStep == "coding" {
-		log.Info("PR already created by worker, skipping open_pr step")
-		// Run coding after-hooks
+		log.Warn("PR already created outside workflow, skipping open_pr step")
 		if state != nil {
 			d.runHooks(ctx, state.After, item, sess)
 		}
-		// Skip open_pr, go directly to await_review
 		prState := engine.GetState("open_pr")
 		if prState != nil {
 			d.runHooks(ctx, prState.After, item, sess)

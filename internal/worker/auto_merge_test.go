@@ -31,7 +31,8 @@ type mockHost struct {
 	daemonManaged         bool
 	autoAddressPRComments bool
 
-	cleanupCalled map[string]bool
+	cleanupCalled    map[string]bool
+	autoCreatePRCalled map[string]bool
 }
 
 func newMockHost(mockExec *exec.MockExecutor) *mockHost {
@@ -52,7 +53,8 @@ func newMockHost(mockExec *exec.MockExecutor) *mockHost {
 		maxDuration:   30,
 		autoMerge:     true,
 		mergeMethod:   "rebase",
-		cleanupCalled: make(map[string]bool),
+		cleanupCalled:      make(map[string]bool),
+		autoCreatePRCalled: make(map[string]bool),
 	}
 }
 
@@ -71,7 +73,8 @@ func (h *mockHost) DaemonManaged() bool                       { return h.daemonM
 func (h *mockHost) AutoAddressPRComments() bool               { return h.autoAddressPRComments }
 
 func (h *mockHost) AutoCreatePR(ctx context.Context, sessionID string) (string, error) {
-	return "", nil
+	h.autoCreatePRCalled[sessionID] = true
+	return "https://github.com/test/repo/pull/1", nil
 }
 
 func (h *mockHost) CreateChildSession(ctx context.Context, supervisorID, taskDescription string) (SessionInfo, error) {

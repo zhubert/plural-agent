@@ -395,6 +395,48 @@ func TestNewDoneWorkerWithError(t *testing.T) {
 	}
 }
 
+func TestSessionWorker_HandleCompletion_DaemonManaged_SkipsPR(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = true
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	// handleCompletion should NOT call AutoCreatePR in daemon-managed mode
+	result := w.handleCompletion()
+	if result {
+		t.Error("expected handleCompletion to return false (no auto-merge started)")
+	}
+	if h.autoCreatePRCalled["s1"] {
+		t.Error("expected AutoCreatePR NOT to be called in daemon-managed mode")
+	}
+}
+
+func TestSessionWorker_HandleCompletion_NonDaemon_CreatesPR(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.daemonManaged = false
+	h.autoMerge = false // Don't start auto-merge goroutine in test
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	result := w.handleCompletion()
+	if result {
+		t.Error("expected handleCompletion to return false (auto-merge disabled)")
+	}
+	if !h.autoCreatePRCalled["s1"] {
+		t.Error("expected AutoCreatePR to be called in non-daemon mode")
+	}
+}
+
 func TestSessionWorker_HandleCreatePR_DaemonManaged(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)

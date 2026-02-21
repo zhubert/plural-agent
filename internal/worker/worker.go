@@ -469,7 +469,8 @@ func (w *SessionWorker) handleCompletion() bool {
 	autoMergeStarted := false
 
 	// For non-supervisor standalone sessions, auto-create PR
-	if !sess.IsSupervisor && sess.SupervisorID == "" && !sess.PRCreated {
+	// Skip when daemon manages lifecycle — the workflow engine handles PR creation via the open_pr step.
+	if !sess.IsSupervisor && sess.SupervisorID == "" && !sess.PRCreated && !w.host.DaemonManaged() {
 		log.Info("auto-creating PR")
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -481,8 +482,8 @@ func (w *SessionWorker) handleCompletion() bool {
 		}
 		log.Info("PR created", "url", prURL)
 
-		// Start auto-merge if enabled (skip when daemon manages lifecycle)
-		if w.host.AutoMerge() && !w.host.DaemonManaged() {
+		// Start auto-merge if enabled
+		if w.host.AutoMerge() {
 			go w.runAutoMerge()
 			autoMergeStarted = true
 		}
