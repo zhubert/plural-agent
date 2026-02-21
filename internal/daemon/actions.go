@@ -373,7 +373,8 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 		return
 	}
 
-	// Mark comments as addressed (via state lock)
+	// Mark ALL comments as addressed (including transcripts) so the count
+	// stays in sync with GetBatchPRStatesWithComments and doesn't re-trigger.
 	commentCount := len(comments)
 	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
 		it.CommentsAddressed += commentCount
@@ -381,8 +382,15 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 		it.UpdatedAt = time.Now()
 	})
 
+	// Filter out our own transcript comments — they aren't review feedback.
+	reviewComments := worker.FilterTranscriptComments(comments)
+	if len(reviewComments) == 0 {
+		log.Debug("all comments are transcripts, nothing to address")
+		return
+	}
+
 	// Format comments as a prompt
-	prompt := worker.FormatPRCommentsPrompt(comments)
+	prompt := worker.FormatPRCommentsPrompt(reviewComments)
 
 	// Resolve review system prompt from workflow config
 	wfCfg := d.getWorkflowConfig(sess.RepoPath)

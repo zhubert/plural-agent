@@ -118,6 +118,73 @@ func TestFormatPRCommentsPrompt(t *testing.T) {
 	})
 }
 
+func TestFilterTranscriptComments(t *testing.T) {
+	transcriptBody := "<details>\n<summary>Session Transcript</summary>\n\n```text\nUser:\nHello\n\nAssistant:\nHi\n```\n</details>"
+
+	t.Run("filters out transcript comments", func(t *testing.T) {
+		comments := []git.PRReviewComment{
+			{Author: "alice", Body: "Please fix the typo"},
+			{Author: "bot", Body: transcriptBody},
+			{Author: "bob", Body: "Add error handling"},
+		}
+		filtered := FilterTranscriptComments(comments)
+		if len(filtered) != 2 {
+			t.Fatalf("expected 2 comments, got %d", len(filtered))
+		}
+		if filtered[0].Body != "Please fix the typo" {
+			t.Errorf("expected first comment body 'Please fix the typo', got %q", filtered[0].Body)
+		}
+		if filtered[1].Body != "Add error handling" {
+			t.Errorf("expected second comment body 'Add error handling', got %q", filtered[1].Body)
+		}
+	})
+
+	t.Run("keeps all comments when no transcripts", func(t *testing.T) {
+		comments := []git.PRReviewComment{
+			{Author: "alice", Body: "Fix this"},
+			{Author: "bob", Body: "Also fix that"},
+		}
+		filtered := FilterTranscriptComments(comments)
+		if len(filtered) != 2 {
+			t.Fatalf("expected 2 comments, got %d", len(filtered))
+		}
+	})
+
+	t.Run("returns empty slice when all are transcripts", func(t *testing.T) {
+		comments := []git.PRReviewComment{
+			{Author: "bot", Body: transcriptBody},
+		}
+		filtered := FilterTranscriptComments(comments)
+		if len(filtered) != 0 {
+			t.Fatalf("expected 0 comments, got %d", len(filtered))
+		}
+	})
+
+	t.Run("handles nil input", func(t *testing.T) {
+		filtered := FilterTranscriptComments(nil)
+		if len(filtered) != 0 {
+			t.Fatalf("expected 0 comments, got %d", len(filtered))
+		}
+	})
+
+	t.Run("handles empty input", func(t *testing.T) {
+		filtered := FilterTranscriptComments([]git.PRReviewComment{})
+		if len(filtered) != 0 {
+			t.Fatalf("expected 0 comments, got %d", len(filtered))
+		}
+	})
+
+	t.Run("does not filter comments that mention transcript casually", func(t *testing.T) {
+		comments := []git.PRReviewComment{
+			{Author: "alice", Body: "Can you check the session transcript for context?"},
+		}
+		filtered := FilterTranscriptComments(comments)
+		if len(filtered) != 1 {
+			t.Fatalf("expected 1 comment, got %d", len(filtered))
+		}
+	})
+}
+
 func TestFormatInitialMessage(t *testing.T) {
 	tests := []struct {
 		name     string

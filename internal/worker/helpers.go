@@ -44,6 +44,24 @@ func FormatPRCommentsPrompt(comments []git.PRReviewComment) string {
 	return sb.String()
 }
 
+// TranscriptMarker is the HTML marker used to identify session transcript comments
+// posted by UploadTranscriptToPR in plural-core. These are collapsible <details> blocks
+// containing the coding session transcript.
+const TranscriptMarker = "<summary>Session Transcript</summary>"
+
+// FilterTranscriptComments removes session transcript comments from a slice of PR review comments.
+// The daemon automatically posts a coding transcript as a PR comment; this transcript
+// should not be treated as review feedback when addressing reviewer comments.
+func FilterTranscriptComments(comments []git.PRReviewComment) []git.PRReviewComment {
+	filtered := make([]git.PRReviewComment, 0, len(comments))
+	for _, c := range comments {
+		if !strings.Contains(c.Body, TranscriptMarker) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
 // FormatInitialMessage formats the initial message for a coding session based on the issue provider.
 // The optional body parameter contains the issue description/body text.
 func FormatInitialMessage(ref config.IssueRef, body string) string {
