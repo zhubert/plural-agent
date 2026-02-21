@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,7 +31,8 @@ type DaemonLock struct {
 }
 
 // AcquireLock attempts to acquire the daemon lock for the given repo path.
-// Returns an error if the lock is already held.
+// Returns an error if the lock is already held by a living process.
+// Stale locks (where the owning process has died) are automatically cleaned up.
 func AcquireLock(repoPath string) (*DaemonLock, error) {
 	fp := LockFilePath(repoPath)
 
@@ -39,32 +41,48 @@ func AcquireLock(repoPath string) (*DaemonLock, error) {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
 
-	// Try to create the lock file exclusively
-	f, err := os.OpenFile(fp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		if os.IsExist(err) {
-			// Check if the lock file is stale (process that created it is gone)
-			data, readErr := os.ReadFile(fp)
-			if readErr == nil {
-				pidStr := strings.TrimSpace(string(data))
-				if pid, parseErr := strconv.Atoi(pidStr); parseErr == nil {
-					if !processAlive(pid) {
-						// Stale lock — owning process is dead. Remove and retry.
-						os.Remove(fp)
-						return AcquireLock(repoPath)
-					}
-				}
-				return nil, fmt.Errorf("daemon lock already held (PID: %s). Remove %s if the process is not running", pidStr, fp)
-			}
+	// Try up to 2 times: once normally, once after stale lock cleanup.
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(fp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			// Successfully created lock file — write our PID
+			fmt.Fprintf(f, "%d", os.Getpid())
+			return &DaemonLock{path: fp, file: f}, nil
+		}
+
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("failed to create lock file: %w", err)
+		}
+
+		// Lock file exists — check if it's stale
+		if attempt > 0 {
+			// Already tried stale cleanup once, don't loop again
+			return nil, fmt.Errorf("daemon lock already held at %s (retry after stale cleanup failed)", fp)
+		}
+
+		data, readErr := os.ReadFile(fp)
+		if readErr != nil {
 			return nil, fmt.Errorf("daemon lock already held at %s", fp)
 		}
-		return nil, fmt.Errorf("failed to create lock file: %w", err)
+
+		pidStr := strings.TrimSpace(string(data))
+		pid, parseErr := strconv.Atoi(pidStr)
+		if parseErr != nil {
+			return nil, fmt.Errorf("daemon lock already held (corrupt PID in %s)", fp)
+		}
+
+		if processAlive(pid) {
+			return nil, fmt.Errorf("daemon lock already held (PID: %s). Remove %s if the process is not running", pidStr, fp)
+		}
+
+		// Stale lock — owning process is dead. Remove and retry.
+		if removeErr := os.Remove(fp); removeErr != nil {
+			return nil, fmt.Errorf("stale daemon lock (dead PID %d) but failed to remove %s: %w", pid, fp, removeErr)
+		}
+		// Loop back to retry file creation
 	}
 
-	// Write our PID
-	fmt.Fprintf(f, "%d", os.Getpid())
-
-	return &DaemonLock{path: fp, file: f}, nil
+	return nil, fmt.Errorf("daemon lock already held at %s", fp)
 }
 
 // Release releases the daemon lock.
@@ -99,8 +117,15 @@ func ClearLocks() (int, error) {
 }
 
 // processAlive returns true if a process with the given PID is running.
-// Uses signal 0 which checks for process existence without sending a signal.
+// On Unix, uses signal 0 which checks for process existence without sending a signal.
+// On Windows, os.FindProcess always succeeds, so we conservatively assume the process is alive.
 func processAlive(pid int) bool {
+	if runtime.GOOS == "windows" {
+		// os.FindProcess on Windows always returns a valid process handle;
+		// signal 0 is not supported. Conservatively assume the process is alive
+		// to avoid accidentally removing a valid lock.
+		return true
+	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false

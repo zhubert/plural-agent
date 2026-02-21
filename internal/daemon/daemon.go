@@ -346,7 +346,9 @@ func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkIte
 		beforeHooks := engine.GetBeforeHooks(item.CurrentStep)
 		if len(beforeHooks) > 0 {
 			sess := d.config.GetSession(item.SessionID)
-			if sess != nil {
+			if sess == nil {
+				d.logger.Warn("session not found, skipping before-hooks", "workItem", item.ID, "step", item.CurrentStep, "session", item.SessionID)
+			} else {
 				hookCtx := workflow.HookContext{
 					RepoPath:   sess.RepoPath,
 					Branch:     item.Branch,
@@ -467,7 +469,7 @@ func (d *Daemon) handleFeedbackComplete(ctx context.Context, item *daemonstate.W
 		it.FeedbackRounds++
 		it.UpdatedAt = time.Now()
 	})
-	log.Info("pushed feedback changes", "round", item.FeedbackRounds+1)
+	log.Info("pushed feedback changes", "round", item.FeedbackRounds)
 }
 
 // processWorkItems checks active items via the engine.
