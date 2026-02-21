@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"fmt"
+	osexec "os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zhubert/plural-agent/internal/daemonstate"
@@ -167,9 +169,13 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 
 	fullBranchName := branchPrefix + branchName
 
-	// Check if branch already exists
+	// Check if branch already exists (stale from a previous crashed session)
 	if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
-		return fmt.Errorf("branch %s already exists", fullBranchName)
+		log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
+		d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
+		if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
+			return fmt.Errorf("branch %s exists and could not be cleaned up", fullBranchName)
+		}
 	}
 
 	// Create new session
@@ -504,6 +510,57 @@ func (d *Daemon) cleanupSession(ctx context.Context, sessionID string) {
 	d.saveConfig("cleanupSession")
 
 	log.Info("cleaned up session")
+}
+
+// cleanupStaleBranch attempts to clean up a stale branch left from a previous crashed session.
+// It first looks for a matching session in config and uses the standard cleanup flow.
+// If no session is found (orphaned branch), it falls back to direct git cleanup.
+func (d *Daemon) cleanupStaleBranch(ctx context.Context, repoPath, branchName string) {
+	log := d.logger.With("branch", branchName)
+
+	// Look for a session with this branch and clean it up via the standard flow
+	for _, sess := range d.config.GetSessions() {
+		if sess.Branch == branchName {
+			log.Info("found stale session, cleaning up", "sessionID", sess.ID)
+			d.cleanupSession(ctx, sess.ID)
+			return
+		}
+	}
+
+	// No matching session — orphaned branch from incomplete cleanup
+	log.Info("no matching session found, attempting direct git cleanup")
+
+	// Try to find and remove any worktree associated with this branch
+	out, err := osexec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain").Output()
+	if err == nil {
+		wtPath := parseWorktreeForBranch(string(out), branchName)
+		if wtPath != "" {
+			log.Info("removing orphaned worktree", "path", wtPath)
+			_ = osexec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", "--force", wtPath).Run()
+		}
+	}
+
+	// Delete the orphaned branch
+	_ = osexec.CommandContext(ctx, "git", "-C", repoPath, "branch", "-D", branchName).Run()
+}
+
+// parseWorktreeForBranch parses `git worktree list --porcelain` output to find
+// the worktree path associated with a given branch name.
+func parseWorktreeForBranch(porcelainOutput, branchName string) string {
+	lines := strings.Split(porcelainOutput, "\n")
+	var currentPath string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		}
+		if strings.HasPrefix(line, "branch refs/heads/") {
+			branch := strings.TrimPrefix(line, "branch refs/heads/")
+			if branch == branchName {
+				return currentPath
+			}
+		}
+	}
+	return ""
 }
 
 // findRepoPath returns the first repo path that matches the daemon's filter.

@@ -351,6 +351,21 @@ func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkIte
 		if result.Terminal {
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
 			d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
+			if !result.TerminalOK {
+				errMsg := ""
+				if e, ok := item.StepData["_last_error"].(string); ok {
+					errMsg = e
+				}
+				if errMsg == "" {
+					if e, ok := result.Data["_last_error"].(string); ok {
+						errMsg = e
+					}
+				}
+				if errMsg != "" {
+					d.state.SetErrorMessage(item.ID, errMsg)
+				}
+				d.logger.Error("work item failed", "workItem", item.ID, "step", item.CurrentStep, "error", errMsg)
+			}
 			return
 		}
 

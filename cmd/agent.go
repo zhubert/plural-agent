@@ -48,6 +48,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("docker is required for agent mode.\nInstall: https://docs.docker.com/get-docker/")
 	}
 
+	// Verify Docker daemon is actually running (not just binary present)
+	if err := checkDockerDaemon(); err != nil {
+		return err
+	}
+
 	// Enable debug logging for agent mode (always on for headless autonomous operation)
 	logger.SetDebug(true)
 

@@ -396,10 +396,13 @@ func (e *Engine) handleFailure(item *WorkItemView, state *State, errStr string, 
 
 	// Fall back to error edge
 	if state.Error != "" {
+		errorData := mergeData(data, map[string]any{
+			"_last_error": errStr,
+		})
 		return &StepResult{
 			NewStep:  state.Error,
 			NewPhase: "idle",
-			Data:     data,
+			Data:     errorData,
 			Hooks:    state.After,
 		}, nil
 	}

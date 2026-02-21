@@ -232,35 +232,108 @@ func TestDaemonState_ActiveSlotCount(t *testing.T) {
 }
 
 func TestDaemonState_HasWorkItemForIssue(t *testing.T) {
-	state := NewDaemonState("/test/repo")
-
-	if state.HasWorkItemForIssue("github", "42") {
-		t.Error("expected false for empty state")
+	tests := []struct {
+		name        string
+		setup       func(s *DaemonState)
+		source      string
+		issueID     string
+		want        bool
+	}{
+		{
+			name:    "empty state",
+			setup:   func(s *DaemonState) {},
+			source:  "github",
+			issueID: "42",
+			want:    false,
+		},
+		{
+			name: "active item matches",
+			setup: func(s *DaemonState) {
+				s.AddWorkItem(&WorkItem{
+					ID:       "item-1",
+					IssueRef: config.IssueRef{Source: "github", ID: "42"},
+				})
+			},
+			source:  "github",
+			issueID: "42",
+			want:    true,
+		},
+		{
+			name: "different issue ID",
+			setup: func(s *DaemonState) {
+				s.AddWorkItem(&WorkItem{
+					ID:       "item-1",
+					IssueRef: config.IssueRef{Source: "github", ID: "42"},
+				})
+			},
+			source:  "github",
+			issueID: "99",
+			want:    false,
+		},
+		{
+			name: "different source",
+			setup: func(s *DaemonState) {
+				s.AddWorkItem(&WorkItem{
+					ID:       "item-1",
+					IssueRef: config.IssueRef{Source: "github", ID: "42"},
+				})
+			},
+			source:  "asana",
+			issueID: "42",
+			want:    false,
+		},
+		{
+			name: "recently failed item still matches",
+			setup: func(s *DaemonState) {
+				s.AddWorkItem(&WorkItem{
+					ID:       "item-1",
+					IssueRef: config.IssueRef{Source: "github", ID: "42"},
+				})
+				s.MarkWorkItemTerminal("item-1", false)
+			},
+			source:  "github",
+			issueID: "42",
+			want:    true,
+		},
+		{
+			name: "recently completed item still matches",
+			setup: func(s *DaemonState) {
+				s.AddWorkItem(&WorkItem{
+					ID:       "item-1",
+					IssueRef: config.IssueRef{Source: "github", ID: "42"},
+				})
+				s.MarkWorkItemTerminal("item-1", true)
+			},
+			source:  "github",
+			issueID: "42",
+			want:    true,
+		},
+		{
+			name: "old failed item does not match",
+			setup: func(s *DaemonState) {
+				longAgo := time.Now().Add(-10 * time.Minute)
+				s.WorkItems["item-1"] = &WorkItem{
+					ID:          "item-1",
+					IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+					State:       WorkItemFailed,
+					CompletedAt: &longAgo,
+				}
+			},
+			source:  "github",
+			issueID: "42",
+			want:    false,
+		},
 	}
 
-	state.AddWorkItem(&WorkItem{
-		ID:       "item-1",
-		IssueRef: config.IssueRef{Source: "github", ID: "42"},
-	})
-
-	if !state.HasWorkItemForIssue("github", "42") {
-		t.Error("expected true for existing non-terminal item")
-	}
-
-	// Different issue
-	if state.HasWorkItemForIssue("github", "99") {
-		t.Error("expected false for different issue")
-	}
-
-	// Different source
-	if state.HasWorkItemForIssue("asana", "42") {
-		t.Error("expected false for different source")
-	}
-
-	// Terminal items should not count
-	state.MarkWorkItemTerminal("item-1", false)
-	if state.HasWorkItemForIssue("github", "42") {
-		t.Error("expected false for terminal item")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewDaemonState("/test/repo")
+			tt.setup(state)
+			got := state.HasWorkItemForIssue(tt.source, tt.issueID)
+			if got != tt.want {
+				t.Errorf("HasWorkItemForIssue(%q, %q) = %v, want %v", tt.source, tt.issueID, got, tt.want)
+			}
+		})
 	}
 }
 

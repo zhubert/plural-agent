@@ -14,6 +14,7 @@ import (
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
 	"github.com/zhubert/plural-core/git"
+	"github.com/zhubert/plural-core/session"
 )
 
 // trackingRunner wraps MockRunner to track Set* calls for configureRunner tests.
@@ -557,5 +558,206 @@ func TestConfigureRunner_NoSystemPrompt(t *testing.T) {
 
 	if runner.systemPrompt != "" {
 		t.Errorf("expected empty system prompt, got %q", runner.systemPrompt)
+	}
+}
+
+func TestStartCoding_CleansUpStaleBranch(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Add a stale session with the branch name that startCoding will generate
+	staleSess := &config.Session{
+		ID:       "stale-sess",
+		RepoPath: "/test/repo",
+		WorkTree: "/test/worktree-stale",
+		Branch:   "issue-10",
+		Name:     "test/stale",
+	}
+	cfg.AddSession(*staleSess)
+
+	// BranchExists uses: git rev-parse --verify <branch>
+	// First call should return success (branch exists), second should return error (cleaned up).
+	branchCheckCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "git" && len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "issue-10" {
+			branchCheckCount++
+			return branchCheckCount > 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := d.startCoding(ctx, item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed after cleaning up stale branch, got: %v", err)
+	}
+
+	// The stale session should have been removed from config
+	if cfg.GetSession("stale-sess") != nil {
+		t.Error("stale session should have been removed from config")
+	}
+
+	// A new session should have been created
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a new session to be created")
+	}
+	newSess := sessions[0]
+	if newSess.Branch != "issue-10" {
+		t.Errorf("expected new session branch 'issue-10', got %q", newSess.Branch)
+	}
+
+	// BranchExists should have been called twice
+	if branchCheckCount != 2 {
+		t.Errorf("expected BranchExists to be called 2 times, got %d", branchCheckCount)
+	}
+}
+
+func TestStartCoding_CleansUpOrphanedBranch(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// No stale session in config — this is a truly orphaned branch.
+
+	// BranchExists: first call returns true (exists), second returns false (cleaned up).
+	branchCheckCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "git" && len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "issue-10" {
+			branchCheckCount++
+			return branchCheckCount > 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix orphaned bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := d.startCoding(ctx, item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed after cleaning up orphaned branch, got: %v", err)
+	}
+
+	// A new session should have been created
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a new session to be created")
+	}
+	newSess := sessions[0]
+	if newSess.Branch != "issue-10" {
+		t.Errorf("expected new session branch 'issue-10', got %q", newSess.Branch)
+	}
+
+	// BranchExists should have been called twice
+	if branchCheckCount != 2 {
+		t.Errorf("expected BranchExists to be called 2 times, got %d", branchCheckCount)
+	}
+}
+
+func TestStartCoding_FailsWhenCleanupFails(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// BranchExists always returns true (cleanup fails to remove the branch).
+	// Default mock returns success for all commands, so BranchExists always returns true.
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(context.Background(), item)
+	if err == nil {
+		t.Fatal("startCoding should fail when branch cannot be cleaned up")
+	}
+	if !strings.Contains(err.Error(), "could not be cleaned up") {
+		t.Errorf("expected 'could not be cleaned up' error, got: %v", err)
+	}
+}
+
+func TestParseWorktreeForBranch(t *testing.T) {
+	tests := []struct {
+		name           string
+		porcelainOutput string
+		branchName     string
+		expectedPath   string
+	}{
+		{
+			name: "finds matching branch",
+			porcelainOutput: "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n\nworktree /home/user/.plural/worktrees/uuid1\nHEAD def456\nbranch refs/heads/issue-10\n\n",
+			branchName:      "issue-10",
+			expectedPath:    "/home/user/.plural/worktrees/uuid1",
+		},
+		{
+			name:            "no matching branch",
+			porcelainOutput: "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n\n",
+			branchName:      "issue-10",
+			expectedPath:    "",
+		},
+		{
+			name:            "empty output",
+			porcelainOutput: "",
+			branchName:      "issue-10",
+			expectedPath:    "",
+		},
+		{
+			name: "multiple worktrees, match first",
+			porcelainOutput: "worktree /wt/a\nHEAD aaa\nbranch refs/heads/issue-10\n\nworktree /wt/b\nHEAD bbb\nbranch refs/heads/issue-20\n\n",
+			branchName:      "issue-10",
+			expectedPath:    "/wt/a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseWorktreeForBranch(tt.porcelainOutput, tt.branchName)
+			if result != tt.expectedPath {
+				t.Errorf("expected %q, got %q", tt.expectedPath, result)
+			}
+		})
 	}
 }

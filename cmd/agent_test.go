@@ -106,3 +106,33 @@ func TestResolveAgentRepo_RealGitRepo(t *testing.T) {
 		t.Errorf("resolveAgentRepo = %q, want %q", resolved, expectedRoot)
 	}
 }
+
+func TestCheckDockerDaemon(t *testing.T) {
+	// Skip if docker binary isn't installed — nothing to test.
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not installed, skipping")
+	}
+
+	err := checkDockerDaemon()
+	// We can't assert success/failure portably (depends on whether Docker
+	// daemon is running in the test environment), but we CAN verify the
+	// function returns a non-nil error with a helpful message when it fails.
+	if err != nil {
+		if !containsAny(err.Error(), "not reachable", "Colima", "Docker Desktop") {
+			t.Errorf("expected helpful error message, got: %v", err)
+		}
+	}
+}
+
+func containsAny(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		if len(s) >= len(sub) {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
