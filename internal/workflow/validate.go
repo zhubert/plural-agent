@@ -118,6 +118,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateLabelParams(prefix, state.Params)...)
 		}
 
+		// Validate params for github.request_review action
+		if state.Action == "github.request_review" {
+			errs = append(errs, validateRequestReviewParams(prefix, state.Params)...)
+		}
+
 	case StateTypeWait:
 		// Wait states require event
 		if state.Event == "" {
@@ -380,6 +385,37 @@ func validateLabelParams(prefix string, params map[string]any) []ValidationError
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".params.label",
 			Message: "label must not be empty",
+		})
+	}
+
+	return errs
+}
+
+// validateRequestReviewParams validates params for github.request_review actions.
+func validateRequestReviewParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	if params == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.reviewer",
+			Message: "reviewer is required for github.request_review action",
+		})
+		return errs
+	}
+
+	reviewer, ok := params["reviewer"]
+	if !ok || reviewer == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.reviewer",
+			Message: "reviewer is required for github.request_review action",
+		})
+		return errs
+	}
+
+	if s, ok := reviewer.(string); ok && s == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.reviewer",
+			Message: "reviewer must not be empty",
 		})
 	}
 
