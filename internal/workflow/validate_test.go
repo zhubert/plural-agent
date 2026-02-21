@@ -629,6 +629,42 @@ func TestValidate(t *testing.T) {
 			wantFields: nil,
 		},
 		{
+			name: "request_review missing reviewer param",
+			cfg: &Config{
+				Start:  "req",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"req":  {Type: StateTypeTask, Action: "github.request_review", Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.req.params.reviewer"},
+		},
+		{
+			name: "request_review with empty reviewer param",
+			cfg: &Config{
+				Start:  "req",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"req":  {Type: StateTypeTask, Action: "github.request_review", Next: "done", Params: map[string]any{"reviewer": ""}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.req.params.reviewer"},
+		},
+		{
+			name: "request_review with valid reviewer",
+			cfg: &Config{
+				Start:  "req",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"req":  {Type: StateTypeTask, Action: "github.request_review", Next: "done", Params: map[string]any{"reviewer": "octocat"}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
 			name: "cycle detection: simple A→B→A",
 			cfg: &Config{
 				Start:  "a",
