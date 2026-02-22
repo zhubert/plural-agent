@@ -1,0 +1,137 @@
+# CI-gate workflow — CI must pass before any human reviews the code.
+#
+# Use this for open-source projects or teams where failing CI wastes
+# reviewers' time. Claude automatically attempts to fix CI failures
+# before requesting review from a designated maintainer.
+#
+# Highlights:
+#   - CI runs before review (open_pr → await_ci → check_ci → request_reviewer)
+#   - choice state routes CI results: pass → reviewer, fail → fix loop
+#   - ai.fix_ci loop (bounded by max_ci_fix_rounds) with choice-gated cycle
+#   - github.request_review to assign a specific reviewer once CI is green
+#   - timeout with PR comment before failing
+
+workflow: ci-gate
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci              # Check CI before requesting review
+    error: failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 2h
+    timeout_next: ci_timed_out
+    params:
+      on_failure: fix           # Fire event with ci_failed=true on CI failure
+    next: check_ci              # Route based on CI result
+    error: failed
+
+  # Branch on the CI result written into step data by ci.complete.
+  check_ci:
+    type: choice
+    choices:
+      - variable: ci_passed
+        equals: true
+        next: request_reviewer  # CI green → assign reviewer
+      - variable: ci_failed
+        equals: true
+        next: fix_ci            # CI red → let Claude fix it
+    default: failed
+
+  # Claude attempts to fix failing CI. Loops back through check_ci (choice
+  # state), which keeps the cycle valid per the workflow engine rules.
+  fix_ci:
+    type: task
+    action: ai.fix_ci
+    params:
+      max_ci_fix_rounds: 3      # Give up after 3 unsuccessful fix attempts
+    next: push_ci_fix
+    error: ci_unfixable
+
+  push_ci_fix:
+    type: task
+    action: github.push
+    next: await_ci              # Loop back: await_ci → check_ci → fix_ci (cycle through choice)
+    error: failed
+
+  # Notify when all fix attempts are exhausted.
+  ci_unfixable:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
+    next: failed
+    error: failed
+
+  ci_timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI has been running for over 2h. Please check the CI pipeline."
+    next: failed
+    error: failed
+
+  # Assign a reviewer only after CI is green, avoiding wasted review time.
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: your-github-username   # Replace with the reviewer's GitHub username
+    next: await_review
+    error: await_review               # If request fails, still wait for review
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge
+    error: failed
+
+  # Comment on the issue when review takes too long, then fail.
+  # (Looping back to await_review would create an unbounded cycle.)
+  review_overdue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash
+      cleanup: true
+    next: done
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail
