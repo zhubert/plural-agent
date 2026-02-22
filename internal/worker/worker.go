@@ -568,7 +568,7 @@ func (w *SessionWorker) handleMergeChild(req mcp.MergeChildRequest) {
 
 	log.Info("merging child to parent", "childID", childSess.ID, "childBranch", childSess.Branch)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(w.ctx, 2*time.Minute)
 	defer cancel()
 
 	resultCh := w.host.GitService().MergeToParent(ctx, childSess.WorkTree, childSess.Branch, sess.WorkTree, sess.Branch, "")
@@ -638,7 +638,7 @@ func (w *SessionWorker) handleGetReviewComments(req mcp.GetReviewCommentsRequest
 
 	log.Info("fetching review comments via MCP tool", "branch", sess.Branch)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
 	defer cancel()
 
 	comments, err := w.host.GitService().FetchPRReviewComments(ctx, sess.RepoPath, sess.Branch)
