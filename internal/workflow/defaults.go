@@ -162,6 +162,24 @@ func Merge(partial, defaults *Config) *Config {
 			s.After = make([]HookConfig, len(state.After))
 			copy(s.After, state.After)
 		}
+		if state.Retry != nil {
+			s.Retry = make([]RetryConfig, len(state.Retry))
+			copy(s.Retry, state.Retry)
+		}
+		if state.Catch != nil {
+			s.Catch = make([]CatchConfig, len(state.Catch))
+			copy(s.Catch, state.Catch)
+		}
+		if state.Choices != nil {
+			s.Choices = make([]ChoiceRule, len(state.Choices))
+			copy(s.Choices, state.Choices)
+		}
+		if state.Data != nil {
+			s.Data = make(map[string]any, len(state.Data))
+			for k, v := range state.Data {
+				s.Data[k] = v
+			}
+		}
 		result.States[name] = &s
 	}
 

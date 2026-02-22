@@ -257,6 +257,97 @@ func TestMerge(t *testing.T) {
 		}
 	})
 
+	t.Run("default state Retry is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States: map[string]*State{
+				"s": {
+					Type: StateTypeTask,
+					Retry: []RetryConfig{
+						{MaxAttempts: 3, BackoffRate: 2.0},
+					},
+				},
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		// Mutate the result's Retry; should not affect defaults
+		result.States["s"].Retry[0].MaxAttempts = 99
+		if defaults.States["s"].Retry[0].MaxAttempts != 3 {
+			t.Error("merge should deep-copy Retry from defaults")
+		}
+	})
+
+	t.Run("default state Catch is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States: map[string]*State{
+				"s": {
+					Type: StateTypeTask,
+					Catch: []CatchConfig{
+						{Errors: []string{"*"}, Next: "failed"},
+					},
+				},
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		// Mutate the result's Catch; should not affect defaults
+		result.States["s"].Catch[0].Next = "mutated"
+		if defaults.States["s"].Catch[0].Next != "failed" {
+			t.Error("merge should deep-copy Catch from defaults")
+		}
+	})
+
+	t.Run("default state Choices is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States: map[string]*State{
+				"s": {
+					Type: StateTypeChoice,
+					Choices: []ChoiceRule{
+						{Variable: "ok", Equals: true, Next: "done"},
+					},
+					Default: "failed",
+				},
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		// Mutate the result's Choices; should not affect defaults
+		result.States["s"].Choices[0].Next = "mutated"
+		if defaults.States["s"].Choices[0].Next != "done" {
+			t.Error("merge should deep-copy Choices from defaults")
+		}
+	})
+
+	t.Run("default state Data is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:   "s",
+			States: map[string]*State{
+				"s": {
+					Type: StateTypePass,
+					Data: map[string]any{"key": "original"},
+				},
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		// Mutate the result's Data; should not affect defaults
+		result.States["s"].Data["key"] = "mutated"
+		if defaults.States["s"].Data["key"] != "original" {
+			t.Error("merge should deep-copy Data from defaults")
+		}
+	})
+
 	t.Run("default settings is deep copied not shared", func(t *testing.T) {
 		defaults := &Config{
 			Workflow: "test",
