@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/zhubert/plural-core/paths"
+
 	"github.com/zhubert/plural-agent/internal/daemonstate"
 )
 
@@ -13,8 +15,8 @@ var agentCleanSkipConfirm bool
 
 var agentCleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Remove agent daemon state and lock files",
-	Long: `Clears daemon state (work item tracking) and removes lock files.
+	Short: "Remove agent daemon state, lock files, and worktrees",
+	Long: `Clears daemon state (work item tracking), removes lock files, and removes worktrees.
 
 This is useful when the daemon state becomes stale or corrupted,
 or when a lock file is left behind after an unclean shutdown.
@@ -32,6 +34,24 @@ func runAgentClean(cmd *cobra.Command, args []string) error {
 	return runAgentCleanWithReader(os.Stdin)
 }
 
+// worktreeEntries returns the names of entries in the worktrees directory.
+// Returns nil if the directory does not exist or is empty.
+func worktreeEntries() []string {
+	wtDir, err := paths.WorktreesDir()
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(wtDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
 func runAgentCleanWithReader(input io.Reader) error {
 	// Check what exists
 	stateExists := daemonstate.StateExists()
@@ -39,8 +59,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: error finding lock files: %v\n", err)
 	}
+	wtEntries := worktreeEntries()
 
-	if !stateExists && len(lockFiles) == 0 {
+	if !stateExists && len(lockFiles) == 0 && len(wtEntries) == 0 {
 		fmt.Println("Nothing to clean.")
 		return nil
 	}
@@ -58,6 +79,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 		fmt.Println()
 		fmt.Println("  Warning: lock files indicate a daemon may be running.")
 		fmt.Println("  Cleaning while a daemon is active can cause issues.")
+	}
+	if len(wtEntries) > 0 {
+		fmt.Printf("  - %d worktree(s)\n", len(wtEntries))
 	}
 
 	// Confirm
@@ -84,6 +108,17 @@ func runAgentCleanWithReader(input io.Reader) error {
 		fmt.Fprintf(os.Stderr, "Warning: error removing lock files: %v\n", err)
 	}
 
+	// Clean worktrees
+	var worktreesRemoved int
+	if len(wtEntries) > 0 {
+		wtDir, _ := paths.WorktreesDir()
+		if err := os.RemoveAll(wtDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: error removing worktrees directory: %v\n", err)
+		} else {
+			worktreesRemoved = len(wtEntries)
+		}
+	}
+
 	// Print results
 	fmt.Println()
 	fmt.Println("Cleaned:")
@@ -92,6 +127,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	}
 	if locksRemoved > 0 {
 		fmt.Printf("  - %d lock file(s) removed\n", locksRemoved)
+	}
+	if worktreesRemoved > 0 {
+		fmt.Printf("  - %d worktree(s) removed\n", worktreesRemoved)
 	}
 
 	return nil

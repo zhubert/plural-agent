@@ -13,6 +13,7 @@ const (
 	DefaultMaxConcurrent  = 3
 	DefaultMergeMethod    = "rebase"
 	DefaultContainerImage = ""
+	DefaultCleanupMerged  = true
 )
 
 // AgentConfig is an in-memory implementation of the Config interface.
@@ -82,6 +83,7 @@ func WithMergeMethod(method string) AgentConfigOption {
 func NewAgentConfig(opts ...AgentConfigOption) *AgentConfig {
 	c := &AgentConfig{
 		containerImage: DefaultContainerImage,
+		cleanupMerged:  DefaultCleanupMerged,
 		maxTurns:       DefaultMaxTurns,
 		maxDurationMin: DefaultMaxDurationMin,
 		maxConcurrent:  DefaultMaxConcurrent,

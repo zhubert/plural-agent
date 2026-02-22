@@ -36,8 +36,8 @@ func TestNewAgentConfig_Defaults(t *testing.T) {
 	if c.GetDefaultBranchPrefix() != "" {
 		t.Errorf("branchPrefix: got %q, want empty", c.GetDefaultBranchPrefix())
 	}
-	if c.GetAutoCleanupMerged() != false {
-		t.Error("cleanupMerged: got true, want false")
+	if c.GetAutoCleanupMerged() != DefaultCleanupMerged {
+		t.Errorf("cleanupMerged: got %v, want %v", c.GetAutoCleanupMerged(), DefaultCleanupMerged)
 	}
 	if len(c.GetRepos()) != 0 {
 		t.Errorf("repos: got %v, want empty", c.GetRepos())

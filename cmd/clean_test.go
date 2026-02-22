@@ -122,6 +122,67 @@ func TestRunAgentClean_ConfirmYes(t *testing.T) {
 	}
 }
 
+func TestRunAgentClean_RemovesWorktrees(t *testing.T) {
+	dataDir, _ := setupAgentCleanTest(t)
+
+	// Create worktree directories (simulating leftover session worktrees)
+	wtDir := filepath.Join(dataDir, "worktrees")
+	for _, name := range []string{"session-abc", "session-def"} {
+		if err := os.MkdirAll(filepath.Join(wtDir, name), 0o755); err != nil {
+			t.Fatalf("failed to create worktree dir: %v", err)
+		}
+	}
+
+	agentCleanSkipConfirm = true
+	defer func() { agentCleanSkipConfirm = false }()
+
+	err := runAgentCleanWithReader(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify worktrees directory removed
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Error("expected worktrees directory to be removed")
+	}
+}
+
+func TestRunAgentClean_NothingToClean_NoWorktrees(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	// No state, no locks, no worktrees — should report nothing to clean
+	agentCleanSkipConfirm = true
+	defer func() { agentCleanSkipConfirm = false }()
+
+	err := runAgentCleanWithReader(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunAgentClean_OnlyWorktrees(t *testing.T) {
+	dataDir, _ := setupAgentCleanTest(t)
+
+	// Only create worktrees, no state file or lock files
+	wtDir := filepath.Join(dataDir, "worktrees")
+	if err := os.MkdirAll(filepath.Join(wtDir, "session-xyz"), 0o755); err != nil {
+		t.Fatalf("failed to create worktree dir: %v", err)
+	}
+
+	agentCleanSkipConfirm = true
+	defer func() { agentCleanSkipConfirm = false }()
+
+	err := runAgentCleanWithReader(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Worktrees should be removed
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Error("expected worktrees directory to be removed")
+	}
+}
+
 func TestRunAgentClean_OnlyLocks(t *testing.T) {
 	_, stateDir := setupAgentCleanTest(t)
 
