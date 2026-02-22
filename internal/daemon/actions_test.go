@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"fmt"
+	osexec "os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1347,5 +1349,306 @@ func TestCommentPRAction_Execute_EmptyBody(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected error for empty comment body")
+	}
+}
+
+// --- formatAction tests ---
+
+// initTestGitRepo creates a temporary directory with an initialized git repo
+// containing an initial commit, suitable for format action tests.
+func initTestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	mustRunGit(t, dir, "init")
+	mustRunGit(t, dir, "config", "user.email", "test@test.com")
+	mustRunGit(t, dir, "config", "user.name", "Test User")
+
+	// Create initial commit so there is a HEAD reference
+	readmePath := filepath.Join(dir, "README.md")
+	createCmd := osexec.Command("sh", "-c", "echo '# Test' > "+readmePath)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to create README.md: %v (output: %s)", err, out)
+	}
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "initial commit")
+
+	return dir
+}
+
+func mustRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := osexec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v (output: %s)", args, err, out)
+	}
+}
+
+func TestFormatAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &formatAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"command": "go fmt ./..."})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestFormatAction_Execute_SessionNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent-session",
+	})
+
+	action := &formatAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"command": "go fmt ./..."})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestFormatAction_Execute_MissingCommand(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &formatAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing command parameter")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing command parameter")
+	}
+}
+
+func TestFormatAction_Execute_EmptyCommand(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &formatAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"command": ""})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for empty command")
+	}
+	if result.Error == nil {
+		t.Error("expected error for empty command")
+	}
+}
+
+func TestRunFormatter_NoChanges(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	// 'true' is a no-op command that succeeds but makes no file changes
+	params := workflow.NewParamHelper(map[string]any{"command": "true"})
+
+	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	if err != nil {
+		t.Fatalf("expected no error for no-op formatter, got: %v", err)
+	}
+
+	// Verify no additional commits were created (only the initial commit)
+	cmd := osexec.Command("git", "log", "--oneline")
+	cmd.Dir = workDir
+	out, _ := cmd.Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected 1 commit (initial), got %d commits: %s", len(lines), out)
+	}
+}
+
+func TestRunFormatter_WithChanges(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	// Command that creates a new file, simulating a formatter adding/modifying files
+	params := workflow.NewParamHelper(map[string]any{"command": "echo 'formatted' > formatted.txt"})
+
+	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify a formatting commit was added
+	cmd := osexec.Command("git", "log", "--oneline")
+	cmd.Dir = workDir
+	out, _ := cmd.Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 {
+		t.Errorf("expected 2 commits (initial + formatting), got %d: %s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "auto-formatting") {
+		t.Errorf("expected formatting commit message to contain 'auto-formatting', got: %s", lines[0])
+	}
+}
+
+func TestRunFormatter_CustomCommitMessage(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	params := workflow.NewParamHelper(map[string]any{
+		"command": "echo 'fmt' > fmt.txt",
+		"message": "chore: apply prettier formatting",
+	})
+
+	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify the custom commit message was used
+	cmd := osexec.Command("git", "log", "--format=%s", "-1")
+	cmd.Dir = workDir
+	out, _ := cmd.Output()
+	msg := strings.TrimSpace(string(out))
+	if msg != "chore: apply prettier formatting" {
+		t.Errorf("expected custom commit message, got: %q", msg)
+	}
+}
+
+func TestRunFormatter_CommandFails(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	// Command that exits non-zero to simulate formatter failure
+	params := workflow.NewParamHelper(map[string]any{"command": "exit 1"})
+
+	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	if err == nil {
+		t.Fatal("expected error when formatter command fails")
+	}
+	if !strings.Contains(err.Error(), "formatter failed") {
+		t.Errorf("expected 'formatter failed' in error, got: %v", err)
+	}
+}
+
+func TestRunFormatter_FallbackToRepoPath(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	// Session with empty WorkTree — should fall back to RepoPath
+	sess := &config.Session{
+		ID:       "sess-1",
+		RepoPath: workDir,
+		WorkTree: "", // empty — forces fallback
+		Branch:   "feature-sess-1",
+		Name:     "test/sess-1",
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	params := workflow.NewParamHelper(map[string]any{"command": "true"})
+
+	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	if err != nil {
+		t.Fatalf("expected no error when falling back to RepoPath, got: %v", err)
 	}
 }

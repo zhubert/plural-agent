@@ -123,6 +123,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateRequestReviewParams(prefix, state.Params)...)
 		}
 
+		// Validate params for git.format action
+		if state.Action == "git.format" {
+			errs = append(errs, validateFormatParams(prefix, state.Params)...)
+		}
+
 	case StateTypeWait:
 		// Wait states require event
 		if state.Event == "" {
@@ -416,6 +421,37 @@ func validateRequestReviewParams(prefix string, params map[string]any) []Validat
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".params.reviewer",
 			Message: "reviewer must not be empty",
+		})
+	}
+
+	return errs
+}
+
+// validateFormatParams validates params for git.format actions.
+func validateFormatParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	if params == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.command",
+			Message: "command is required for git.format action",
+		})
+		return errs
+	}
+
+	command, ok := params["command"]
+	if !ok || command == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.command",
+			Message: "command is required for git.format action",
+		})
+		return errs
+	}
+
+	if s, ok := command.(string); ok && s == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.command",
+			Message: "command must not be empty",
 		})
 	}
 

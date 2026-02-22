@@ -989,6 +989,83 @@ func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, e
 	return logs, nil
 }
 
+// formatAction implements the git.format action.
+type formatAction struct {
+	daemon *Daemon
+}
+
+// Execute runs a formatter command in the session's worktree and commits any resulting changes.
+func (a *formatAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.runFormatter(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("format failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// runFormatter runs the specified formatter command in the session's worktree
+// and commits any resulting changes.
+func (d *Daemon) runFormatter(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found for work item %s", item.ID)
+	}
+
+	command := params.String("command", "")
+	if command == "" {
+		return fmt.Errorf("command parameter is required for git.format")
+	}
+
+	message := params.String("message", "Apply auto-formatting")
+
+	// Use worktree if available, fall back to repo path
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	formatCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	// Run the formatter command via shell
+	formatCmd := osexec.CommandContext(formatCtx, "sh", "-c", command)
+	formatCmd.Dir = workDir
+	if output, err := formatCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("formatter failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+
+	// Stage all changes (handles new files, modifications, and deletions)
+	addCmd := osexec.CommandContext(formatCtx, "git", "add", "-A")
+	addCmd.Dir = workDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Check if there is anything staged to commit (exit 0 = no changes)
+	diffCmd := osexec.CommandContext(formatCtx, "git", "diff", "--cached", "--quiet")
+	diffCmd.Dir = workDir
+	if err := diffCmd.Run(); err == nil {
+		d.logger.Info("formatter produced no changes", "workItem", item.ID)
+		return nil
+	}
+
+	// Commit the formatting changes
+	commitCmd := osexec.CommandContext(formatCtx, "git", "commit", "-m", message)
+	commitCmd.Dir = workDir
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+
+	d.logger.Info("applied formatting and committed", "workItem", item.ID, "command", command)
+	return nil
+}
+
 // getCIFixRounds extracts the CI fix round counter from step data.
 func getCIFixRounds(stepData map[string]any) int {
 	v, ok := stepData["ci_fix_rounds"]
