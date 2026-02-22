@@ -102,3 +102,31 @@ func TestResolveSystemPrompt_SymlinkTraversal(t *testing.T) {
 		t.Error("expected error for symlink traversal, got nil")
 	}
 }
+
+// TestResolveSystemPrompt_SymlinkInternal verifies that a symlink inside the repo
+// pointing to another file inside the repo is resolved correctly, and that
+// we read from the real (resolved) path rather than the symlink path.
+// This is a regression test for the TOCTOU fix: os.ReadFile must use realPath.
+func TestResolveSystemPrompt_SymlinkInternal(t *testing.T) {
+	repoDir := t.TempDir()
+
+	// Create a real prompt file inside the repo
+	realFile := filepath.Join(repoDir, "real_prompt.md")
+	if err := os.WriteFile(realFile, []byte("real content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink inside the repo pointing to the real file (also inside)
+	symlinkPath := filepath.Join(repoDir, "link_prompt.md")
+	if err := os.Symlink(realFile, symlinkPath); err != nil {
+		t.Skipf("cannot create symlinks: %v", err)
+	}
+
+	got, err := ResolveSystemPrompt("file:link_prompt.md", repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error for internal symlink: %v", err)
+	}
+	if got != "real content" {
+		t.Errorf("got %q, want %q", got, "real content")
+	}
+}

@@ -49,7 +49,7 @@ func ResolveSystemPrompt(prompt, repoPath string) (string, error) {
 		return "", fmt.Errorf("prompt file %q escapes repository root", relPath)
 	}
 
-	data, err := os.ReadFile(absPath)
+	data, err := os.ReadFile(realPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read prompt file %q: %w", relPath, err)
 	}
