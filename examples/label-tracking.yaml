@@ -85,7 +85,8 @@ states:
     params:
       require_review: true
       require_ci: true
-    timeout: 72h                   # Route to label_failed after 3 days of inactivity
+    timeout: 72h
+    timeout_next: label_failed     # Route to label_failed after 3 days of inactivity
     next: merge
     error: label_failed
 
