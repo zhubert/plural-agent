@@ -66,18 +66,29 @@ states:
     event: ci.complete
     timeout: 3h
     params:
-      on_failure: retry       # Keep polling; CI may pass on re-run
+      on_failure: retry       # Keep polling; CI may still pass on a subsequent run
     next: await_review
     error: failed
 
   await_review:
     type: wait
     event: pr.reviewed
+    timeout: 72h
+    timeout_next: review_overdue
     params:
       auto_address: true
       max_feedback_rounds: 5  # Allow more review rounds for complex features
       system_prompt: "file:.plural/prompts/review-feedback.md"
     next: merge
+    error: failed
+
+  # Comment on the PR and fail if review takes too long.
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: failed
     error: failed
 
   merge:
