@@ -665,6 +665,54 @@ func TestValidate(t *testing.T) {
 			wantFields: nil,
 		},
 		{
+			name: "git.format missing command param",
+			cfg: &Config{
+				Start:  "fmt",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"fmt":  {Type: StateTypeTask, Action: "git.format", Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.fmt.params.command"},
+		},
+		{
+			name: "git.format with empty command param",
+			cfg: &Config{
+				Start:  "fmt",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"fmt":  {Type: StateTypeTask, Action: "git.format", Next: "done", Params: map[string]any{"command": ""}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.fmt.params.command"},
+		},
+		{
+			name: "git.format with valid command",
+			cfg: &Config{
+				Start:  "fmt",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"fmt":  {Type: StateTypeTask, Action: "git.format", Next: "done", Params: map[string]any{"command": "go fmt ./..."}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "git.format with command and custom message",
+			cfg: &Config{
+				Start:  "fmt",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"fmt":  {Type: StateTypeTask, Action: "git.format", Next: "done", Params: map[string]any{"command": "prettier --write .", "message": "chore: format"}},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
 			name: "cycle detection: simple A→B→A",
 			cfg: &Config{
 				Start:  "a",
