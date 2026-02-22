@@ -53,6 +53,8 @@ func GenerateDockerfile(langs []DetectedLang) string {
 		}
 	}
 
+	b.WriteString("ENTRYPOINT [\"claude\"]\n")
+
 	return b.String()
 }
 

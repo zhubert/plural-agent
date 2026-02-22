@@ -71,6 +71,25 @@ func TestGenerateDockerfile_AlwaysIncludesClaudeCode(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
+	tests := []struct {
+		name  string
+		langs []DetectedLang
+	}{
+		{"no languages", nil},
+		{"go only", []DetectedLang{{Lang: LangGo, Version: "1.23"}}},
+		{"multi", []DetectedLang{{Lang: LangGo}, {Lang: LangRuby}, {Lang: LangPython}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			df := GenerateDockerfile(tt.langs)
+			if !strings.Contains(df, `ENTRYPOINT ["claude"]`) {
+				t.Error("expected ENTRYPOINT for claude in every Dockerfile")
+			}
+		})
+	}
+}
+
 func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: ""},
