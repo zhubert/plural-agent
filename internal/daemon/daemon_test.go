@@ -565,10 +565,11 @@ func TestDaemon_RecoverFromState_AsyncPendingNoPR(t *testing.T) {
 	}
 }
 
-func TestDaemon_RecoverFromState_AddressingFeedback(t *testing.T) {
+func TestDaemon_RecoverFromState_AddressingFeedback_NoSession(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
+	// No session registered — should fall back to resetting to idle
 	d.state.AddWorkItem(&daemonstate.WorkItem{
 		ID:          "item-1",
 		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
@@ -576,7 +577,6 @@ func TestDaemon_RecoverFromState_AddressingFeedback(t *testing.T) {
 		Branch:      "feature-1",
 		CurrentStep: "await_review",
 	})
-	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
 
 	d.recoverFromState(context.Background())
@@ -590,7 +590,167 @@ func TestDaemon_RecoverFromState_AddressingFeedback(t *testing.T) {
 	}
 }
 
-func TestDaemon_RecoverFromState_Pushing(t *testing.T) {
+func TestDaemon_RecoverFromState_AddressingFeedback_PRMerged(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed, got %s", item.State)
+	}
+	if item.CurrentStep != "done" {
+		t.Errorf("expected done, got %s", item.CurrentStep)
+	}
+	if item.CompletedAt == nil {
+		t.Error("expected CompletedAt to be set")
+	}
+}
+
+func TestDaemon_RecoverFromState_AddressingFeedback_PRClosed(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "CLOSED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.State != daemonstate.WorkItemFailed {
+		t.Errorf("expected failed, got %s", item.State)
+	}
+	if item.ErrorMessage == "" {
+		t.Error("expected error message to be set")
+	}
+}
+
+func TestDaemon_RecoverFromState_AddressingFeedback_PRApproved(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Both GetPRState and CheckPRReviewDecision use "gh pr view" prefix,
+	// so we need a combined JSON that satisfies both parsers.
+	type review struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	}
+	r := review{State: "APPROVED"}
+	r.Author.Login = "reviewer1"
+	prViewJSON, _ := json.Marshal(struct {
+		State   string   `json:"state"`
+		Reviews []review `json:"reviews"`
+	}{State: "OPEN", Reviews: []review{r}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.CurrentStep != "merge" {
+		t.Errorf("expected merge, got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected idle, got %s", item.Phase)
+	}
+}
+
+func TestDaemon_RecoverFromState_AddressingFeedback_PROpenNotApproved(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is open with no approving reviews
+	prViewJSON, _ := json.Marshal(struct {
+		State   string        `json:"state"`
+		Reviews []interface{} `json:"reviews"`
+	}{State: "OPEN", Reviews: []interface{}{}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.Phase != "idle" {
+		t.Errorf("expected idle, got %s", item.Phase)
+	}
+	if item.CurrentStep != "await_review" {
+		t.Errorf("expected await_review, got %s", item.CurrentStep)
+	}
+}
+
+func TestDaemon_RecoverFromState_Pushing_NoSession(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
@@ -601,8 +761,67 @@ func TestDaemon_RecoverFromState_Pushing(t *testing.T) {
 		Branch:      "feature-1",
 		CurrentStep: "await_review",
 	})
-	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "await_review", "pushing")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.Phase != "idle" {
+		t.Errorf("expected idle, got %s", item.Phase)
+	}
+}
+
+func TestDaemon_RecoverFromState_Pushing_PRMerged(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	prStateJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prStateJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "pushing")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed, got %s", item.State)
+	}
+	if item.CurrentStep != "done" {
+		t.Errorf("expected done, got %s", item.CurrentStep)
+	}
+}
+
+func TestDaemon_RecoverFromState_AddressingFeedback_NoBranch(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "", // No branch
+		CurrentStep: "await_review",
+	})
+	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
 
 	d.recoverFromState(context.Background())
 
