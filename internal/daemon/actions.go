@@ -982,8 +982,9 @@ func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, e
 	logs := string(logOutput)
 	// Truncate to ~50k chars if too long
 	const maxLogLen = 50000
+	const truncSuffix = "\n\n... (truncated)"
 	if len(logs) > maxLogLen {
-		logs = logs[:maxLogLen] + "\n\n... (truncated)"
+		logs = logs[:maxLogLen-len(truncSuffix)] + truncSuffix
 	}
 
 	return logs, nil

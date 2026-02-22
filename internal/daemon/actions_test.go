@@ -1652,3 +1652,42 @@ func TestRunFormatter_FallbackToRepoPath(t *testing.T) {
 		t.Fatalf("expected no error when falling back to RepoPath, got: %v", err)
 	}
 }
+
+func TestTruncateLogs(t *testing.T) {
+	const maxLogLen = 50000
+	const truncSuffix = "\n\n... (truncated)"
+
+	truncate := func(logs string) string {
+		if len(logs) > maxLogLen {
+			return logs[:maxLogLen-len(truncSuffix)] + truncSuffix
+		}
+		return logs
+	}
+
+	t.Run("short log is unchanged", func(t *testing.T) {
+		input := strings.Repeat("x", 100)
+		got := truncate(input)
+		if got != input {
+			t.Errorf("expected unchanged log, got len=%d", len(got))
+		}
+	})
+
+	t.Run("log exactly at maxLogLen is unchanged", func(t *testing.T) {
+		input := strings.Repeat("x", maxLogLen)
+		got := truncate(input)
+		if got != input {
+			t.Errorf("expected unchanged log at exact limit, got len=%d", len(got))
+		}
+	})
+
+	t.Run("long log is truncated to exactly maxLogLen", func(t *testing.T) {
+		input := strings.Repeat("x", maxLogLen+1000)
+		got := truncate(input)
+		if len(got) != maxLogLen {
+			t.Errorf("expected len=%d, got len=%d", maxLogLen, len(got))
+		}
+		if !strings.HasSuffix(got, truncSuffix) {
+			t.Errorf("expected truncated log to end with suffix %q", truncSuffix)
+		}
+	})
+}
