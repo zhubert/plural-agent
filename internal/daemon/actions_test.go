@@ -1855,6 +1855,8 @@ func TestDaemon_RefreshStaleSession_RecreatesWorktree(t *testing.T) {
 		}
 	}
 	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
 	runGit("commit", "--allow-empty", "-m", "init")
 	runGit("checkout", "-b", "issue-42")
 	runGit("commit", "--allow-empty", "-m", "work on issue")
@@ -1918,6 +1920,8 @@ func TestDaemon_RefreshStaleSession_RemovesStaleWorktree(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
 	runGit("commit", "--allow-empty", "-m", "init")
 	runGit("checkout", "-b", "issue-99")
 	runGit("commit", "--allow-empty", "-m", "work on issue")
