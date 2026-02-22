@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	osexec "os/exec"
 	"path/filepath"
@@ -584,6 +585,137 @@ func TestConfigureRunner_NoSystemPrompt(t *testing.T) {
 
 	if runner.systemPrompt != "" {
 		t.Errorf("expected empty system prompt, got %q", runner.systemPrompt)
+	}
+}
+
+func TestStartCoding_SkipsCleanupWhenPRExists(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// BranchExists returns true (branch exists)
+	// Default mock returns success for all commands, so BranchExists returns true.
+
+	// GetPRState returns OPEN PR via "gh pr view" prefix
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(context.Background(), item)
+	if err == nil {
+		t.Fatal("startCoding should return error when branch has existing PR")
+	}
+	if !strings.Contains(err.Error(), "existing OPEN PR") {
+		t.Errorf("expected 'existing OPEN PR' error, got: %v", err)
+	}
+
+	// The branch should NOT have been cleaned up (no cleanupStaleBranch call).
+	// Verify by checking that no session was created (startCoding returns before session creation).
+	sessions := cfg.GetSessions()
+	if len(sessions) != 0 {
+		t.Errorf("expected no sessions to be created, got %d", len(sessions))
+	}
+}
+
+func TestStartCoding_SkipsCleanupWhenPRMerged(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns MERGED PR
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(context.Background(), item)
+	if err == nil {
+		t.Fatal("startCoding should return error when branch has merged PR")
+	}
+	if !strings.Contains(err.Error(), "existing MERGED PR") {
+		t.Errorf("expected 'existing MERGED PR' error, got: %v", err)
+	}
+}
+
+func TestStartCoding_CleansUpWhenNoPR(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns error (no PR found) via "gh pr view"
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	// BranchExists: first call returns true, second returns false (cleaned up)
+	branchCheckCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "git" && len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "issue-10" {
+			branchCheckCount++
+			return branchCheckCount > 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(context.Background(), item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed when no PR exists on branch, got: %v", err)
+	}
+
+	// Should have cleaned up the stale branch and created a new session
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a new session to be created")
 	}
 }
 

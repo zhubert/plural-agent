@@ -16,6 +16,7 @@ import (
 	"github.com/zhubert/plural-agent/internal/workflow"
 	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/issues"
 	"github.com/zhubert/plural-core/paths"
 	"github.com/zhubert/plural-core/session"
@@ -285,6 +286,16 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 
 	// Check if branch already exists (stale from a previous crashed session)
 	if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
+		// Before cleaning up, check if there's a live PR on this branch.
+		// If so, skip coding and let the caller advance to the appropriate wait state.
+		prCtx, prCancel := context.WithTimeout(ctx, 15*time.Second)
+		prState, prErr := d.gitService.GetPRState(prCtx, repoPath, fullBranchName)
+		prCancel()
+		if prErr == nil && (prState == git.PRStateOpen || prState == git.PRStateMerged) {
+			log.Warn("branch has existing PR, skipping coding", "branch", fullBranchName, "prState", prState)
+			return fmt.Errorf("branch %s has an existing %s PR", fullBranchName, prState)
+		}
+
 		log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
 		d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
 		if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
