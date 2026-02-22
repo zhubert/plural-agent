@@ -473,7 +473,7 @@ func validateCIParams(prefix string, params map[string]any) []ValidationError {
 			default:
 				errs = append(errs, ValidationError{
 					Field:   prefix + ".params.on_failure",
-					Message: fmt.Sprintf("unknown on_failure policy %q (must be abandon, retry, or notify)", s),
+					Message: fmt.Sprintf("unknown on_failure policy %q (must be abandon, retry, notify, or fix)", s),
 				})
 			}
 		}
