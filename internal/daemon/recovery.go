@@ -5,14 +5,56 @@ import (
 	"time"
 
 	"github.com/zhubert/plural-agent/internal/daemonstate"
+	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"
 )
+
+// reconstructSessions creates minimal config.Session objects for recovered work items
+// whose sessions are missing from the in-memory config. On daemon restart, the config
+// starts empty (AgentConfig.Save() is a no-op), so all sessions are lost. Without
+// reconstruction, GetSession() returns nil and every polling path silently skips
+// recovered items forever.
+func (d *Daemon) reconstructSessions() {
+	log := d.logger.With("component", "recovery")
+
+	for _, item := range d.state.WorkItems {
+		if item.IsTerminal() {
+			continue
+		}
+		if item.SessionID == "" {
+			continue
+		}
+		if d.config.GetSession(item.SessionID) != nil {
+			continue
+		}
+
+		// Only mark PRCreated if the item is past the coding step.
+		prCreated := item.CurrentStep != "" && item.CurrentStep != "coding"
+
+		sess := config.Session{
+			ID:            item.SessionID,
+			RepoPath:      d.state.RepoPath,
+			Branch:        item.Branch,
+			DaemonManaged: true,
+			Autonomous:    true,
+			Started:       true,
+			PRCreated:     prCreated,
+		}
+		d.config.AddSession(sess)
+
+		log.Info("reconstructed session for recovered work item",
+			"workItem", item.ID, "sessionID", item.SessionID, "branch", item.Branch)
+	}
+}
 
 // recoverFromState reconciles daemon state with reality after a restart.
 func (d *Daemon) recoverFromState(ctx context.Context) {
 	if d.state == nil || len(d.state.WorkItems) == 0 {
 		return
 	}
+
+	// Reconstruct sessions before recovery so GetSession() works for all items.
+	d.reconstructSessions()
 
 	log := d.logger.With("component", "recovery")
 	log.Info("recovering from previous state", "workItems", len(d.state.WorkItems))
