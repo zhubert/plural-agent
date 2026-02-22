@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,9 +13,11 @@ import (
 func TestGenerateDockerfile_GoWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: "1.23"},
-	})
-	if !strings.Contains(df, "go1.23.0.linux-amd64.tar.gz") {
-		t.Error("expected Go 1.23 tarball URL in Dockerfile")
+	}, "0.2.11")
+	expectedArch := goArch()
+	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", expectedArch)
+	if !strings.Contains(df, expected) {
+		t.Errorf("expected %s in Dockerfile, got:\n%s", expected, df)
 	}
 	if !strings.Contains(df, "/usr/local/go/bin") {
 		t.Error("expected Go PATH setup in Dockerfile")
@@ -26,9 +29,10 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 		{Lang: LangGo, Version: "1.22"},
 		{Lang: LangRuby, Version: "3.3"},
 		{Lang: LangNode, Version: "20"},
-	})
-	if !strings.Contains(df, "go1.22.0.linux-amd64.tar.gz") {
-		t.Error("expected Go install in Dockerfile")
+	}, "0.2.11")
+	expected := fmt.Sprintf("go1.22.0.linux-%s.tar.gz", goArch())
+	if !strings.Contains(df, expected) {
+		t.Errorf("expected %s in Dockerfile", expected)
 	}
 	if !strings.Contains(df, "ruby-install --system ruby 3.3") {
 		t.Error("expected Ruby 3.3 install in Dockerfile")
@@ -39,7 +43,7 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 }
 
 func TestGenerateDockerfile_NoLanguages(t *testing.T) {
-	df := GenerateDockerfile(nil)
+	df := GenerateDockerfile(nil, "0.2.11")
 	if !strings.Contains(df, "ubuntu:24.04") {
 		t.Error("expected ubuntu base image")
 	}
@@ -63,7 +67,7 @@ func TestGenerateDockerfile_AlwaysIncludesClaudeCode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs)
+			df := GenerateDockerfile(tt.langs, "0.2.11")
 			if !strings.Contains(df, "@anthropic-ai/claude-code") {
 				t.Error("expected Claude Code install in every Dockerfile")
 			}
@@ -82,7 +86,7 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs)
+			df := GenerateDockerfile(tt.langs, "0.2.11")
 			if !strings.Contains(df, `ENTRYPOINT ["claude"]`) {
 				t.Error("expected ENTRYPOINT for claude in every Dockerfile")
 			}
@@ -93,17 +97,18 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: ""},
-	})
+	}, "0.2.11")
 	// Should use default Go version 1.23
-	if !strings.Contains(df, "go1.23.0.linux-amd64.tar.gz") {
-		t.Error("expected default Go 1.23 version when version is empty")
+	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", goArch())
+	if !strings.Contains(df, expected) {
+		t.Errorf("expected %s when version is empty", expected)
 	}
 }
 
 func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
-	})
+	}, "0.2.11")
 	if !strings.Contains(df, "python3.11") {
 		t.Error("expected Python 3.11 install in Dockerfile")
 	}
@@ -115,7 +120,7 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangRust, Version: "1.77.0"},
-	})
+	}, "0.2.11")
 	if !strings.Contains(df, "--default-toolchain 1.77.0") {
 		t.Error("expected Rust 1.77.0 toolchain in Dockerfile")
 	}
@@ -127,7 +132,7 @@ func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
 func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangJava, Version: "21"},
-	})
+	}, "0.2.11")
 	if !strings.Contains(df, "openjdk-21-jdk") {
 		t.Error("expected OpenJDK 21 install in Dockerfile")
 	}
@@ -136,12 +141,50 @@ func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 func TestGenerateDockerfile_PHP(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPHP},
-	})
+	}, "0.2.11")
 	if !strings.Contains(df, "php-cli") {
 		t.Error("expected PHP CLI install in Dockerfile")
 	}
 	if !strings.Contains(df, "composer") {
 		t.Error("expected Composer install in Dockerfile")
+	}
+}
+
+func TestGenerateDockerfile_IncludesPluralBinary(t *testing.T) {
+	expectedArch := releaseArch()
+	tests := []struct {
+		name  string
+		langs []DetectedLang
+	}{
+		{"no languages", nil},
+		{"go only", []DetectedLang{{Lang: LangGo, Version: "1.23"}}},
+		{"multi", []DetectedLang{{Lang: LangGo}, {Lang: LangRuby}, {Lang: LangPython}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			df := GenerateDockerfile(tt.langs, "0.2.11")
+			expected := fmt.Sprintf("plural-agent/releases/download/v0.2.11/plural-agent_Linux_%s.tar.gz", expectedArch)
+			if !strings.Contains(df, expected) {
+				t.Errorf("expected release download URL in Dockerfile, got:\n%s", df)
+			}
+			if !strings.Contains(df, "/usr/local/bin/plural") {
+				t.Error("expected plural binary install path in Dockerfile")
+			}
+		})
+	}
+}
+
+func TestGenerateDockerfile_SkipsPluralForDevVersion(t *testing.T) {
+	df := GenerateDockerfile(nil, "dev")
+	if strings.Contains(df, "plural-agent/releases") {
+		t.Error("should not download plural binary for dev version")
+	}
+}
+
+func TestGenerateDockerfile_SkipsPluralForEmptyVersion(t *testing.T) {
+	df := GenerateDockerfile(nil, "")
+	if strings.Contains(df, "plural-agent/releases") {
+		t.Error("should not download plural binary for empty version")
 	}
 }
 
@@ -151,8 +194,8 @@ func TestGenerateDockerfile_Deterministic(t *testing.T) {
 		{Lang: LangNode, Version: "20"},
 		{Lang: LangRuby, Version: "3.3"},
 	}
-	df1 := GenerateDockerfile(langs)
-	df2 := GenerateDockerfile(langs)
+	df1 := GenerateDockerfile(langs, "0.2.11")
+	df2 := GenerateDockerfile(langs, "0.2.11")
 	if df1 != df2 {
 		t.Error("GenerateDockerfile should be deterministic for the same input")
 	}
@@ -162,12 +205,26 @@ func TestGenerateDockerfile_NodeVersionOverride(t *testing.T) {
 	// When Node is detected with a specific version, it should use that version
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangNode, Version: "22"},
-	})
+	}, "0.2.11")
 	if !strings.Contains(df, "setup_22.x") {
 		t.Error("expected detected Node version 22 to override default")
 	}
 	if strings.Contains(df, "setup_20.x") {
 		t.Error("should not use default Node 20 when version 22 is detected")
+	}
+}
+
+func TestReleaseArch(t *testing.T) {
+	arch := releaseArch()
+	switch runtime.GOARCH {
+	case "arm64":
+		if arch != "arm64" {
+			t.Errorf("expected arm64, got %s", arch)
+		}
+	default:
+		if arch != "x86_64" {
+			t.Errorf("expected x86_64, got %s", arch)
+		}
 	}
 }
 
@@ -215,7 +272,7 @@ func TestEnsureImage_Cached(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, logger)
+	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,7 +307,7 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, logger)
+	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -274,7 +331,7 @@ func TestEnsureImage_BuildFailure(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	_, err := EnsureImage(context.Background(), nil, logger)
+	_, err := EnsureImage(context.Background(), nil, "0.2.11", logger)
 	if err == nil {
 		t.Fatal("expected error on build failure")
 	}

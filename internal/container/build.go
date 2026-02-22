@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -20,10 +21,32 @@ var defaultVersions = map[Language]string{
 	LangJava:   "21",
 }
 
+// goArch returns the Go/Docker architecture string for the current platform.
+func goArch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "arm64"
+	default:
+		return "amd64"
+	}
+}
+
+// releaseArch returns the goreleaser archive architecture suffix.
+func releaseArch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "arm64"
+	default:
+		return "x86_64"
+	}
+}
+
 // GenerateDockerfile produces a Dockerfile that includes all detected language
 // toolchains at their specified versions (or defaults).
 // Node.js is always included since it's required for Claude Code.
-func GenerateDockerfile(langs []DetectedLang) string {
+// If version is non-empty (and not "dev"), the plural-agent binary is downloaded
+// from the GitHub release and installed as /usr/local/bin/plural.
+func GenerateDockerfile(langs []DetectedLang, version string) string {
 	var b strings.Builder
 
 	// Determine Node version: use detected version if present, else default
@@ -53,6 +76,13 @@ func GenerateDockerfile(langs []DetectedLang) string {
 		}
 	}
 
+	// Download the plural-agent binary from GitHub releases
+	if version != "" && version != "dev" {
+		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/plural-agent/releases/download/v%s/plural-agent_Linux_%s.tar.gz"+
+			" | tar -xz -C /tmp && mv /tmp/plural-agent /usr/local/bin/plural\n",
+			version, releaseArch())
+	}
+
 	b.WriteString("ENTRYPOINT [\"claude\"]\n")
 
 	return b.String()
@@ -69,9 +99,9 @@ func languageInstallBlock(l DetectedLang) string {
 	switch l.Lang {
 	case LangGo:
 		return fmt.Sprintf(""+
-			"RUN curl -fsSL https://go.dev/dl/go%s.0.linux-amd64.tar.gz | tar -C /usr/local -xz\n"+
+			"RUN curl -fsSL https://go.dev/dl/go%s.0.linux-%s.tar.gz | tar -C /usr/local -xz\n"+
 			"ENV PATH=\"/usr/local/go/bin:/root/go/bin:${PATH}\"\n",
-			v)
+			v, goArch())
 	case LangRuby:
 		return fmt.Sprintf(""+
 			"RUN apt-get update && apt-get install -y --no-install-recommends \\\n"+
@@ -138,9 +168,10 @@ func dockerCommand(ctx context.Context, stdin string, args ...string) ([]byte, e
 }
 
 // EnsureImage generates a Dockerfile for the detected languages, builds it if
-// not already cached, and returns the image tag.
-func EnsureImage(ctx context.Context, langs []DetectedLang, logger *slog.Logger) (string, error) {
-	dockerfile := GenerateDockerfile(langs)
+// not already cached, and returns the image tag. The plural-agent binary is
+// downloaded from the GitHub release inside the Dockerfile.
+func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logger *slog.Logger) (string, error) {
+	dockerfile := GenerateDockerfile(langs, version)
 	tag := ImageTag(dockerfile)
 
 	// Check if image already exists (cached)

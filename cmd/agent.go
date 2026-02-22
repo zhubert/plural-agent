@@ -102,7 +102,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		detected := container.Detect(ctx, agentRepo)
 		agentLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
 
-		image, err := container.EnsureImage(ctx, detected, agentLogger)
+		image, err := container.EnsureImage(ctx, detected, version, agentLogger)
 		if err != nil {
 			return fmt.Errorf("failed to auto-build container image: %w\n\n"+
 				"You can skip auto-detection by setting container_image in .plural/workflow.yaml", err)
