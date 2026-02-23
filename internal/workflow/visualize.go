@@ -70,11 +70,6 @@ func GenerateMermaid(cfg *Config) string {
 			}
 		}
 
-		// Add note for params
-		note := formatStateNote(state)
-		if note != "" {
-			sb.WriteString(fmt.Sprintf("    note right of %s\n        %s\n    end note\n", name, note))
-		}
 	}
 
 	return sb.String()
@@ -97,15 +92,3 @@ func formatChoiceLabel(rule ChoiceRule) string {
 	return rule.Variable
 }
 
-// formatStateNote creates a note string from a state's params.
-func formatStateNote(state *State) string {
-	if len(state.Params) == 0 {
-		return ""
-	}
-
-	var parts []string
-	for k, v := range state.Params {
-		parts = append(parts, fmt.Sprintf("%s: %v", k, v))
-	}
-	return strings.Join(parts, ", ")
-}
