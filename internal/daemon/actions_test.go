@@ -2176,6 +2176,217 @@ func TestDaemon_RefreshStaleSession_RemovesStaleWorktree(t *testing.T) {
 	_ = osexec.Command("git", "-C", repoDir, "worktree", "remove", "--force", result.WorkTree).Run()
 }
 
+// --- branchHasChanges tests ---
+
+func TestBranchHasChanges_NoCommitsNoChanges(t *testing.T) {
+	// Create a git repo with a branch that has no new commits relative to main
+	repoDir := initTestGitRepo(t)
+
+	// Create a branch at the same commit as the current HEAD
+	mustRunGit(t, repoDir, "branch", "issue-50")
+	mustRunGit(t, repoDir, "checkout", "issue-50")
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-no-changes",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-50",
+		BaseBranch: "main",
+	}
+
+	// Determine which branch is the default (could be "main" or "master")
+	defaultBranch := getDefaultBranch(t, repoDir)
+	sess.BaseBranch = defaultBranch
+
+	hasChanges, err := d.branchHasChanges(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected no changes on branch with no new commits and no uncommitted changes")
+	}
+}
+
+func TestBranchHasChanges_HasCommits(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+
+	// Create a branch and add a commit
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-51")
+	filePath := filepath.Join(repoDir, "new-file.txt")
+	createCmd := osexec.Command("sh", "-c", "echo 'hello' > "+filePath)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to create file: %v (output: %s)", err, out)
+	}
+	mustRunGit(t, repoDir, "add", ".")
+	mustRunGit(t, repoDir, "commit", "-m", "add new file")
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-with-commits",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-51",
+		BaseBranch: defaultBranch,
+	}
+
+	hasChanges, err := d.branchHasChanges(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasChanges {
+		t.Error("expected changes on branch with new commits")
+	}
+}
+
+func TestBranchHasChanges_HasUncommittedChanges(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+
+	// Create a branch (no new commits) but add uncommitted changes
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-52")
+	filePath := filepath.Join(repoDir, "uncommitted.txt")
+	createCmd := osexec.Command("sh", "-c", "echo 'uncommitted' > "+filePath)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to create file: %v (output: %s)", err, out)
+	}
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-uncommitted",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-52",
+		BaseBranch: defaultBranch,
+	}
+
+	hasChanges, err := d.branchHasChanges(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasChanges {
+		t.Error("expected changes when there are uncommitted files")
+	}
+}
+
+func TestBranchHasChanges_DefaultsToMain(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	// Ensure the default branch is called "main" for this test
+	defaultBranch := getDefaultBranch(t, repoDir)
+	if defaultBranch != "main" {
+		mustRunGit(t, repoDir, "branch", "-m", defaultBranch, "main")
+	}
+
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-53")
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-default-base",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-53",
+		BaseBranch: "", // empty — should default to "main"
+	}
+
+	hasChanges, err := d.branchHasChanges(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected no changes on branch with no new commits")
+	}
+}
+
+func TestBranchHasChanges_FallsBackToRepoPath(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-54")
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-no-worktree",
+		RepoPath:   repoDir,
+		WorkTree:   "", // empty — should fall back to RepoPath
+		Branch:     "issue-54",
+		BaseBranch: defaultBranch,
+	}
+
+	hasChanges, err := d.branchHasChanges(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected no changes")
+	}
+}
+
+// TestCreatePR_NoChanges_ReturnsError verifies that createPR returns a clear error
+// when the coding session made no changes (no commits and no uncommitted changes).
+// This is a regression test for the bug where the daemon would attempt to create
+// a PR on GitHub even when there were no changes, resulting in a cryptic GraphQL error.
+func TestCreatePR_NoChanges_ReturnsError(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-50")
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:         "sess-no-changes",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-50",
+		BaseBranch: defaultBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-no-changes",
+		IssueRef:  config.IssueRef{Source: "github", ID: "50"},
+		SessionID: "sess-no-changes",
+		Branch:    "issue-50",
+		StepData:  map[string]any{},
+	})
+
+	item := d.state.GetWorkItem("item-no-changes")
+	_, err := d.createPR(context.Background(), item)
+	if err == nil {
+		t.Fatal("expected error when creating PR with no changes")
+	}
+	if !strings.Contains(err.Error(), "no changes on branch") {
+		t.Errorf("expected 'no changes on branch' error, got: %v", err)
+	}
+}
+
+// getDefaultBranch returns the name of the default branch in the repo.
+func getDefaultBranch(t *testing.T, repoDir string) string {
+	t.Helper()
+	cmd := osexec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to get default branch: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestAddressFeedback_TranscriptOnlyResetsPhase(t *testing.T) {
 	// Regression: when all PR comments are transcripts, addressFeedback must
 	// reset the work item phase back to "idle" so the concurrency slot is freed.
