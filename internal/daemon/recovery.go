@@ -218,6 +218,11 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 				now := time.Now()
 				it.CurrentStep = recoveryStep
 				it.Phase = "idle"
+				// Must set State to non-queued so GetActiveWorkItems() includes
+				// this item for CI/review polling. Without this, the item stays
+				// WorkItemQueued and startQueuedItems() resets it to "coding"
+				// on every tick, creating an infinite loop.
+				it.State = daemonstate.WorkItemCoding
 				it.StepEnteredAt = now
 				it.UpdatedAt = now
 			})

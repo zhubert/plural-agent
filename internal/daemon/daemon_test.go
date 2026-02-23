@@ -1905,3 +1905,41 @@ func TestProcessWaitItems_MergesEventDataIntoStepData(t *testing.T) {
 		t.Errorf("expected review_approved=true in step data, got %v", item.StepData)
 	}
 }
+
+// TestStartQueuedItems_TransitionsStateFromQueued verifies that startQueuedItems
+// transitions the work item's State from WorkItemQueued to WorkItemCoding before
+// running the sync chain. Without this, items that take the existing-PR shortcut
+// in codingAction (which skips startCoding) stay WorkItemQueued forever.
+// GetActiveWorkItems() excludes queued items, so CI/review polling never sees
+// them, and startQueuedItems re-queues them on every tick (infinite loop).
+func TestStartQueuedItems_TransitionsStateFromQueued(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	// Add a queued work item (the default state from AddWorkItem)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+		StepData: map[string]any{},
+	})
+
+	d.loadWorkflowConfigs()
+
+	// Snapshot: the item starts in WorkItemQueued state
+	item := d.state.GetWorkItem("item-1")
+	if item.State != daemonstate.WorkItemQueued {
+		t.Fatalf("expected initial state queued, got %s", item.State)
+	}
+
+	// Run startQueuedItems — it will fail to start coding (no session service
+	// in test), but the important thing is that State is changed BEFORE the
+	// sync chain runs, not by startCoding itself.
+	d.startQueuedItems(context.Background())
+
+	item = d.state.GetWorkItem("item-1")
+	if item.State == daemonstate.WorkItemQueued {
+		t.Error("item State should no longer be WorkItemQueued after startQueuedItems processes it")
+	}
+}

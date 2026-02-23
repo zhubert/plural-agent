@@ -180,6 +180,16 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 			continue
 		}
 
+		// Transition out of "queued" state before running the sync chain.
+		// This is critical: if the chain takes the existing-PR shortcut
+		// (errExistingPR in codingAction), startCoding never runs and
+		// State stays WorkItemQueued. GetActiveWorkItems() excludes queued
+		// items, so CI/review polling would never see this item, and
+		// startQueuedItems would re-queue it on the next tick.
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.State = daemonstate.WorkItemCoding
+		})
+
 		// Initialize to the engine's start state
 		startState := engine.GetStartState()
 		d.state.AdvanceWorkItem(item.ID, startState, "idle")

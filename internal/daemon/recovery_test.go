@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/zhubert/plural-agent/internal/daemonstate"
 	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/plural-core/exec"
 )
 
 func TestDaemon_ReconstructSessions_RecoveredItemsGetSessions(t *testing.T) {
@@ -190,6 +192,61 @@ func TestDaemon_ReconstructSessions_EmptySessionIDSkipped(t *testing.T) {
 	// Should not create any sessions
 	if len(cfg.GetSessions()) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(cfg.GetSessions()))
+	}
+}
+
+// TestDaemon_RecoverAsyncPending_SetsStateToCoding verifies that when
+// recoverAsyncPending finds an open PR and advances the item to a wait state,
+// it also sets State to WorkItemCoding. Without this, the item stays
+// WorkItemQueued and GetActiveWorkItems() excludes it from CI/review polling,
+// while startQueuedItems resets it to "coding" on every tick (infinite loop).
+func TestDaemon_RecoverAsyncPending_SetsStateToCoding(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetPRState to return OPEN
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	sess.Branch = "issue-1"
+	cfg.AddSession(*sess)
+
+	// Simulate an item that was async_pending (worker was running) when daemon
+	// stopped. AddWorkItem sets State=WorkItemQueued by default.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "issue-1",
+		CurrentStep: "await_ci",
+		Phase:       "async_pending",
+		StepData:    map[string]any{},
+	})
+	// Override phase since AddWorkItem resets it
+	d.state.AdvanceWorkItem("item-1", "await_ci", "async_pending")
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-1")
+	// recoverAsyncPending should set State to WorkItemCoding so the item
+	// is visible to GetActiveWorkItems() for CI/review polling.
+	if item.State == daemonstate.WorkItemQueued {
+		t.Error("expected State to be changed from WorkItemQueued after recovery with existing PR")
+	}
+	if item.CurrentStep != "await_ci" {
+		t.Errorf("expected CurrentStep await_ci, got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected Phase idle, got %s", item.Phase)
 	}
 }
 
