@@ -1105,7 +1105,7 @@ states:
     coding --> failed : error
     open_pr --> await_merge : github.create_pr
     open_pr --> failed : error
-    await_merge --> merge : pr.mergeable (timeout: 72h0m0s)
+    await_merge --> merge : pr.mergeable
     await_merge --> timed_out : timeout
     await_merge --> failed : error
     timed_out --> failed : github.comment_pr
@@ -1263,9 +1263,9 @@ states:
     coding --> failed : error
     open_pr --> await_ci : github.create_pr
     open_pr --> failed : error
-    await_ci --> await_review : ci.complete (timeout: 3h0m0s)
+    await_ci --> await_review : ci.complete
     await_ci --> failed : error
-    await_review --> merge : pr.reviewed (timeout: 72h0m0s)
+    await_review --> merge : pr.reviewed
     await_review --> review_overdue : timeout
     await_review --> failed : error
     review_overdue --> failed : github.comment_pr
@@ -1440,11 +1440,11 @@ states:
     coding --> failed : error
     open_pr --> await_ci : github.create_pr
     open_pr --> failed : error
-    await_ci --> check_ci : ci.complete (timeout: 2h0m0s)
+    await_ci --> check_ci : ci.complete
     await_ci --> ci_timed_out : timeout
     await_ci --> failed : error
-    check_ci --> request_reviewer : ci_passed == true
-    check_ci --> fix_ci : ci_failed == true
+    check_ci --> request_reviewer : ci_passed is true
+    check_ci --> fix_ci : ci_failed is true
     check_ci --> failed : default
     fix_ci --> push_ci_fix : ai.fix_ci
     fix_ci --> ci_unfixable : error
@@ -1456,7 +1456,7 @@ states:
     ci_timed_out --> failed : error
     request_reviewer --> await_review : github.request_review
     request_reviewer --> await_review : error
-    await_review --> merge : pr.reviewed (timeout: 48h0m0s)
+    await_review --> merge : pr.reviewed
     await_review --> review_overdue : timeout
     await_review --> failed : error
     review_overdue --> failed : github.comment_issue
@@ -1629,11 +1629,11 @@ states:
     add_in_review --> open_pr : error
     open_pr --> await_merge : github.create_pr
     open_pr --> label_failed : error
-    await_merge --> merge : pr.mergeable (timeout: 72h0m0s)
+    await_merge --> merge : pr.mergeable
     await_merge --> label_failed : timeout
     await_merge --> label_failed : error
     merge --> check_close : github.merge
-    check_close --> close_issue : close_issue_on_merge == true
+    check_close --> close_issue : close_issue_on_merge is true
     check_close --> done : default
     close_issue --> done : github.close_issue
     close_issue --> done : error
@@ -1784,9 +1784,9 @@ states:
     format --> open_pr : error
     open_pr --> await_ci : github.create_pr
     open_pr --> failed : error
-    await_ci --> await_review : ci.complete (timeout: 2h0m0s)
+    await_ci --> await_review : ci.complete
     await_ci --> failed : error
-    await_review --> merge : pr.reviewed (timeout: 48h0m0s)
+    await_review --> merge : pr.reviewed
     await_review --> review_overdue : timeout
     await_review --> failed : error
     review_overdue --> failed : github.comment_pr
