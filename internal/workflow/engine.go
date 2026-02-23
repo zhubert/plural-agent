@@ -158,9 +158,14 @@ func (e *Engine) processTaskState(ctx context.Context, item *WorkItemView, state
 		data["_retry_count"] = 0
 	}
 
-	// Follow next edge
+	// Follow next edge, allowing the action to override it
+	nextStep := state.Next
+	if result.OverrideNext != "" {
+		nextStep = result.OverrideNext
+	}
+
 	return &StepResult{
-		NewStep:  state.Next,
+		NewStep:  nextStep,
 		NewPhase: "idle",
 		Data:     data,
 		Hooks:    state.After,

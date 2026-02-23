@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	osexec "os/exec"
 	"path/filepath"
@@ -623,15 +624,20 @@ func TestStartCoding_SkipsCleanupWhenPRExists(t *testing.T) {
 	if err == nil {
 		t.Fatal("startCoding should return error when branch has existing PR")
 	}
-	if !strings.Contains(err.Error(), "existing OPEN PR") {
-		t.Errorf("expected 'existing OPEN PR' error, got: %v", err)
+	if !errors.Is(err, errExistingPR) {
+		t.Errorf("expected errExistingPR sentinel, got: %v", err)
 	}
 
-	// The branch should NOT have been cleaned up (no cleanupStaleBranch call).
-	// Verify by checking that no session was created (startCoding returns before session creation).
+	// A tracking session should have been created so the work item can advance.
 	sessions := cfg.GetSessions()
-	if len(sessions) != 0 {
-		t.Errorf("expected no sessions to be created, got %d", len(sessions))
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 tracking session, got %d", len(sessions))
+	}
+	if !sessions[0].PRCreated {
+		t.Error("tracking session should have PRCreated=true")
+	}
+	if item.SessionID == "" {
+		t.Error("work item should have SessionID set")
 	}
 }
 
@@ -667,8 +673,17 @@ func TestStartCoding_SkipsCleanupWhenPRMerged(t *testing.T) {
 	if err == nil {
 		t.Fatal("startCoding should return error when branch has merged PR")
 	}
-	if !strings.Contains(err.Error(), "existing MERGED PR") {
-		t.Errorf("expected 'existing MERGED PR' error, got: %v", err)
+	if !errors.Is(err, errMergedPR) {
+		t.Errorf("expected errMergedPR sentinel, got: %v", err)
+	}
+
+	// A tracking session should have been created.
+	sessions := cfg.GetSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 tracking session, got %d", len(sessions))
+	}
+	if item.SessionID == "" {
+		t.Error("work item should have SessionID set")
 	}
 }
 
@@ -2443,4 +2458,214 @@ func TestAddressFeedback_TranscriptOnlyResetsPhase(t *testing.T) {
 	if updated.ConsumesSlot() {
 		t.Error("work item should not consume a concurrency slot after transcript-only feedback")
 	}
+}
+
+// --- codingAction sentinel error tests ---
+
+func TestCodingAction_ExistingPR_AdvancesToOpenPR(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns OPEN PR
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "54", Title: "Fix bug"},
+		StepData: map[string]any{},
+	})
+
+	action := &codingAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "work-1",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success on existing PR, got error: %v", result.Error)
+	}
+	if result.Async {
+		t.Error("expected synchronous result (not async) on existing PR")
+	}
+	if result.OverrideNext != "" {
+		t.Errorf("expected no OverrideNext for open PR, got %q", result.OverrideNext)
+	}
+}
+
+func TestCodingAction_MergedPR_SkipsToDone(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns MERGED PR
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	// Mock gh issue edit (remove label) and gh issue comment/close
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "close"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "54", Title: "Fix bug"},
+		StepData: map[string]any{},
+	})
+
+	action := &codingAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "work-1",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success on merged PR, got error: %v", result.Error)
+	}
+	if result.OverrideNext != "done" {
+		t.Errorf("expected OverrideNext='done', got %q", result.OverrideNext)
+	}
+}
+
+// --- createPRAction sentinel error tests ---
+
+func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns OPEN via "gh pr view" prefix
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := &config.Session{
+		ID:        "sess-existing",
+		RepoPath:  "/test/repo",
+		WorkTree:  "/test/worktree",
+		Branch:    "issue-54",
+		PRCreated: true,
+	}
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-existing",
+		IssueRef:  config.IssueRef{Source: "github", ID: "54"},
+		SessionID: "sess-existing",
+		Branch:    "issue-54",
+		StepData:  map[string]any{},
+	})
+
+	item := d.state.GetWorkItem("item-existing")
+	_, err := d.createPR(context.Background(), item)
+	if err != nil {
+		t.Fatalf("expected no error for existing PR, got: %v", err)
+	}
+	// Note: getPRURL uses os/exec directly and won't find a real PR in test,
+	// but createPR should still return without error (URL may be empty).
+}
+
+func TestCreatePRAction_NoChanges_ClosesIssue(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-50")
+
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock gh issue edit/comment/close for closeIssueGracefully
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "close"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = repoDir
+	cfg.Repos = []string{repoDir}
+
+	sess := &config.Session{
+		ID:         "sess-no-changes",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-50",
+		BaseBranch: defaultBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-no-changes",
+		IssueRef:  config.IssueRef{Source: "github", ID: "50"},
+		SessionID: "sess-no-changes",
+		Branch:    "issue-50",
+		StepData:  map[string]any{},
+	})
+
+	action := &createPRAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-no-changes",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success on no-changes, got error: %v", result.Error)
+	}
+	if result.OverrideNext != "done" {
+		t.Errorf("expected OverrideNext='done', got %q", result.OverrideNext)
+	}
+}
+
+// --- closeIssueGracefully test ---
+
+func TestCloseIssueGracefully_NonGitHub(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	item := &daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "asana", ID: "task-1"},
+	}
+
+	// Should return immediately without error for non-GitHub issues
+	d.closeIssueGracefully(context.Background(), item)
+	// No assertion needed — just verifying it doesn't panic
 }

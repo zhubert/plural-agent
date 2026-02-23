@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	osexec "os/exec"
 	"path/filepath"
@@ -20,6 +21,13 @@ import (
 	"github.com/zhubert/plural-core/issues"
 	"github.com/zhubert/plural-core/paths"
 	"github.com/zhubert/plural-core/session"
+)
+
+// Sentinel errors for recoverable situations that should not cause infinite re-queue.
+var (
+	errExistingPR = errors.New("existing open PR")
+	errMergedPR   = errors.New("existing merged PR")
+	errNoChanges  = errors.New("no changes")
 )
 
 // DefaultCodingSystemPrompt is the system prompt used for daemon-managed coding sessions
@@ -67,6 +75,16 @@ func (a *codingAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 	}
 
 	if err := d.startCoding(ctx, item); err != nil {
+		if errors.Is(err, errExistingPR) {
+			// Branch has an open PR from a previous attempt — skip coding,
+			// advance to open_pr which will detect the existing PR.
+			return workflow.ActionResult{Success: true}
+		}
+		if errors.Is(err, errMergedPR) {
+			// Branch already merged — close the issue and skip to done.
+			d.closeIssueGracefully(ctx, item)
+			return workflow.ActionResult{Success: true, OverrideNext: "done"}
+		}
 		return workflow.ActionResult{Error: err}
 	}
 
@@ -88,6 +106,11 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 
 	prURL, err := d.createPR(ctx, item)
 	if err != nil {
+		if errors.Is(err, errNoChanges) {
+			// Coding session made no changes — close the issue and skip to done.
+			d.closeIssueGracefully(ctx, item)
+			return workflow.ActionResult{Success: true, OverrideNext: "done"}
+		}
 		return workflow.ActionResult{Error: fmt.Errorf("PR creation failed: %v", err)}
 	}
 
@@ -287,13 +310,39 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	// Check if branch already exists (stale from a previous crashed session)
 	if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
 		// Before cleaning up, check if there's a live PR on this branch.
-		// If so, skip coding and let the caller advance to the appropriate wait state.
+		// If so, create a minimal tracking session so the workflow can advance
+		// to the PR monitoring states instead of failing and re-queuing.
 		prCtx, prCancel := context.WithTimeout(ctx, 15*time.Second)
 		prState, prErr := d.gitService.GetPRState(prCtx, repoPath, fullBranchName)
 		prCancel()
 		if prErr == nil && (prState == git.PRStateOpen || prState == git.PRStateMerged) {
-			log.Warn("branch has existing PR, skipping coding", "branch", fullBranchName, "prState", prState)
-			return fmt.Errorf("branch %s has an existing %s PR", fullBranchName, prState)
+			log.Warn("branch has existing PR, creating tracking session", "branch", fullBranchName, "prState", prState)
+
+			// Create a minimal tracking session so the work item has a
+			// session reference for downstream actions (push, PR view, etc.).
+			trackingSess := &config.Session{
+				ID:            uuid.New().String(),
+				RepoPath:      repoPath,
+				Branch:        fullBranchName,
+				BaseBranch:    d.sessionService.GetDefaultBranch(ctx, repoPath),
+				DaemonManaged: true,
+				Autonomous:    true,
+				Containerized: true,
+				PRCreated:     true,
+			}
+			d.config.AddSession(*trackingSess)
+
+			item.SessionID = trackingSess.ID
+			item.Branch = fullBranchName
+			item.UpdatedAt = time.Now()
+
+			d.saveConfig("startCoding:existingPR")
+			d.saveState()
+
+			if prState == git.PRStateMerged {
+				return fmt.Errorf("branch %s has an existing %s PR: %w", fullBranchName, prState, errMergedPR)
+			}
+			return fmt.Errorf("branch %s has an existing %s PR: %w", fullBranchName, prState, errExistingPR)
 		}
 
 		log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
@@ -453,6 +502,23 @@ func (d *Daemon) createPR(ctx context.Context, item *daemonstate.WorkItem) (stri
 
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
 
+	// If the session already has a PR (e.g., from a previous attempt that was
+	// recovered via the existing-PR path in startCoding), return its URL
+	// instead of trying to create a duplicate.
+	if sess.PRCreated {
+		prCtx, prCancel := context.WithTimeout(ctx, 15*time.Second)
+		prState, prErr := d.gitService.GetPRState(prCtx, sess.RepoPath, sess.Branch)
+		prCancel()
+		if prErr == nil && prState == git.PRStateOpen {
+			prURL, urlErr := getPRURL(ctx, sess.RepoPath, sess.Branch)
+			if urlErr != nil {
+				log.Debug("failed to get existing PR URL, using empty", "error", urlErr)
+			}
+			log.Info("PR already exists, returning existing URL", "url", prURL)
+			return prURL, nil
+		}
+	}
+
 	// Check if there are any changes to create a PR for.
 	// If the coding session determined no changes were needed (e.g., the fix
 	// was already applied), there will be no commits on the branch and no
@@ -461,7 +527,7 @@ func (d *Daemon) createPR(ctx context.Context, item *daemonstate.WorkItem) (stri
 	if hasChanges, err := d.branchHasChanges(ctx, sess); err != nil {
 		log.Warn("failed to check branch for changes, proceeding with PR creation", "error", err)
 	} else if !hasChanges {
-		return "", fmt.Errorf("no changes on branch %s — coding session made no commits", sess.Branch)
+		return "", fmt.Errorf("no changes on branch %s — coding session made no commits: %w", sess.Branch, errNoChanges)
 	}
 
 	log.Info("creating PR")
@@ -982,6 +1048,67 @@ func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) err
 		return fmt.Errorf("gh issue close failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// closeIssueGracefully removes the "queued" label and closes the issue with an
+// explanatory comment. All operations are best-effort — failures are logged but
+// do not block the workflow from advancing.
+func (d *Daemon) closeIssueGracefully(ctx context.Context, item *daemonstate.WorkItem) {
+	if item.IssueRef.Source != "github" {
+		return
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return
+	}
+
+	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
+
+	issueNum, err := strconv.Atoi(item.IssueRef.ID)
+	if err != nil {
+		return
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Remove queued label (best-effort)
+	if err := d.gitService.RemoveIssueLabel(opCtx, repoPath, issueNum, "queued"); err != nil {
+		log.Debug("failed to remove queued label during graceful close", "error", err)
+	}
+
+	// Comment explaining why we're closing
+	comment := "Closing this issue — no work was needed (the branch already has a merged PR or the coding session made no changes)."
+	if err := d.gitService.CommentOnIssue(opCtx, repoPath, issueNum, comment); err != nil {
+		log.Debug("failed to comment during graceful close", "error", err)
+	}
+
+	// Close the issue
+	if err := d.closeIssue(opCtx, item); err != nil {
+		log.Debug("failed to close issue during graceful close", "error", err)
+	}
+}
+
+// getPRURL fetches the URL of an existing PR for the given branch using the gh CLI.
+func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
+	prCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(prCtx, "gh", "pr", "view", branch, "--json", "url", "--repo", repoPath)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("failed to parse PR URL: %w", err)
+	}
+
+	return result.URL, nil
 }
 
 // requestReview requests a review on the PR for a work item.
