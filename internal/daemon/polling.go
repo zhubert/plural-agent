@@ -18,6 +18,11 @@ import (
 func (d *Daemon) pollForNewIssues(ctx context.Context) {
 	log := d.logger.With("component", "issue-poller")
 
+	if d.configSavePaused {
+		log.Warn("config save failures exceed threshold, skipping new issue polling to prevent state drift")
+		return
+	}
+
 	if d.repoFilter == "" {
 		log.Debug("no repo filter set, skipping issue polling")
 		return
@@ -148,6 +153,11 @@ func (d *Daemon) fetchIssuesForProvider(ctx context.Context, repoPath string, wf
 
 // startQueuedItems starts coding on queued work items that have available slots.
 func (d *Daemon) startQueuedItems(ctx context.Context) {
+	if d.configSavePaused {
+		d.logger.Warn("config save failures exceed threshold, skipping start of queued items to prevent state drift")
+		return
+	}
+
 	maxConcurrent := d.getMaxConcurrent()
 	queued := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
 
