@@ -408,6 +408,9 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 	reviewComments := worker.FilterTranscriptComments(comments)
 	if len(reviewComments) == 0 {
 		log.Debug("all comments are transcripts, nothing to address")
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.Phase = "idle"
+		})
 		return
 	}
 

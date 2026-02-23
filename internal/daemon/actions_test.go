@@ -2108,3 +2108,61 @@ func TestDaemon_RefreshStaleSession_RemovesStaleWorktree(t *testing.T) {
 	// Clean up
 	_ = osexec.Command("git", "-C", repoDir, "worktree", "remove", "--force", result.WorkTree).Run()
 }
+
+func TestAddressFeedback_TranscriptOnlyResetsPhase(t *testing.T) {
+	// Regression: when all PR comments are transcripts, addressFeedback must
+	// reset the work item phase back to "idle" so the concurrency slot is freed.
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Return a single transcript comment from gh pr view
+	transcriptBody := "<details><summary>Session Transcript</summary>\nsome log\n</details>"
+	reviewsJSON, _ := json.Marshal(struct {
+		Comments []struct {
+			Author struct{ Login string } `json:"author"`
+			Body   string                `json:"body"`
+			URL    string                `json:"url"`
+		} `json:"comments"`
+		Reviews []any `json:"reviews"`
+	}{
+		Comments: []struct {
+			Author struct{ Login string } `json:"author"`
+			Body   string                `json:"body"`
+			URL    string                `json:"url"`
+		}{
+			{Author: struct{ Login string }{Login: "plural-bot"}, Body: transcriptBody, URL: "https://example.com"},
+		},
+		Reviews: []any{},
+	})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: reviewsJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_review",
+	})
+
+	item := d.state.GetWorkItem("item-1")
+	d.addressFeedback(context.Background(), item)
+
+	updated := d.state.GetWorkItem("item-1")
+	if updated.Phase != "idle" {
+		t.Errorf("expected phase to be reset to 'idle' after transcript-only comments, got %q", updated.Phase)
+	}
+	if !updated.ConsumesSlot() {
+		// Phase is idle, so it shouldn't consume a slot — this is the expected behavior
+	}
+	if updated.ConsumesSlot() {
+		t.Error("work item should not consume a concurrency slot after transcript-only feedback")
+	}
+}
