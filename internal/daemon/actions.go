@@ -329,13 +329,20 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	}
 
 	d.config.AddSession(*sess)
-	d.saveConfig("startCoding")
 
-	// Update work item with session info.
+	// Update work item with session info BEFORE saving to disk so that both
+	// config and state are persisted atomically. If the daemon crashes between
+	// these two saves there is still a small window, but it is much smaller
+	// than the previous order (config saved, work item updated in memory only,
+	// state saved at end of tick). Recovery will detect the orphaned branch on
+	// the next start and clean it up.
 	item.SessionID = sess.ID
 	item.Branch = sess.Branch
 	item.State = daemonstate.WorkItemCoding
 	item.UpdatedAt = time.Now()
+
+	d.saveConfig("startCoding")
+	d.saveState()
 
 	// Build initial message using provider-aware formatting
 	issueBody, _ := item.StepData["issue_body"].(string)
