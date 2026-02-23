@@ -7,8 +7,7 @@ Erg polls for work from GitHub, Asana, or Linear, spins up containerized Claude 
 ## Install
 
 ```bash
-brew tap zhubert/tap
-brew install erg
+brew install zhubert/tap/erg
 ```
 
 Or [build from source](#build-from-source).
