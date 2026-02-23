@@ -192,6 +192,6 @@ else
     echo -e "${GREEN}Release ${VERSION} completed successfully!${NC}"
     echo ""
     echo "Next steps:"
-    echo "  - Verify the GitHub release: https://github.com/zhubert/plural-agent/releases/tag/${VERSION}"
+    echo "  - Verify the GitHub release: https://github.com/zhubert/erg/releases/tag/${VERSION}"
     echo "  - Test Homebrew installation: brew upgrade plural-agent"
 fi

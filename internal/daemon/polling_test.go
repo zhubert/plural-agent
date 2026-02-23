@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/zhubert/plural-agent/internal/daemonstate"
-	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/exec"
 )

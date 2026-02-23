@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zhubert/plural-agent/internal/daemonstate"
+	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"
 )

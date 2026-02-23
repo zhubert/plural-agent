@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zhubert/plural-agent/cmd"
+	"github.com/zhubert/erg/cmd"
 )
 
 // Version information set via ldflags at build time

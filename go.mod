@@ -1,4 +1,4 @@
-module github.com/zhubert/plural-agent
+module github.com/zhubert/erg
 
 go 1.25.4
 

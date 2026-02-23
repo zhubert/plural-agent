@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 // EventChecker implements workflow.EventChecker for the daemon.
