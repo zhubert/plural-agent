@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/zhubert/erg/internal/daemonstate"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/exec"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/exec"
 )
 
 func TestDaemon_ReconstructSessions_RecoveredItemsGetSessions(t *testing.T) {

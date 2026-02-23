@@ -13,11 +13,11 @@ import (
 	"github.com/zhubert/erg/internal/container"
 	"github.com/zhubert/erg/internal/daemon"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/cli"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/issues"
-	"github.com/zhubert/plural-core/logger"
-	"github.com/zhubert/plural-core/session"
+	"github.com/zhubert/erg/internal/cli"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/logger"
+	"github.com/zhubert/erg/internal/session"
 )
 
 var (

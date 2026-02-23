@@ -15,12 +15,12 @@ import (
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/worker"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/claude"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/issues"
-	"github.com/zhubert/plural-core/paths"
-	"github.com/zhubert/plural-core/session"
+	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/paths"
+	"github.com/zhubert/erg/internal/session"
 )
 
 // Sentinel errors for recoverable situations that should not cause infinite re-queue.

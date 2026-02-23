@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/daemonstate"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/git"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/git"
 )
 
 // reconstructSessions creates minimal config.Session objects for recovered work items

@@ -8,7 +8,7 @@ import (
 
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/erg/internal/config"
 )
 
 // ---- formatAgeAt ----

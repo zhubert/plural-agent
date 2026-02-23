@@ -9,9 +9,9 @@ import (
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/worker"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/claude"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/manager"
+	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/manager"
 )
 
 // Compile-time assertion: Daemon must implement worker.Host.

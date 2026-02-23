@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/zhubert/plural-core/paths"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // LockFilePath returns the path to the lock file for the given repo path.

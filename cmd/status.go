@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/session"
+	"github.com/zhubert/erg/internal/session"
 )
 
 var (

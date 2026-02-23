@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/agentconfig"
-	"github.com/zhubert/plural-core/claude"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/exec"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/manager"
-	"github.com/zhubert/plural-core/mcp"
+	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/exec"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/manager"
+	"github.com/zhubert/erg/internal/mcp"
 )
 
 // mockHost implements worker.Host for unit testing.

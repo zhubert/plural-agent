@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/erg/internal/config"
 )
 
 func TestWorkItemProperties(t *testing.T) {

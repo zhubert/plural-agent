@@ -56,8 +56,20 @@ tail -f ~/.erg/logs/stream-*.log    # Raw Claude stream messages (per-session)
 main.go              Entry point, calls cmd.Execute()
 cmd/                  CLI commands (Cobra): agent, clean, mcp_server, workflow
 internal/
+  paths/              Path resolution, XDG support (leaf)
+  exec/               Command execution + MockExecutor (leaf)
+  cli/                CLI prerequisite validation (leaf)
+  logger/             Structured slog logging (depends on: paths)
+  config/             Session, IssueRef, MCPServer, Config (depends on: paths)
+  git/                GitService, PR/branch ops (depends on: exec, logger)
+  issues/             Provider interface: GitHub, Asana, Linear (depends on: git)
+  mcp/                MCP protocol, socket server/client (depends on: logger)
+  claude/             RunnerInterface, process mgmt, tool sets (depends on: mcp)
+  session/            SessionService (depends on: exec, config, logger, paths)
+  manager/            SessionManager (depends on: claude, config, git, logger, mcp)
   agentconfig/        Config interface (leaf package, no internal deps)
-  daemonstate/        Daemon state persistence and file-based locking (leaf package)
+  container/          Container lifecycle and Docker management
+  daemonstate/        Daemon state persistence and file-based locking (leaf)
   worker/             SessionWorker — manages a single session's lifecycle
   workflow/           Workflow engine, config, validation, and visualization
   daemon/             Persistent orchestrator: polling, actions, events, recovery
@@ -66,14 +78,13 @@ internal/
 Import hierarchy (no cycles):
 ```
 cmd       → daemon, agentconfig, workflow
-daemon    → worker, daemonstate, agentconfig, workflow
-worker    → agentconfig
-workflow  → (leaf, depends only on plural-core)
+daemon    → worker, daemonstate, agentconfig, workflow, manager, session, config, ...
+worker    → agentconfig, claude, manager, session, config, git, ...
+workflow  → (leaf)
 ```
 
 ### Key Dependencies
 
-- `github.com/zhubert/plural-core` — shared library (config, git, session, claude, MCP, issue providers)
 - `github.com/spf13/cobra` — CLI framework
 - `gopkg.in/yaml.v3` — YAML parsing for workflow configs
 

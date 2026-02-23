@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zhubert/plural-core/git"
+	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/workflow"
 )
 
