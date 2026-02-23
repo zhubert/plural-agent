@@ -136,6 +136,23 @@ func processAlive(pid int) bool {
 	return err == nil
 }
 
+// ReadLockStatus reads the daemon lock file for the given repo and returns the
+// PID written to it and whether that process is currently running.
+// Returns pid=0, running=false if the lock file does not exist or cannot be parsed.
+func ReadLockStatus(repoPath string) (pid int, running bool) {
+	fp := LockFilePath(repoPath)
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return 0, false
+	}
+	pidStr := strings.TrimSpace(string(data))
+	p, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return 0, false
+	}
+	return p, processAlive(p)
+}
+
 // FindLocks returns the paths of all daemon lock files.
 func FindLocks() ([]string, error) {
 	dir, err := paths.StateDir()
