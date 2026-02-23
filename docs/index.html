@@ -763,6 +763,14 @@
                 <a href="#hooks" class="sidebar-link">Hooks</a>
             </li>
             <li class="sidebar-section">
+                <span class="sidebar-section-title">Examples</span>
+                <a href="#example-minimal" class="sidebar-link">Minimal</a>
+                <a href="#example-supervised" class="sidebar-link">Supervised</a>
+                <a href="#example-ci-gate" class="sidebar-link">CI gate</a>
+                <a href="#example-label-tracking" class="sidebar-link">Label tracking</a>
+                <a href="#example-linear" class="sidebar-link">Linear</a>
+            </li>
+            <li class="sidebar-section">
                 <span class="sidebar-section-title">Reference</span>
                 <a href="#cli" class="sidebar-link">CLI commands</a>
             </li>
@@ -936,6 +944,634 @@
         <h3 id="hooks">Hooks</h3>
         <p><code>before</code> hooks run before step execution &mdash; if they fail, the step is blocked. <code>after</code> hooks run after completion and are fire-and-forget.</p>
         <p>Hooks receive environment variables including <code>$ERG_BRANCH</code>, <code>$ERG_PR_URL</code>, <code>$ERG_ISSUE_URL</code>, and more.</p>
+
+        <!-- Example workflows -->
+        <h2 id="examples">Example workflows</h2>
+        <p>Ready-made configs for common use cases. Copy any of these into <code>.erg/workflow.yaml</code> in your repo and customize as needed.</p>
+
+        <h3 id="example-minimal">Minimal</h3>
+        <p>Simple pipeline: code, open PR, wait for review + CI to pass together, merge. Uses <code>pr.mergeable</code> to combine approval and CI into a single wait state. The best starting point for most projects.</p>
+        <div class="code-block">
+            <div class="code-header">
+                <span class="code-filename">examples/minimal.yaml</span>
+                <a href="https://github.com/zhubert/erg/blob/main/examples/minimal.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
+            </div>
+            <pre># Minimal workflow — code, open PR, wait for approval + CI, merge.
+#
+# Use this for small teams or bots where you want the simplest possible
+# pipeline. Uses pr.mergeable to fire a single event when both review
+# approval and CI pass, replacing the separate await_review + await_ci
+# states from the default workflow.
+#
+# Highlights:
+#   - pr.mergeable: combined review + CI wait in a single state
+#   - squash merge for clean commit history
+#   - settings block: max_concurrent, branch_prefix, cleanup_merged
+
+workflow: minimal
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+settings:
+  max_concurrent: 5          # Allow up to 5 sessions running at once
+  branch_prefix: bot/        # All branches will start with "bot/"
+  cleanup_merged: true       # Delete branches and worktrees after merge
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 30
+      max_duration: 20m
+    next: open_pr
+    error: failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_merge
+    error: failed
+
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  # No need to manage them as separate wait states.
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true   # Must be approved by a reviewer
+      require_ci: true       # CI must pass
+    timeout: 72h             # Time out after 3 days of inactivity
+    timeout_next: timed_out
+    next: merge
+    error: failed
+
+  # Comment on the PR and fail if the wait times out.
+  timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been waiting 72h with no activity. Closing — re-label the issue to retry."
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash         # Squash all commits into one for a clean history
+      cleanup: true
+    next: done
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre>
+        </div>
+
+        <h3 id="example-supervised">Supervised</h3>
+        <p>For complex features spanning multiple files. Claude acts as a supervisor that can spawn child sessions for parallel work. Includes hooks, retry with exponential backoff, <code>catch</code>-based error routing, and a Slack notification after merge.</p>
+        <div class="code-block">
+            <div class="code-header">
+                <span class="code-filename">examples/supervised.yaml</span>
+                <a href="https://github.com/zhubert/erg/blob/main/examples/supervised.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
+            </div>
+            <pre># Supervised workflow — for complex features spanning multiple files.
+#
+# Claude acts as a supervisor that can spawn child sessions for parallel
+# work across different subsystems. A custom system prompt enforces
+# architectural guidelines. Hooks install dependencies before coding and
+# run lint checks after. Failed sessions are retried with exponential
+# backoff before routing to a recovery state.
+#
+# Highlights:
+#   - supervisor: true for multi-session task coordination
+#   - system_prompt loaded from a file for per-repo AI guidelines
+#   - before hooks (block on failure) and after hooks (fire-and-forget)
+#   - retry with exponential backoff before catch-based error routing
+#   - Slack webhook notification after merge via after hook
+
+workflow: supervised-feature
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: feature-queued
+
+settings:
+  max_concurrent: 2          # Supervisor sessions are resource-heavy; limit concurrency
+  branch_prefix: feature/
+  cleanup_merged: true
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 100
+      max_duration: 60m
+      supervisor: true                                   # Enable multi-session coordination
+      system_prompt: "file:.erg/prompts/feature.md"  # Architecture + style guidelines
+    before:
+      - run: "make deps"      # Install dependencies before Claude starts (blocks on failure)
+      - run: "make generate"  # Run code generation (blocks on failure)
+    after:
+      - run: "make lint"      # Run lint after coding (logged on failure, does not block)
+    retry:
+      - max_attempts: 2
+        interval: 60s
+        backoff_rate: 2.0     # Wait 60s, then 120s between retries
+        errors: ["*"]         # Retry on any failure
+    catch:
+      - errors: ["container_error"]
+        next: notify_container_failure  # Container issues get a human-readable comment
+      - errors: ["*"]
+        next: failed                    # All other failures → fail
+    next: open_pr
+    error: failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci
+    error: failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 3h
+    params:
+      on_failure: retry       # Keep polling; CI may still pass on a subsequent run
+    next: await_review
+    error: failed
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 72h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 5  # Allow more review rounds for complex features
+      system_prompt: "file:.erg/prompts/review-feedback.md"
+    next: merge
+    error: failed
+
+  # Comment on the PR and fail if review takes too long.
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    after:
+      # Post to Slack after merge. SLACK_WEBHOOK_URL must be set in the environment.
+      - run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\": \"Feature merged: &lt;$ERG_PR_URL|$ERG_ISSUE_TITLE&gt;\"}"
+    next: done
+
+  # Post a comment when a container error prevents coding, then fail.
+  notify_container_failure:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "The coding session failed due to a container error. Please check the infrastructure and re-queue the issue."
+    next: failed
+    error: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre>
+        </div>
+
+        <h3 id="example-ci-gate">CI gate</h3>
+        <p>CI must pass before a reviewer is assigned. A <code>choice</code> state routes on the CI result: green goes to review, red triggers a Claude fix loop that retries up to three times before giving up.</p>
+        <div class="code-block">
+            <div class="code-header">
+                <span class="code-filename">examples/ci-gate.yaml</span>
+                <a href="https://github.com/zhubert/erg/blob/main/examples/ci-gate.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
+            </div>
+            <pre># CI-gate workflow — CI must pass before any human reviews the code.
+#
+# Use this for open-source projects or teams where failing CI wastes
+# reviewers' time. Claude automatically attempts to fix CI failures
+# before requesting review from a designated maintainer.
+#
+# Highlights:
+#   - CI runs before review (open_pr → await_ci → check_ci → request_reviewer)
+#   - choice state routes CI results: pass → reviewer, fail → fix loop
+#   - ai.fix_ci loop (bounded by max_ci_fix_rounds) with choice-gated cycle
+#   - github.request_review to assign a specific reviewer once CI is green
+#   - timeout with PR comment before failing
+
+workflow: ci-gate
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci              # Check CI before requesting review
+    error: failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 2h
+    timeout_next: ci_timed_out
+    params:
+      on_failure: fix           # Fire event with ci_failed=true on CI failure
+    next: check_ci              # Route based on CI result
+    error: failed
+
+  # Branch on the CI result written into step data by ci.complete.
+  check_ci:
+    type: choice
+    choices:
+      - variable: ci_passed
+        equals: true
+        next: request_reviewer  # CI green → assign reviewer
+      - variable: ci_failed
+        equals: true
+        next: fix_ci            # CI red → let Claude fix it
+    default: failed
+
+  # Claude attempts to fix failing CI. Loops back through check_ci (choice
+  # state), which keeps the cycle valid per the workflow engine rules.
+  fix_ci:
+    type: task
+    action: ai.fix_ci
+    params:
+      max_ci_fix_rounds: 3      # Give up after 3 unsuccessful fix attempts
+    next: push_ci_fix
+    error: ci_unfixable
+
+  push_ci_fix:
+    type: task
+    action: github.push
+    next: await_ci              # Loop back: await_ci → check_ci → fix_ci (cycle through choice)
+    error: failed
+
+  # Notify when all fix attempts are exhausted.
+  ci_unfixable:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
+    next: failed
+    error: failed
+
+  ci_timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI has been running for over 2h. Please check the CI pipeline."
+    next: failed
+    error: failed
+
+  # Assign a reviewer only after CI is green, avoiding wasted review time.
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: your-github-username   # Replace with the reviewer's GitHub username
+    next: await_review
+    error: await_review               # If request fails, still wait for review
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge
+    error: failed
+
+  # Comment on the issue when review takes too long, then fail.
+  # (Looping back to await_review would create an unbounded cycle.)
+  review_overdue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash
+      cleanup: true
+    next: done
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre>
+        </div>
+
+        <h3 id="example-label-tracking">Label tracking</h3>
+        <p>Issues move through GitHub labels as they advance: <code>queued</code> → <code>in-progress</code> → <code>in-review</code>. A <code>pass</code> state injects config flags, and a <code>choice</code> state reads them to conditionally close the source issue after merge.</p>
+        <div class="code-block">
+            <div class="code-header">
+                <span class="code-filename">examples/label-tracking.yaml</span>
+                <a href="https://github.com/zhubert/erg/blob/main/examples/label-tracking.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
+            </div>
+            <pre># Label-tracking workflow — use GitHub labels to show workflow progress.
+#
+# Issues move through labels as they advance: queued → in-progress →
+# in-review, and the source issue is closed automatically after merge.
+# A pass state at the top injects configuration flags that a downstream
+# choice state reads to decide whether to auto-close the issue.
+#
+# Highlights:
+#   - pass state to inject workflow configuration at startup
+#   - choice state reads pass-state data to conditionally close the issue
+#   - github.add_label / github.remove_label for real-time status tracking
+#   - github.close_issue to close the source issue after merge
+
+workflow: label-tracking
+start: configure
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  # Inject static workflow configuration into step data.
+  # Downstream states can read these values via choice rules.
+  configure:
+    type: pass
+    data:
+      close_issue_on_merge: true   # Set to false to keep the issue open after merge
+    next: start_coding
+
+  # Remove the "queued" label and add "in-progress" when work begins.
+  start_coding:
+    type: task
+    action: github.remove_label
+    params:
+      label: queued
+    next: label_in_progress
+    error: label_in_progress       # Continue even if the label was already missing
+
+  label_in_progress:
+    type: task
+    action: github.add_label
+    params:
+      label: in-progress
+    next: coding
+    error: coding                  # Continue even if labeling fails
+
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: label_in_review
+    error: label_failed
+
+  # Swap labels from "in-progress" to "in-review" before opening the PR.
+  label_in_review:
+    type: task
+    action: github.remove_label
+    params:
+      label: in-progress
+    next: add_in_review
+    error: add_in_review
+
+  add_in_review:
+    type: task
+    action: github.add_label
+    params:
+      label: in-review
+    next: open_pr
+    error: open_pr
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_merge
+    error: label_failed
+
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    timeout_next: label_failed     # Route to label_failed after 3 days of inactivity
+    next: merge
+    error: label_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: check_close
+
+  # Read the close_issue_on_merge flag set by the configure pass state.
+  check_close:
+    type: choice
+    choices:
+      - variable: close_issue_on_merge
+        equals: true
+        next: close_issue
+    default: done
+
+  close_issue:
+    type: task
+    action: github.close_issue     # Close the source issue after a successful merge
+    next: done
+    error: done                    # Proceed to done even if the close fails
+
+  done:
+    type: succeed
+
+  # Add a "bot-failed" label so failed issues are easy to find.
+  label_failed:
+    type: task
+    action: github.add_label
+    params:
+      label: bot-failed
+    next: failed
+    error: failed
+
+  failed:
+    type: fail</pre>
+        </div>
+
+        <h3 id="example-linear">Linear</h3>
+        <p>For teams that track work in Linear instead of GitHub Issues. Polls a Linear team for issues, runs an inline system prompt, auto-formats code before opening the PR, and posts a Slack notification after merge.</p>
+        <div class="code-block">
+            <div class="code-header">
+                <span class="code-filename">examples/linear.yaml</span>
+                <a href="https://github.com/zhubert/erg/blob/main/examples/linear.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
+            </div>
+            <pre># Linear integration — polls Linear issues and processes them automatically.
+#
+# Use this for teams that track work in Linear instead of GitHub Issues.
+# Set your Linear team ID in source.filter.team. The agent polls for
+# issues assigned to that team and processes them through this workflow.
+#
+# Replace "YOUR_LINEAR_TEAM_ID" with your team ID from:
+#   Linear → Settings → Teams → &lt;Your Team&gt; → Team ID
+#
+# Highlights:
+#   - linear provider with team filter
+#   - inline system_prompt to embed AI instructions directly in the config
+#   - git.format to auto-format code before opening a PR
+#   - squash merge for a clean, linear commit history
+#   - Slack notification after merge via after hook
+
+workflow: linear-sprint
+start: coding
+
+source:
+  provider: linear
+  filter:
+    team: YOUR_LINEAR_TEAM_ID
+
+settings:
+  max_concurrent: 3
+  branch_prefix: linear/
+  cleanup_merged: true
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+      system_prompt: |
+        You are an expert software engineer working on this team's codebase.
+        Follow the existing code style and architecture patterns exactly.
+        Write tests for all new functionality.
+        Keep changes focused and minimal — only address what the issue asks for.
+        Do not refactor unrelated code or add unrequested features.
+    next: format
+    error: failed
+
+  # Auto-format code before opening the PR to ensure consistent style.
+  # Replace "make fmt" with your project's formatter command, e.g.:
+  #   "go fmt ./..." for Go
+  #   "npx prettier --write ." for JavaScript/TypeScript
+  #   "black ." for Python
+  format:
+    type: task
+    action: git.format
+    params:
+      command: "make fmt"
+    next: open_pr
+    error: open_pr             # If formatting fails, open the PR anyway
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci
+    error: failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 2h
+    params:
+      on_failure: retry        # Keep polling; CI may still pass on a subsequent run
+    next: await_review
+    error: failed
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge
+    error: failed
+
+  # Comment on the PR and fail if review takes too long.
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash
+      cleanup: true
+    after:
+      # Post to Slack after merge. SLACK_WEBHOOK_URL must be set in the environment.
+      - run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\": \"Merged: $ERG_ISSUE_TITLE\\n$ERG_PR_URL\"}"
+    next: done
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre>
+        </div>
 
         <!-- CLI reference -->
         <h2 id="cli">CLI commands</h2>
