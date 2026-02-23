@@ -44,7 +44,7 @@ func releaseArch() string {
 // GenerateDockerfile produces a Dockerfile that includes all detected language
 // toolchains at their specified versions (or defaults).
 // Node.js is always included since it's required for Claude Code.
-// If version is non-empty (and not "dev"), the plural-agent binary is downloaded
+// If version is non-empty (and not "dev"), the erg binary is downloaded
 // from the GitHub release and installed as /usr/local/bin/plural.
 func GenerateDockerfile(langs []DetectedLang, version string) string {
 	var b strings.Builder
@@ -76,15 +76,15 @@ func GenerateDockerfile(langs []DetectedLang, version string) string {
 		}
 	}
 
-	// Install the plural-agent binary from GitHub releases.
+	// Install the erg binary from GitHub releases.
 	// Pinned versions use an exact tag; otherwise grab the latest release.
 	if version != "" && version != "dev" {
-		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/erg/releases/download/v%s/plural-agent_Linux_%s.tar.gz"+
-			" | tar -xz -C /tmp && mv /tmp/plural-agent /usr/local/bin/plural\n",
+		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/erg/releases/download/v%s/erg_Linux_%s.tar.gz"+
+			" | tar -xz -C /tmp && mv /tmp/erg /usr/local/bin/erg\n",
 			version, releaseArch())
 	} else {
-		fmt.Fprintf(&b, "RUN curl -fsSL -L https://github.com/zhubert/erg/releases/latest/download/plural-agent_Linux_%s.tar.gz"+
-			" | tar -xz -C /tmp && mv /tmp/plural-agent /usr/local/bin/plural\n",
+		fmt.Fprintf(&b, "RUN curl -fsSL -L https://github.com/zhubert/erg/releases/latest/download/erg_Linux_%s.tar.gz"+
+			" | tar -xz -C /tmp && mv /tmp/erg /usr/local/bin/erg\n",
 			releaseArch())
 	}
 
@@ -153,10 +153,10 @@ func languageInstallBlock(l DetectedLang) string {
 }
 
 // ImageTag returns a deterministic image tag based on the Dockerfile content.
-// Format: plural-agent:<first 12 chars of SHA256>
+// Format: erg:<first 12 chars of SHA256>
 func ImageTag(dockerfile string) string {
 	h := sha256.Sum256([]byte(dockerfile))
-	return fmt.Sprintf("plural-agent:%x", h[:6])
+	return fmt.Sprintf("erg:%x", h[:6])
 }
 
 // dockerCommandFunc is the function used to execute docker commands. Overridden in tests.
@@ -177,7 +177,7 @@ func dockerCommand(ctx context.Context, stdin string, args ...string) ([]byte, e
 }
 
 // EnsureImage generates a Dockerfile for the detected languages, builds it if
-// not already cached, and returns the image tag. The plural-agent binary is
+// not already cached, and returns the image tag. The erg binary is
 // always installed from GitHub releases (pinned or latest).
 func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logger *slog.Logger) (string, error) {
 	dockerfile := GenerateDockerfile(langs, version)

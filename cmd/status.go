@@ -30,9 +30,9 @@ in the active workflow.
 Use --map to see items positioned on the workflow graph.
 
 Examples:
-  plural-agent status                        # Use current git repo as default
-  plural-agent status --repo owner/repo      # Check specific repo
-  plural-agent status --repo owner/repo --map  # Workflow map view`,
+  erg status                        # Use current git repo as default
+  erg status --repo owner/repo      # Check specific repo
+  erg status --repo owner/repo --map  # Workflow map view`,
 	RunE: runStatus,
 }
 

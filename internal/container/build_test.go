@@ -172,12 +172,12 @@ func TestGenerateDockerfile_IncludesPluralBinary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			df := GenerateDockerfile(tt.langs, "0.2.11")
-			expected := fmt.Sprintf("erg/releases/download/v0.2.11/plural-agent_Linux_%s.tar.gz", expectedArch)
+			expected := fmt.Sprintf("erg/releases/download/v0.2.11/erg_Linux_%s.tar.gz", expectedArch)
 			if !strings.Contains(df, expected) {
 				t.Errorf("expected release download URL in Dockerfile, got:\n%s", df)
 			}
-			if !strings.Contains(df, "/usr/local/bin/plural") {
-				t.Error("expected plural binary install path in Dockerfile")
+			if !strings.Contains(df, "/usr/local/bin/erg") {
+				t.Error("expected erg binary install path in Dockerfile")
 			}
 		})
 	}
@@ -193,8 +193,8 @@ func TestGenerateDockerfile_DevVersionUsesLatestRelease(t *testing.T) {
 			if !strings.Contains(df, "/releases/latest/download/") {
 				t.Error("dev version should use latest release URL")
 			}
-			if !strings.Contains(df, "/usr/local/bin/plural") {
-				t.Error("dev version should still install plural binary")
+			if !strings.Contains(df, "/usr/local/bin/erg") {
+				t.Error("dev version should still install erg binary")
 			}
 		})
 	}
@@ -259,8 +259,8 @@ func TestImageTag_DifferentContent(t *testing.T) {
 
 func TestImageTag_Format(t *testing.T) {
 	tag := ImageTag("test content")
-	if !strings.HasPrefix(tag, "plural-agent:") {
-		t.Errorf("expected tag to start with 'plural-agent:', got %q", tag)
+	if !strings.HasPrefix(tag, "erg:") {
+		t.Errorf("expected tag to start with 'erg:', got %q", tag)
 	}
 	// 12 hex chars from 6 bytes
 	parts := strings.SplitN(tag, ":", 2)
@@ -291,8 +291,8 @@ func TestEnsureImage_Cached(t *testing.T) {
 	if !inspectCalled {
 		t.Error("expected docker image inspect to be called")
 	}
-	if !strings.HasPrefix(tag, "plural-agent:") {
-		t.Errorf("expected tag to start with 'plural-agent:', got %q", tag)
+	if !strings.HasPrefix(tag, "erg:") {
+		t.Errorf("expected tag to start with 'erg:', got %q", tag)
 	}
 }
 
@@ -326,7 +326,7 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 	if !buildCalled {
 		t.Error("expected docker build to be called")
 	}
-	if !strings.HasPrefix(tag, "plural-agent:") {
+	if !strings.HasPrefix(tag, "erg:") {
 		t.Errorf("expected valid tag, got %q", tag)
 	}
 }

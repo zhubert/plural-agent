@@ -34,7 +34,7 @@ type DaemonLock struct {
 // Returns an error if the lock is already held by a living process.
 // Stale locks (where the owning process has died) are automatically cleaned up.
 // Note: On Windows, stale lock detection is not supported (signal 0 is unavailable),
-// so stale locks must be removed manually via "plural-agent clean".
+// so stale locks must be removed manually via "erg clean".
 func AcquireLock(repoPath string) (*DaemonLock, error) {
 	fp := LockFilePath(repoPath)
 

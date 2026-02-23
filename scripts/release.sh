@@ -193,5 +193,5 @@ else
     echo ""
     echo "Next steps:"
     echo "  - Verify the GitHub release: https://github.com/zhubert/erg/releases/tag/${VERSION}"
-    echo "  - Test Homebrew installation: brew upgrade plural-agent"
+    echo "  - Test Homebrew installation: brew upgrade erg"
 fi

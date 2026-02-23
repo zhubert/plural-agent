@@ -19,7 +19,7 @@ func SetVersionInfo(v, c, d string) {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "plural-agent",
+	Use:   "erg",
 	Short: "Headless autonomous agent daemon for managing Claude Code sessions",
 	Long: `Persistent orchestrator daemon that manages the full lifecycle of work items:
 picking up issues, coding, PR creation, review feedback cycles, and final merge.
@@ -36,10 +36,10 @@ as max_turns, max_duration, merge_method, and auto_merge can all be specified th
 All sessions are containerized (container = sandbox).
 
 Examples:
-  plural-agent                          # Use current git repo as default
-  plural-agent --repo owner/repo        # Run daemon (long-running)
-  plural-agent --repo owner/repo --once # Process one tick and exit
-  plural-agent --repo /path/to/repo     # Use filesystem path instead`,
+  erg                          # Use current git repo as default
+  erg --repo owner/repo        # Run daemon (long-running)
+  erg --repo owner/repo --once # Process one tick and exit
+  erg --repo /path/to/repo     # Use filesystem path instead`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -67,7 +67,7 @@ func Execute() error {
 
 func versionTemplate() string {
 	if commit != "none" && commit != "" {
-		return fmt.Sprintf("plural-agent %s\n  commit: %s\n  built:  %s\n", version, commit, date)
+		return fmt.Sprintf("erg %s\n  commit: %s\n  built:  %s\n", version, commit, date)
 	}
-	return fmt.Sprintf("plural-agent %s\n", version)
+	return fmt.Sprintf("erg %s\n", version)
 }

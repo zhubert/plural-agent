@@ -32,8 +32,8 @@ optional sections. Run this in your repository root (or use --repo) to get start
 with a customizable agent workflow.
 
 Examples:
-  plural-agent workflow init                   # Initialize in current directory
-  plural-agent workflow init --repo /path/to/repo`,
+  erg workflow init                   # Initialize in current directory
+  erg workflow init --repo /path/to/repo`,
 	RunE: runWorkflowInit,
 }
 
