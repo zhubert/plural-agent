@@ -542,6 +542,15 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			if len(result.Hooks) > 0 {
 				d.runHooks(ctx, result.Hooks, item, sess)
 			}
+			// Merge event data into step data so downstream choice states
+			// can evaluate it.
+			if result.Data != nil {
+				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+					for k, v := range result.Data {
+						it.StepData[k] = v
+					}
+				})
+			}
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
 			if result.Terminal {
 				d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
@@ -586,6 +595,15 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 		if result.NewStep != view.CurrentStep || result.NewPhase != view.Phase {
 			if len(result.Hooks) > 0 {
 				d.runHooks(ctx, result.Hooks, item, sess)
+			}
+			// Merge event data (e.g. ci_passed) into step data so downstream
+			// choice states can evaluate it.
+			if result.Data != nil {
+				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+					for k, v := range result.Data {
+						it.StepData[k] = v
+					}
+				})
 			}
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
 			if result.Terminal {

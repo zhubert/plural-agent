@@ -1746,3 +1746,162 @@ func TestDaemon_ProcessIdleSyncItems_SkipsWaitStates(t *testing.T) {
 		t.Errorf("expected idle to be unchanged, got %s", item.Phase)
 	}
 }
+
+// dataCapturingEventChecker fires on the given event and returns data.
+type dataCapturingEventChecker struct {
+	fireEvent string
+	data      map[string]any
+}
+
+func (c *dataCapturingEventChecker) CheckEvent(_ context.Context, event string, _ *workflow.ParamHelper, _ *workflow.WorkItemView) (bool, map[string]any, error) {
+	if event == c.fireEvent {
+		return true, c.data, nil
+	}
+	return false, nil, nil
+}
+
+func TestProcessCIItems_MergesEventDataIntoStepData(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+	d.autoMerge = true
+
+	sess := testSession("sess-ci")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-ci",
+		IssueRef:    config.IssueRef{Source: "github", ID: "200"},
+		SessionID:   "sess-ci",
+		Branch:      "feature-sess-ci",
+		CurrentStep: "await_ci",
+		StepData:    map[string]any{},
+	})
+	d.state.TransitionWorkItem("item-ci", daemonstate.WorkItemCoding)
+	d.state.AdvanceWorkItem("item-ci", "await_ci", "idle")
+
+	// Build a workflow: await_ci (wait) → check_ci (choice) → done (succeed)
+	// The choice state checks ci_passed == true. If data merge is missing,
+	// it falls through to default (failed).
+	wfCfg := &workflow.Config{
+		Workflow: "test-ci",
+		Start:    "await_ci",
+		States: map[string]*workflow.State{
+			"await_ci": {
+				Type:  workflow.StateTypeWait,
+				Event: "ci.complete",
+				Next:  "check_ci",
+			},
+			"check_ci": {
+				Type: workflow.StateTypeChoice,
+				Choices: []workflow.ChoiceRule{
+					{Variable: "ci_passed", Equals: true, Next: "done"},
+				},
+				Default: "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+
+	checker := &dataCapturingEventChecker{
+		fireEvent: "ci.complete",
+		data:      map[string]any{"ci_passed": true},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(wfCfg, registry, checker, d.logger)
+	d.engines = map[string]*workflow.Engine{"/test/repo": engine}
+
+	d.processCIItems(context.Background())
+
+	item := d.state.GetWorkItem("item-ci")
+
+	// With the fix, ci_passed should be merged and the choice routes to "done" (succeed).
+	// Without the fix, ci_passed is missing and the choice falls to "failed".
+	if !item.IsTerminal() {
+		t.Fatalf("expected item to be terminal, got step=%q phase=%q", item.CurrentStep, item.Phase)
+	}
+	if item.State == daemonstate.WorkItemFailed {
+		t.Fatal("item reached 'failed' terminal — event data was not merged into step data")
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed state, got %s", item.State)
+	}
+
+	// Verify the data was actually merged
+	if val, ok := item.StepData["ci_passed"]; !ok || val != true {
+		t.Errorf("expected ci_passed=true in step data, got %v", item.StepData)
+	}
+}
+
+func TestProcessWaitItems_MergesEventDataIntoStepData(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-review")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-review",
+		IssueRef:    config.IssueRef{Source: "github", ID: "300"},
+		SessionID:   "sess-review",
+		Branch:      "feature-sess-review",
+		CurrentStep: "await_review",
+		StepData:    map[string]any{},
+	})
+	d.state.TransitionWorkItem("item-review", daemonstate.WorkItemCoding)
+	d.state.AdvanceWorkItem("item-review", "await_review", "idle")
+
+	// Build a workflow: await_review (wait) → check_review (choice) → done (succeed)
+	wfCfg := &workflow.Config{
+		Workflow: "test-review",
+		Start:    "await_review",
+		States: map[string]*workflow.State{
+			"await_review": {
+				Type:  workflow.StateTypeWait,
+				Event: "pr.reviewed",
+				Next:  "check_review",
+			},
+			"check_review": {
+				Type: workflow.StateTypeChoice,
+				Choices: []workflow.ChoiceRule{
+					{Variable: "review_approved", Equals: true, Next: "done"},
+				},
+				Default: "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+
+	checker := &dataCapturingEventChecker{
+		fireEvent: "pr.reviewed",
+		data:      map[string]any{"review_approved": true},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(wfCfg, registry, checker, d.logger)
+	d.engines = map[string]*workflow.Engine{"/test/repo": engine}
+
+	d.lastReviewPollAt = time.Time{} // Ensure processWaitItems runs
+	d.processWaitItems(context.Background())
+
+	item := d.state.GetWorkItem("item-review")
+
+	if !item.IsTerminal() {
+		t.Fatalf("expected item to be terminal, got step=%q phase=%q", item.CurrentStep, item.Phase)
+	}
+	if item.State == daemonstate.WorkItemFailed {
+		t.Fatal("item reached 'failed' terminal — event data was not merged into step data")
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed state, got %s", item.State)
+	}
+
+	// Verify the data was actually merged
+	if val, ok := item.StepData["review_approved"]; !ok || val != true {
+		t.Errorf("expected review_approved=true in step data, got %v", item.StepData)
+	}
+}
