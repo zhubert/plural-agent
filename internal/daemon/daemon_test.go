@@ -224,7 +224,7 @@ func TestDaemon_CollectCompletedWorkers(t *testing.T) {
 	})
 	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
-	d.state.GetWorkItem("item-1").State = daemonstate.WorkItemCoding
+	d.state.GetWorkItem("item-1").State = daemonstate.WorkItemActive
 
 	// Add a session for the work item
 	sess := testSession("sess-1")
@@ -271,7 +271,7 @@ func TestDaemon_ProcessWorkItems_AwaitingReview_PRClosed(t *testing.T) {
 		Branch:      "feature-sess-1",
 		CurrentStep: "await_review",
 		Phase:       "idle",
-		State:       daemonstate.WorkItemCoding, // Non-terminal so it's active
+		State:       daemonstate.WorkItemActive, // Non-terminal so it's active
 	})
 
 	// Load workflow configs to create engines
@@ -322,7 +322,7 @@ func TestDaemon_ProcessWorkItems_AwaitingCI_Passing(t *testing.T) {
 		Branch:      "feature-sess-1",
 		CurrentStep: "await_ci",
 		Phase:       "idle",
-		State:       daemonstate.WorkItemCoding, // Non-terminal
+		State:       daemonstate.WorkItemActive, // Non-terminal
 	})
 
 	d.loadWorkflowConfigs()
@@ -448,7 +448,7 @@ func TestDaemon_ReviewPollIntervalGating(t *testing.T) {
 		Branch:      "feature-sess-1",
 		CurrentStep: "await_review",
 		Phase:       "idle",
-		State:       daemonstate.WorkItemCoding, // Non-terminal
+		State:       daemonstate.WorkItemActive, // Non-terminal
 	})
 
 	d.loadWorkflowConfigs()
@@ -1341,7 +1341,7 @@ func TestDaemon_CollectCompletedWorkers_WorkerError(t *testing.T) {
 		CurrentStep: "coding",
 	})
 	d.state.AdvanceWorkItem("item-err", "coding", "async_pending")
-	d.state.GetWorkItem("item-err").State = daemonstate.WorkItemCoding
+	d.state.GetWorkItem("item-err").State = daemonstate.WorkItemActive
 
 	// Create a done worker WITH an error (simulating API 500)
 	mock := worker.NewDoneWorkerWithError(fmt.Errorf("API error detected in response stream"))
@@ -1605,7 +1605,9 @@ func TestProcessWaitItems_PreservesPhaseSetByEventHandler(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 	// Transition out of queued so GetActiveWorkItems includes it
-	d.state.TransitionWorkItem("item-phase", daemonstate.WorkItemCoding)
+	d.state.UpdateWorkItem("item-phase", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 	d.state.AdvanceWorkItem("item-phase", "await_review", "idle")
 
 	// Inject a custom engine with a phase-mutating event checker.
@@ -1700,7 +1702,7 @@ func TestDaemon_ProcessIdleSyncItems_ExecutesMerge(t *testing.T) {
 		Branch:    "feature-sess-1",
 	})
 	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
-		it.State = daemonstate.WorkItemCoding
+		it.State = daemonstate.WorkItemActive
 	})
 	d.state.AdvanceWorkItem("item-1", "merge", "idle")
 
@@ -1729,7 +1731,7 @@ func TestDaemon_ProcessIdleSyncItems_SkipsWaitStates(t *testing.T) {
 		Branch:    "feature-sess-1",
 	})
 	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
-		it.State = daemonstate.WorkItemCoding
+		it.State = daemonstate.WorkItemActive
 	})
 	d.state.AdvanceWorkItem("item-1", "await_review", "idle")
 
@@ -1778,7 +1780,9 @@ func TestProcessCIItems_MergesEventDataIntoStepData(t *testing.T) {
 		CurrentStep: "await_ci",
 		StepData:    map[string]any{},
 	})
-	d.state.TransitionWorkItem("item-ci", daemonstate.WorkItemCoding)
+	d.state.UpdateWorkItem("item-ci", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 	d.state.AdvanceWorkItem("item-ci", "await_ci", "idle")
 
 	// Build a workflow: await_ci (wait) → check_ci (choice) → done (succeed)
@@ -1852,7 +1856,9 @@ func TestProcessWaitItems_MergesEventDataIntoStepData(t *testing.T) {
 		CurrentStep: "await_review",
 		StepData:    map[string]any{},
 	})
-	d.state.TransitionWorkItem("item-review", daemonstate.WorkItemCoding)
+	d.state.UpdateWorkItem("item-review", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 	d.state.AdvanceWorkItem("item-review", "await_review", "idle")
 
 	// Build a workflow: await_review (wait) → check_review (choice) → done (succeed)
@@ -1907,7 +1913,7 @@ func TestProcessWaitItems_MergesEventDataIntoStepData(t *testing.T) {
 }
 
 // TestStartQueuedItems_TransitionsStateFromQueued verifies that startQueuedItems
-// transitions the work item's State from WorkItemQueued to WorkItemCoding before
+// transitions the work item's State from WorkItemQueued to WorkItemActive before
 // running the sync chain. Without this, items that take the existing-PR shortcut
 // in codingAction (which skips startCoding) stay WorkItemQueued forever.
 // GetActiveWorkItems() excludes queued items, so CI/review polling never sees

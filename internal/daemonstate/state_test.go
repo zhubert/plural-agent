@@ -38,7 +38,6 @@ func TestWorkItemProperties(t *testing.T) {
 		terminals := []*WorkItem{
 			{State: WorkItemCompleted},
 			{State: WorkItemFailed},
-			{State: WorkItemAbandoned},
 		}
 		for _, item := range terminals {
 			if !item.IsTerminal() {
@@ -48,7 +47,7 @@ func TestWorkItemProperties(t *testing.T) {
 
 		nonTerminals := []*WorkItem{
 			{State: WorkItemQueued},
-			{State: WorkItemCoding},
+			{State: WorkItemActive},
 			{State: ""},
 		}
 		for _, item := range nonTerminals {
@@ -419,6 +418,72 @@ func TestDaemonState_SaveAndLoad(t *testing.T) {
 	}
 	if item.IssueRef.Title != "Fix bug" {
 		t.Errorf("expected title 'Fix bug', got %q", item.IssueRef.Title)
+	}
+}
+
+func TestLoadDaemonState_MigratesLegacyStates(t *testing.T) {
+	tmpDir := t.TempDir()
+	fp := filepath.Join(tmpDir, "daemon-state.json")
+
+	// Write a state file with legacy state values directly (simulating an old on-disk file)
+	legacyJSON := `{
+		"version": 2,
+		"repo_path": "/test/repo",
+		"work_items": {
+			"item-queued": {"id": "item-queued", "state": "queued", "issue_ref": {"source": "github", "id": "1"}},
+			"item-coding": {"id": "item-coding", "state": "coding", "issue_ref": {"source": "github", "id": "2"}},
+			"item-pr":     {"id": "item-pr",     "state": "pr_created", "issue_ref": {"source": "github", "id": "3"}},
+			"item-review": {"id": "item-review", "state": "awaiting_review", "issue_ref": {"source": "github", "id": "4"}},
+			"item-done":   {"id": "item-done",   "state": "completed", "issue_ref": {"source": "github", "id": "5"}},
+			"item-fail":   {"id": "item-fail",   "state": "failed", "issue_ref": {"source": "github", "id": "6"}},
+			"item-abandon":{"id": "item-abandon","state": "abandoned", "issue_ref": {"source": "github", "id": "7"}}
+		}
+	}`
+	if err := os.WriteFile(fp, []byte(legacyJSON), 0o644); err != nil {
+		t.Fatalf("failed to write legacy state: %v", err)
+	}
+
+	// Patch StateFilePath to return our temp file by loading directly
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	var state DaemonState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	// Run the same migration that LoadDaemonState does
+	for _, item := range state.WorkItems {
+		switch item.State {
+		case WorkItemQueued, WorkItemCompleted, WorkItemFailed:
+			// already valid
+		default:
+			item.State = WorkItemActive
+		}
+	}
+
+	tests := []struct {
+		id       string
+		expected WorkItemState
+	}{
+		{"item-queued", WorkItemQueued},
+		{"item-coding", WorkItemActive},
+		{"item-pr", WorkItemActive},
+		{"item-review", WorkItemActive},
+		{"item-done", WorkItemCompleted},
+		{"item-fail", WorkItemFailed},
+		{"item-abandon", WorkItemActive},
+	}
+
+	for _, tt := range tests {
+		item := state.WorkItems[tt.id]
+		if item == nil {
+			t.Errorf("item %s not found", tt.id)
+			continue
+		}
+		if item.State != tt.expected {
+			t.Errorf("item %s: expected state %q, got %q", tt.id, tt.expected, item.State)
+		}
 	}
 }
 

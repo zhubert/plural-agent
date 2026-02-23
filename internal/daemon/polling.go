@@ -187,7 +187,7 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 		// items, so CI/review polling would never see this item, and
 		// startQueuedItems would re-queue it on the next tick.
 		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.State = daemonstate.WorkItemCoding
+			it.State = daemonstate.WorkItemActive
 		})
 
 		// Initialize to the engine's start state

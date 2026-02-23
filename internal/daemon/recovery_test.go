@@ -197,7 +197,7 @@ func TestDaemon_ReconstructSessions_EmptySessionIDSkipped(t *testing.T) {
 
 // TestDaemon_RecoverAsyncPending_SetsStateToCoding verifies that when
 // recoverAsyncPending finds an open PR and advances the item to a wait state,
-// it also sets State to WorkItemCoding. Without this, the item stays
+// it also sets State to WorkItemActive. Without this, the item stays
 // WorkItemQueued and GetActiveWorkItems() excludes it from CI/review polling,
 // while startQueuedItems resets it to "coding" on every tick (infinite loop).
 func TestDaemon_RecoverAsyncPending_SetsStateToCoding(t *testing.T) {
@@ -237,7 +237,7 @@ func TestDaemon_RecoverAsyncPending_SetsStateToCoding(t *testing.T) {
 	d.recoverFromState(context.Background())
 
 	item := d.state.GetWorkItem("item-1")
-	// recoverAsyncPending should set State to WorkItemCoding so the item
+	// recoverAsyncPending should set State to WorkItemActive so the item
 	// is visible to GetActiveWorkItems() for CI/review polling.
 	if item.State == daemonstate.WorkItemQueued {
 		t.Error("expected State to be changed from WorkItemQueued after recovery with existing PR")

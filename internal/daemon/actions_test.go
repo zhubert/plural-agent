@@ -900,7 +900,7 @@ func TestStartCoding_FailsWhenCleanupFails(t *testing.T) {
 // After the fix, we verify that when startCoding succeeds:
 //   - item.SessionID is set (so saveState records the link to the session)
 //   - item.Branch matches the session branch
-//   - item.State is WorkItemCoding
+//   - item.State is WorkItemActive
 //   - The SessionID on the work item matches the session recorded in config
 func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	cfg := testConfig()
@@ -944,8 +944,8 @@ func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	if item.Branch == "" {
 		t.Error("item.Branch must be set after startCoding")
 	}
-	if item.State != daemonstate.WorkItemCoding {
-		t.Errorf("item.State must be WorkItemCoding, got %q", item.State)
+	if item.State != daemonstate.WorkItemActive {
+		t.Errorf("item.State must be WorkItemActive, got %q", item.State)
 	}
 
 	// The SessionID on the work item must match the session recorded in config,

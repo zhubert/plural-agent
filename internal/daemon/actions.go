@@ -387,7 +387,7 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	// the next start and clean it up.
 	item.SessionID = sess.ID
 	item.Branch = sess.Branch
-	item.State = daemonstate.WorkItemCoding
+	item.State = daemonstate.WorkItemActive
 	item.UpdatedAt = time.Now()
 
 	d.saveConfig("startCoding")

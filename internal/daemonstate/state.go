@@ -18,17 +18,10 @@ import (
 type WorkItemState string
 
 const (
-	WorkItemQueued             WorkItemState = "queued"
-	WorkItemCoding             WorkItemState = "coding"
-	WorkItemPRCreated          WorkItemState = "pr_created"
-	WorkItemAwaitingReview     WorkItemState = "awaiting_review"
-	WorkItemAddressingFeedback WorkItemState = "addressing_feedback"
-	WorkItemPushing            WorkItemState = "pushing"
-	WorkItemAwaitingCI         WorkItemState = "awaiting_ci"
-	WorkItemMerging            WorkItemState = "merging"
-	WorkItemCompleted          WorkItemState = "completed"
-	WorkItemFailed             WorkItemState = "failed"
-	WorkItemAbandoned          WorkItemState = "abandoned"
+	WorkItemQueued    WorkItemState = "queued"
+	WorkItemActive    WorkItemState = "active"
+	WorkItemCompleted WorkItemState = "completed"
+	WorkItemFailed    WorkItemState = "failed"
 )
 
 // WorkItem tracks a single issue through its full lifecycle.
@@ -61,7 +54,7 @@ func (item *WorkItem) ConsumesSlot() bool {
 
 // IsTerminal returns true if the work item is in a terminal state.
 func (item *WorkItem) IsTerminal() bool {
-	return item.State == WorkItemCompleted || item.State == WorkItemFailed || item.State == WorkItemAbandoned
+	return item.State == WorkItemCompleted || item.State == WorkItemFailed
 }
 
 // DaemonState holds the persistent state of the daemon.
@@ -127,6 +120,18 @@ func LoadDaemonState(repoPath string) (*DaemonState, error) {
 	state.filePath = fp
 	if state.WorkItems == nil {
 		state.WorkItems = make(map[string]*WorkItem)
+	}
+
+	// Normalize legacy state values: anything that isn't queued, completed,
+	// or failed becomes "active". This handles old files with values like
+	// "coding", "pr_created", "awaiting_review", etc.
+	for _, item := range state.WorkItems {
+		switch item.State {
+		case WorkItemQueued, WorkItemCompleted, WorkItemFailed:
+			// already valid
+		default:
+			item.State = WorkItemActive
+		}
 	}
 
 	// Validate repo path matches
@@ -204,28 +209,6 @@ func (s *DaemonState) MarkWorkItemTerminal(id string, success bool) error {
 	now := time.Now()
 	item.CompletedAt = &now
 	item.UpdatedAt = now
-
-	return nil
-}
-
-// TransitionWorkItem transitions a work item to a new state.
-// Kept for backward compatibility during migration.
-func (s *DaemonState) TransitionWorkItem(id string, newState WorkItemState) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	item, ok := s.WorkItems[id]
-	if !ok {
-		return fmt.Errorf("work item not found: %s", id)
-	}
-
-	item.State = newState
-	item.UpdatedAt = time.Now()
-
-	if newState == WorkItemCompleted || newState == WorkItemFailed || newState == WorkItemAbandoned {
-		now := time.Now()
-		item.CompletedAt = &now
-	}
 
 	return nil
 }

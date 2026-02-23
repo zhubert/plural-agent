@@ -222,7 +222,7 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 				// this item for CI/review polling. Without this, the item stays
 				// WorkItemQueued and startQueuedItems() resets it to "coding"
 				// on every tick, creating an infinite loop.
-				it.State = daemonstate.WorkItemCoding
+				it.State = daemonstate.WorkItemActive
 				it.StepEnteredAt = now
 				it.UpdatedAt = now
 			})
