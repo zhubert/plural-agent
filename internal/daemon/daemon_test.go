@@ -1233,6 +1233,98 @@ func TestDaemon_SaveConfig_IncrementOnFailure(t *testing.T) {
 	}
 }
 
+func TestDaemon_SaveConfig_PausesAfterThreshold(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Point the config at an invalid path to force Save() to fail
+	cfg.SetFilePath("/nonexistent/path/config.json")
+
+	// Should not be paused yet
+	if d.configSavePaused {
+		t.Error("expected configSavePaused=false initially")
+	}
+
+	// Trigger 4 failures — still under threshold
+	for i := 0; i < 4; i++ {
+		d.saveConfig("test")
+	}
+	if d.configSavePaused {
+		t.Error("expected configSavePaused=false before threshold reached")
+	}
+
+	// 5th failure crosses the threshold
+	d.saveConfig("test")
+	if !d.configSavePaused {
+		t.Error("expected configSavePaused=true after 5 consecutive failures")
+	}
+	if d.configSaveFailures != 5 {
+		t.Errorf("expected configSaveFailures=5, got %d", d.configSaveFailures)
+	}
+}
+
+func TestDaemon_SaveConfig_RecoveryResumesPaused(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Simulate paused state from prior failures
+	d.configSavePaused = true
+	d.configSaveFailures = 7
+
+	// Point config at a valid temp file so Save() succeeds
+	tmpFile := filepath.Join(t.TempDir(), "config.json")
+	cfg.SetFilePath(tmpFile)
+
+	d.saveConfig("recovery")
+
+	if d.configSavePaused {
+		t.Error("expected configSavePaused=false after successful save")
+	}
+	if d.configSaveFailures != 0 {
+		t.Errorf("expected configSaveFailures=0 after recovery, got %d", d.configSaveFailures)
+	}
+}
+
+func TestDaemon_PollForNewIssues_SkipsWhenPaused(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+	d.configSavePaused = true
+
+	// pollForNewIssues should return immediately without queuing anything
+	d.pollForNewIssues(context.Background())
+
+	if len(d.state.WorkItems) != 0 {
+		t.Errorf("expected 0 work items when paused, got %d", len(d.state.WorkItems))
+	}
+}
+
+func TestDaemon_StartQueuedItems_SkipsWhenPaused(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+	d.configSavePaused = true
+
+	// Add a queued item
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	initialState := d.state.GetWorkItem("item-1").State
+
+	d.startQueuedItems(context.Background())
+
+	// Item should remain in its original queued state — not promoted to coding
+	item := d.state.GetWorkItem("item-1")
+	if item.State != initialState {
+		t.Errorf("expected state unchanged (%s) when paused, got %s", initialState, item.State)
+	}
+	if len(d.workers) != 0 {
+		t.Errorf("expected 0 workers when paused, got %d", len(d.workers))
+	}
+}
+
 func TestDaemon_CollectCompletedWorkers_WorkerError(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)

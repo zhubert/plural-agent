@@ -65,15 +65,17 @@ func (d *Daemon) releaseLock() {
 
 // saveConfig saves the config with failure tracking.
 // The context parameter describes where the save was triggered from for logging.
+// After 5 consecutive failures, new work is paused until a save succeeds.
 func (d *Daemon) saveConfig(where string) {
 	if err := d.config.Save(); err != nil {
 		d.configSaveFailures++
 		if d.configSaveFailures >= 5 {
-			d.logger.Error("config save failed repeatedly",
+			d.logger.Error("config save failed repeatedly, pausing new work to prevent state drift",
 				"where", where,
 				"consecutiveFailures", d.configSaveFailures,
 				"error", err,
 			)
+			d.configSavePaused = true
 		} else {
 			d.logger.Warn("config save failed",
 				"where", where,
@@ -82,6 +84,12 @@ func (d *Daemon) saveConfig(where string) {
 			)
 		}
 	} else {
+		if d.configSavePaused {
+			d.logger.Info("config save recovered, resuming new work",
+				"where", where,
+			)
+			d.configSavePaused = false
+		}
 		d.configSaveFailures = 0
 	}
 }

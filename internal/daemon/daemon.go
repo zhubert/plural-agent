@@ -42,6 +42,7 @@ type Daemon struct {
 
 	// Config save tracking
 	configSaveFailures int
+	configSavePaused   bool // true after 5+ consecutive failures; blocks new work
 
 	// Options
 	once                  bool
