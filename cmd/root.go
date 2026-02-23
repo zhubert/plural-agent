@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/zhubert/plural-core/logger"
+	"github.com/zhubert/erg/internal/logger"
 )
 
 var (

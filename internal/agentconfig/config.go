@@ -1,6 +1,6 @@
 package agentconfig
 
-import "github.com/zhubert/plural-core/config"
+import "github.com/zhubert/erg/internal/config"
 
 // Config defines the configuration interface required by the agent and worker packages.
 // This decouples them from the concrete config.Config struct, allowing them

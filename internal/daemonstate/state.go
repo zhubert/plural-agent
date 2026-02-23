@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/paths"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // WorkItemState represents the current state of a work item in the daemon lifecycle.

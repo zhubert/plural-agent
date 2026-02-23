@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhubert/plural-core/logger"
-	"github.com/zhubert/plural-core/mcp"
+	"github.com/zhubert/erg/internal/logger"
+	"github.com/zhubert/erg/internal/mcp"
 )
 
 var socketPath string

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/issues"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 )
 
 // TrimURL extracts a URL from output text.

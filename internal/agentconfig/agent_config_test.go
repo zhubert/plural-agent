@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/issues"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/issues"
 )
 
 // Compile-time interface checks.

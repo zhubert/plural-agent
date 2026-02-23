@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhubert/plural-core/claude"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/mcp"
+	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/mcp"
 )
 
 // SessionWorker manages a single autonomous session's lifecycle.

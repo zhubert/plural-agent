@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/git"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/git"
 )
 
 func TestTrimURL(t *testing.T) {

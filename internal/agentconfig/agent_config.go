@@ -3,7 +3,7 @@ package agentconfig
 import (
 	"sync"
 
-	"github.com/zhubert/plural-core/config"
+	"github.com/zhubert/erg/internal/config"
 )
 
 // Default values for AgentConfig.

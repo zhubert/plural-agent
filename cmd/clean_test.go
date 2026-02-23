@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhubert/plural-core/paths"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // setupAgentCleanTest sets up isolated temp dirs for paths resolution.

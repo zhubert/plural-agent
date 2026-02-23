@@ -9,9 +9,9 @@ import (
 
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/plural-core/config"
-	"github.com/zhubert/plural-core/git"
-	"github.com/zhubert/plural-core/issues"
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 )
 
 // pollForNewIssues checks for new issues and creates work items for them.
