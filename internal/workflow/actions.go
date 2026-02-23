@@ -28,10 +28,11 @@ type ActionContext struct {
 
 // ActionResult is the outcome of an action execution.
 type ActionResult struct {
-	Success bool           // Whether the action succeeded
-	Async   bool           // True if action spawned async work (e.g., Claude worker)
-	Error   error          // Error if not successful
-	Data    map[string]any // Output data to merge into step data
+	Success      bool           // Whether the action succeeded
+	Async        bool           // True if action spawned async work (e.g., Claude worker)
+	Error        error          // Error if not successful
+	Data         map[string]any // Output data to merge into step data
+	OverrideNext string         // When set on success, engine uses this instead of state.Next
 }
 
 // ActionRegistry maps action names to Action implementations.

@@ -1251,3 +1251,61 @@ func TestEngine_GetBeforeHooks(t *testing.T) {
 		t.Errorf("expected nil for non-existent state, got %v", hooks)
 	}
 }
+
+func TestEngine_ProcessStep_TaskSync_OverrideNext(t *testing.T) {
+	// When an action returns Success with OverrideNext set, the engine
+	// should use OverrideNext instead of the state's configured Next edge.
+	registry := NewActionRegistry()
+	registry.Register("skip.action", &mockAction{
+		result: ActionResult{Success: true, OverrideNext: "done"},
+	})
+
+	cfg := &Config{
+		Start: "coding",
+		States: map[string]*State{
+			"coding":  {Type: StateTypeTask, Action: "skip.action", Next: "open_pr", Error: "failed"},
+			"open_pr": {Type: StateTypeSucceed},
+			"done":    {Type: StateTypeSucceed},
+			"failed":  {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, registry, nil, testLogger())
+
+	view := &WorkItemView{CurrentStep: "coding"}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "done" {
+		t.Errorf("expected OverrideNext 'done', got %q", result.NewStep)
+	}
+	if result.NewPhase != "idle" {
+		t.Errorf("expected phase 'idle', got %q", result.NewPhase)
+	}
+}
+
+func TestEngine_ProcessStep_TaskSync_NoOverride(t *testing.T) {
+	// When OverrideNext is empty, the engine should use the state's Next edge as normal.
+	registry := NewActionRegistry()
+	registry.Register("normal.action", &mockAction{
+		result: ActionResult{Success: true},
+	})
+
+	cfg := &Config{
+		Start: "coding",
+		States: map[string]*State{
+			"coding":  {Type: StateTypeTask, Action: "normal.action", Next: "open_pr"},
+			"open_pr": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, registry, nil, testLogger())
+
+	view := &WorkItemView{CurrentStep: "coding"}
+	result, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NewStep != "open_pr" {
+		t.Errorf("expected normal Next 'open_pr', got %q", result.NewStep)
+	}
+}
