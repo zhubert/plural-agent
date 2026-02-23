@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/zhubert/plural-agent/internal/agentconfig"
+	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/git"
 	"github.com/zhubert/plural-core/manager"

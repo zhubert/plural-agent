@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhubert/plural-core/paths"
 
-	"github.com/zhubert/plural-agent/internal/daemonstate"
+	"github.com/zhubert/erg/internal/daemonstate"
 )
 
 var agentCleanSkipConfirm bool

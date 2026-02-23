@@ -172,7 +172,7 @@ func TestGenerateDockerfile_IncludesPluralBinary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			df := GenerateDockerfile(tt.langs, "0.2.11")
-			expected := fmt.Sprintf("plural-agent/releases/download/v0.2.11/plural-agent_Linux_%s.tar.gz", expectedArch)
+			expected := fmt.Sprintf("erg/releases/download/v0.2.11/plural-agent_Linux_%s.tar.gz", expectedArch)
 			if !strings.Contains(df, expected) {
 				t.Errorf("expected release download URL in Dockerfile, got:\n%s", df)
 			}

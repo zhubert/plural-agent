@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zhubert/plural-agent/internal/worker"
+	"github.com/zhubert/erg/internal/worker"
 )
 
 // waitForActiveWorkers waits for all active workers to complete (used in --once mode).

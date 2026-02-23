@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zhubert/plural-agent/internal/daemonstate"
-	"github.com/zhubert/plural-agent/internal/worker"
-	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/worker"
+	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/plural-core/claude"
 	"github.com/zhubert/plural-core/config"
 	"github.com/zhubert/plural-core/git"

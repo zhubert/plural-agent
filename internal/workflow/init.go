@@ -8,7 +8,7 @@ import (
 
 // Template is the default workflow.yaml content with the step-functions format.
 const Template = `# Plural Agent Workflow Configuration
-# See: https://github.com/zhubert/plural-agent for full documentation
+# See: https://github.com/zhubert/erg for full documentation
 #
 # This file defines a state machine that controls how the plural agent
 # daemon processes issues. States are nodes connected by next (success)

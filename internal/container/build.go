@@ -79,11 +79,11 @@ func GenerateDockerfile(langs []DetectedLang, version string) string {
 	// Install the plural-agent binary from GitHub releases.
 	// Pinned versions use an exact tag; otherwise grab the latest release.
 	if version != "" && version != "dev" {
-		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/plural-agent/releases/download/v%s/plural-agent_Linux_%s.tar.gz"+
+		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/erg/releases/download/v%s/plural-agent_Linux_%s.tar.gz"+
 			" | tar -xz -C /tmp && mv /tmp/plural-agent /usr/local/bin/plural\n",
 			version, releaseArch())
 	} else {
-		fmt.Fprintf(&b, "RUN curl -fsSL -L https://github.com/zhubert/plural-agent/releases/latest/download/plural-agent_Linux_%s.tar.gz"+
+		fmt.Fprintf(&b, "RUN curl -fsSL -L https://github.com/zhubert/erg/releases/latest/download/plural-agent_Linux_%s.tar.gz"+
 			" | tar -xz -C /tmp && mv /tmp/plural-agent /usr/local/bin/plural\n",
 			releaseArch())
 	}
