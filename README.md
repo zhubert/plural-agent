@@ -26,7 +26,7 @@ Or [build from source](#build-from-source).
 erg --repo owner/repo
 ```
 
-Label a GitHub issue `queued` and erg picks it up automatically. For Asana or Linear, configure the [workflow source](https://zhubert.github.io/erg/).
+Label a GitHub issue `queued` and erg picks it up automatically. For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
 
 ## How It Works
 
@@ -40,7 +40,7 @@ For complex issues, Claude can delegate subtasks to child sessions via MCP tools
 
 ## Documentation
 
-Full documentation — workflow configuration, state types, error handling, hooks, CLI reference — is at **[zhubert.github.io/erg](https://zhubert.github.io/erg/)**.
+Full documentation — workflow configuration, state types, error handling, hooks, CLI reference — is at **[zhubert.com/erg](https://zhubert.com/erg/)**.
 
 ## Build from Source
 
