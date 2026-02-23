@@ -163,7 +163,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, agentLogger, opts...)
 
 	// Run daemon
-	return d.Run(ctx)
+	if err := d.Run(ctx); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return nil
 }
 
 // cwdGitRootGetter abstracts the GetCurrentDirGitRoot call for testability.
