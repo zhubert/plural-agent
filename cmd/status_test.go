@@ -1,0 +1,498 @@
+package cmd
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zhubert/plural-agent/internal/daemonstate"
+	"github.com/zhubert/plural-agent/internal/workflow"
+	"github.com/zhubert/plural-core/config"
+)
+
+// ---- formatAgeAt ----
+
+func TestFormatAgeAt_ZeroTime(t *testing.T) {
+	got := formatAgeAt(time.Time{}, time.Now())
+	if got != "—" {
+		t.Errorf("expected '—' for zero time, got %q", got)
+	}
+}
+
+func TestFormatAgeAt_Seconds(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	got := formatAgeAt(now.Add(-45*time.Second), now)
+	if got != "45s" {
+		t.Errorf("expected '45s', got %q", got)
+	}
+}
+
+func TestFormatAgeAt_Minutes(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	got := formatAgeAt(now.Add(-7*time.Minute), now)
+	if got != "7m" {
+		t.Errorf("expected '7m', got %q", got)
+	}
+}
+
+func TestFormatAgeAt_Hours(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	got := formatAgeAt(now.Add(-3*time.Hour), now)
+	if got != "3h" {
+		t.Errorf("expected '3h', got %q", got)
+	}
+}
+
+func TestFormatAgeAt_Days(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	got := formatAgeAt(now.Add(-50*time.Hour), now)
+	if got != "2d" {
+		t.Errorf("expected '2d', got %q", got)
+	}
+}
+
+func TestFormatAgeAt_BoundaryMinute(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	// Exactly 1 minute → "1m"
+	got := formatAgeAt(now.Add(-time.Minute), now)
+	if got != "1m" {
+		t.Errorf("expected '1m' at boundary, got %q", got)
+	}
+}
+
+func TestFormatAgeAt_BoundaryHour(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	// Exactly 1 hour → "1h"
+	got := formatAgeAt(now.Add(-time.Hour), now)
+	if got != "1h" {
+		t.Errorf("expected '1h' at boundary, got %q", got)
+	}
+}
+
+// ---- formatIssue ----
+
+func TestFormatIssue_GitHub(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Fix the login bug"},
+	}
+	got := formatIssue(item)
+	if got != "#42 Fix the login bug" {
+		t.Errorf("unexpected issue format: %q", got)
+	}
+}
+
+func TestFormatIssue_OtherProvider(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		IssueRef: config.IssueRef{Source: "asana", ID: "ABC123", Title: "Add dark mode"},
+	}
+	got := formatIssue(item)
+	if got != "ABC123 Add dark mode" {
+		t.Errorf("unexpected issue format: %q", got)
+	}
+}
+
+func TestFormatIssue_NoSource(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		ID: "work-item-uuid-123",
+	}
+	got := formatIssue(item)
+	if got != "work-item-uuid-123" {
+		t.Errorf("expected item ID when no source, got %q", got)
+	}
+}
+
+func TestFormatIssue_Truncation(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		IssueRef: config.IssueRef{
+			Source: "github",
+			ID:     "99",
+			Title:  "This is a very long issue title that exceeds thirty characters",
+		},
+	}
+	got := formatIssue(item)
+	if len(got) > 30 {
+		t.Errorf("expected truncation to 30 chars, got %d chars: %q", len(got), got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("expected truncated string to end with '...', got %q", got)
+	}
+}
+
+// ---- formatStep ----
+
+func TestFormatStep_Active(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State:       daemonstate.WorkItemCoding,
+		CurrentStep: "coding",
+	}
+	got := formatStep(item)
+	if got != "coding" {
+		t.Errorf("expected 'coding', got %q", got)
+	}
+}
+
+func TestFormatStep_Failed(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State:       daemonstate.WorkItemFailed,
+		CurrentStep: "coding",
+	}
+	got := formatStep(item)
+	if got != "(failed)" {
+		t.Errorf("expected '(failed)', got %q", got)
+	}
+}
+
+func TestFormatStep_Abandoned(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State: daemonstate.WorkItemAbandoned,
+	}
+	got := formatStep(item)
+	if got != "(abandoned)" {
+		t.Errorf("expected '(abandoned)', got %q", got)
+	}
+}
+
+func TestFormatStep_QueuedNoStep(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State: daemonstate.WorkItemQueued,
+	}
+	got := formatStep(item)
+	if got != "(queued)" {
+		t.Errorf("expected '(queued)', got %q", got)
+	}
+}
+
+func TestFormatStep_QueuedWithStep(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State:       daemonstate.WorkItemQueued,
+		CurrentStep: "coding",
+	}
+	got := formatStep(item)
+	if got != "coding" {
+		t.Errorf("expected 'coding' for queued item with step, got %q", got)
+	}
+}
+
+// ---- printFooter ----
+
+func TestPrintFooter_WithMaxConcurrent(t *testing.T) {
+	var buf bytes.Buffer
+	printFooter(&buf, 2, 3, 1, 48291, true)
+	out := buf.String()
+	if !strings.Contains(out, "Slots: 2/3 active") {
+		t.Errorf("expected 'Slots: 2/3 active' in output: %q", out)
+	}
+	if !strings.Contains(out, "Queued: 1") {
+		t.Errorf("expected 'Queued: 1' in output: %q", out)
+	}
+	if !strings.Contains(out, "Daemon PID: 48291 (running)") {
+		t.Errorf("expected daemon PID in output: %q", out)
+	}
+}
+
+func TestPrintFooter_NoMaxConcurrent(t *testing.T) {
+	var buf bytes.Buffer
+	printFooter(&buf, 1, 0, 0, 0, false)
+	out := buf.String()
+	if !strings.Contains(out, "Slots: 1 active") {
+		t.Errorf("expected 'Slots: 1 active' in output: %q", out)
+	}
+	if !strings.Contains(out, "Daemon: not running") {
+		t.Errorf("expected 'Daemon: not running' in output: %q", out)
+	}
+}
+
+func TestPrintFooter_DeadDaemon(t *testing.T) {
+	var buf bytes.Buffer
+	printFooter(&buf, 0, 0, 0, 12345, false)
+	out := buf.String()
+	if !strings.Contains(out, "Daemon PID: 12345 (dead)") {
+		t.Errorf("expected '(dead)' indicator in output: %q", out)
+	}
+}
+
+// ---- printTableView ----
+
+func TestPrintTableView_Basic(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "42", Title: "Fix login bug"},
+			State:         daemonstate.WorkItemAwaitingReview,
+			CurrentStep:   "await_review",
+			Phase:         "idle",
+			StepEnteredAt: now.Add(-12 * time.Minute),
+			PRURL:         "https://github.com/owner/repo/pull/87",
+		},
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "38", Title: "Add dark mode"},
+			State:         daemonstate.WorkItemCoding,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-3 * time.Minute),
+		},
+	}
+
+	var buf bytes.Buffer
+	printTableView(&buf, items)
+	out := buf.String()
+
+	if !strings.Contains(out, "ISSUE") {
+		t.Error("expected ISSUE header in table output")
+	}
+	if !strings.Contains(out, "STEP") {
+		t.Error("expected STEP header in table output")
+	}
+	if !strings.Contains(out, "#42 Fix login bug") {
+		t.Errorf("expected issue #42 in output: %q", out)
+	}
+	if !strings.Contains(out, "await_review") {
+		t.Errorf("expected step 'await_review' in output: %q", out)
+	}
+	if !strings.Contains(out, "https://github.com/owner/repo/pull/87") {
+		t.Errorf("expected PR URL in output: %q", out)
+	}
+	if !strings.Contains(out, "—") {
+		t.Errorf("expected '—' for missing PR URL in output: %q", out)
+	}
+}
+
+func TestPrintTableView_FailedItem(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "10", Title: "Bad issue"},
+			State:         daemonstate.WorkItemFailed,
+			CurrentStep:   "coding",
+			Phase:         "idle",
+			StepEnteredAt: now.Add(-1 * time.Hour),
+		},
+	}
+
+	var buf bytes.Buffer
+	printTableView(&buf, items)
+	out := buf.String()
+
+	if !strings.Contains(out, "(failed)") {
+		t.Errorf("expected '(failed)' in table output for failed item: %q", out)
+	}
+}
+
+func TestPrintTableView_EmptyPhase(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "5", Title: "Test"},
+			State:         daemonstate.WorkItemCoding,
+			CurrentStep:   "coding",
+			Phase:         "", // empty phase should default to "idle"
+			StepEnteredAt: now.Add(-2 * time.Minute),
+		},
+	}
+
+	var buf bytes.Buffer
+	printTableView(&buf, items)
+	out := buf.String()
+
+	if !strings.Contains(out, "idle") {
+		t.Errorf("expected 'idle' for empty phase in output: %q", out)
+	}
+}
+
+// ---- primaryWorkflowPath ----
+
+func TestPrimaryWorkflowPath_Default(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	path := primaryWorkflowPath(cfg)
+
+	// Default happy path: coding → open_pr → await_ci → check_ci_result → await_review → merge → done
+	expectedStart := "coding"
+	if len(path) == 0 || path[0] != expectedStart {
+		t.Errorf("expected path to start with %q, got %v", expectedStart, path)
+	}
+
+	// Verify key states appear in order
+	stateIndex := make(map[string]int, len(path))
+	for i, s := range path {
+		stateIndex[s] = i
+	}
+
+	checkOrder := []struct{ before, after string }{
+		{"coding", "open_pr"},
+		{"open_pr", "await_ci"},
+		{"await_ci", "check_ci_result"},
+		{"check_ci_result", "await_review"},
+		{"await_review", "merge"},
+		{"merge", "done"},
+	}
+	for _, c := range checkOrder {
+		bi, bOK := stateIndex[c.before]
+		ai, aOK := stateIndex[c.after]
+		if !bOK {
+			t.Errorf("expected state %q in path, not found", c.before)
+			continue
+		}
+		if !aOK {
+			t.Errorf("expected state %q in path, not found", c.after)
+			continue
+		}
+		if bi >= ai {
+			t.Errorf("expected %q (index %d) before %q (index %d)", c.before, bi, c.after, ai)
+		}
+	}
+}
+
+func TestPrimaryWorkflowPath_NilConfig(t *testing.T) {
+	path := primaryWorkflowPath(nil)
+	if path != nil {
+		t.Errorf("expected nil path for nil config, got %v", path)
+	}
+}
+
+func TestPrimaryWorkflowPath_EmptyStart(t *testing.T) {
+	cfg := &workflow.Config{
+		Start:  "",
+		States: map[string]*workflow.State{},
+	}
+	path := primaryWorkflowPath(cfg)
+	if path != nil {
+		t.Errorf("expected nil path for empty start, got %v", path)
+	}
+}
+
+func TestPrimaryWorkflowPath_NoLoop(t *testing.T) {
+	// Ensure cycle detection prevents infinite loop
+	cfg := &workflow.Config{
+		Start: "a",
+		States: map[string]*workflow.State{
+			"a": {Type: workflow.StateTypeTask, Next: "b"},
+			"b": {Type: workflow.StateTypeTask, Next: "a"}, // cycle
+		},
+	}
+	path := primaryWorkflowPath(cfg)
+	if len(path) != 2 {
+		t.Errorf("expected path length 2 with cycle detection, got %d: %v", len(path), path)
+	}
+}
+
+func TestPrimaryWorkflowPath_TerminalState(t *testing.T) {
+	cfg := &workflow.Config{
+		Start: "start",
+		States: map[string]*workflow.State{
+			"start": {Type: workflow.StateTypeTask, Next: "done"},
+			"done":  {Type: workflow.StateTypeSucceed},
+		},
+	}
+	path := primaryWorkflowPath(cfg)
+	if len(path) != 2 || path[0] != "start" || path[1] != "done" {
+		t.Errorf("expected [start done], got %v", path)
+	}
+}
+
+// ---- printMapView ----
+
+func TestPrintMapView_DefaultConfig(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "38", Title: "Add dark mode"},
+			State:         daemonstate.WorkItemCoding,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-3 * time.Minute),
+		},
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "42", Title: "Fix login bug"},
+			State:         daemonstate.WorkItemAwaitingReview,
+			CurrentStep:   "await_review",
+			Phase:         "idle",
+			StepEnteredAt: now.Add(-12 * time.Minute),
+		},
+	}
+
+	var buf bytes.Buffer
+	printMapView(&buf, items, cfg)
+	out := buf.String()
+
+	// All primary path states should appear
+	for _, state := range []string{"coding", "open_pr", "await_ci", "await_review", "merge", "done"} {
+		if !strings.Contains(out, state) {
+			t.Errorf("expected state %q in map output: %q", state, out)
+		}
+	}
+
+	// Items should be annotated at their step
+	if !strings.Contains(out, "#38 Add dark mode") {
+		t.Errorf("expected item #38 in map output: %q", out)
+	}
+	if !strings.Contains(out, "#42 Fix login bug") {
+		t.Errorf("expected item #42 in map output: %q", out)
+	}
+}
+
+func TestPrintMapView_EmptyItems(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	var buf bytes.Buffer
+	printMapView(&buf, nil, cfg)
+	out := buf.String()
+
+	// States should still appear even with no active items
+	if !strings.Contains(out, "coding") {
+		t.Errorf("expected states in map output even with no items: %q", out)
+	}
+}
+
+func TestPrintMapView_NilConfig(t *testing.T) {
+	var buf bytes.Buffer
+	printMapView(&buf, nil, nil)
+	out := buf.String()
+	if !strings.Contains(out, "no workflow config available") {
+		t.Errorf("expected fallback message for nil config: %q", out)
+	}
+}
+
+func TestPrintMapView_OffPathItem(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:    config.IssueRef{Source: "github", ID: "99", Title: "CI fix"},
+			State:       daemonstate.WorkItemCoding,
+			CurrentStep: "fix_ci", // off the primary happy path
+			Phase:       "async_pending",
+		},
+	}
+
+	var buf bytes.Buffer
+	printMapView(&buf, items, cfg)
+	out := buf.String()
+
+	// Off-path step with items should still appear
+	if !strings.Contains(out, "fix_ci") {
+		t.Errorf("expected off-path step 'fix_ci' to appear in map output: %q", out)
+	}
+	if !strings.Contains(out, "#99 CI fix") {
+		t.Errorf("expected off-path item label in map output: %q", out)
+	}
+}
+
+// ---- runStatus edge cases ----
+
+func TestRunStatus_NoStateFile(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	// Use a repo path that has no state file
+	statusRepo = "/nonexistent/test/repo"
+	statusMap = false
+	defer func() {
+		statusRepo = ""
+		statusMap = false
+	}()
+
+	cmd := statusCmd
+	err := runStatus(cmd, nil)
+	if err != nil {
+		t.Fatalf("expected no error for missing state file, got: %v", err)
+	}
+}

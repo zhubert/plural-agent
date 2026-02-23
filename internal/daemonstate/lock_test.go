@@ -133,6 +133,82 @@ func TestFindLocks_FindsLockFiles(t *testing.T) {
 	}
 }
 
+func TestReadLockStatus_NoLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "no-lock-repo")
+
+	pid, running := ReadLockStatus(repoPath)
+	if pid != 0 {
+		t.Errorf("expected pid=0 for missing lock file, got %d", pid)
+	}
+	if running {
+		t.Error("expected running=false for missing lock file")
+	}
+}
+
+func TestReadLockStatus_RunningProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "running-repo")
+
+	// Acquire a real lock (writes current PID)
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer lock.Release()
+
+	pid, running := ReadLockStatus(repoPath)
+	if pid != os.Getpid() {
+		t.Errorf("expected current PID %d, got %d", os.Getpid(), pid)
+	}
+	if !running {
+		t.Error("expected running=true for current process lock")
+	}
+}
+
+func TestReadLockStatus_StaleLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "stale-repo")
+
+	// Write a lock file with a PID that almost certainly doesn't exist
+	fp := LockFilePath(repoPath)
+	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+		t.Fatalf("failed to create lock dir: %v", err)
+	}
+	if err := os.WriteFile(fp, []byte("999999999"), 0o644); err != nil {
+		t.Fatalf("failed to write stale lock: %v", err)
+	}
+
+	pid, running := ReadLockStatus(repoPath)
+	if pid != 999999999 {
+		t.Errorf("expected pid=999999999, got %d", pid)
+	}
+	if running {
+		t.Error("expected running=false for stale lock with dead PID")
+	}
+}
+
+func TestReadLockStatus_CorruptLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "corrupt-repo")
+
+	fp := LockFilePath(repoPath)
+	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+		t.Fatalf("failed to create lock dir: %v", err)
+	}
+	if err := os.WriteFile(fp, []byte("not-a-pid"), 0o644); err != nil {
+		t.Fatalf("failed to write corrupt lock: %v", err)
+	}
+
+	pid, running := ReadLockStatus(repoPath)
+	if pid != 0 {
+		t.Errorf("expected pid=0 for corrupt lock, got %d", pid)
+	}
+	if running {
+		t.Error("expected running=false for corrupt lock")
+	}
+}
+
 func TestLockFilePath_Deterministic(t *testing.T) {
 	path1 := LockFilePath("/some/repo")
 	path2 := LockFilePath("/some/repo")
