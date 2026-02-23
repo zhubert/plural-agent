@@ -14,20 +14,20 @@ var workflowRepoPath string
 var workflowCmd = &cobra.Command{
 	Use:   "workflow",
 	Short: "Manage workflow configuration",
-	Long:  `Commands for validating and visualizing .plural/workflow.yaml configuration files.`,
+	Long:  `Commands for validating and visualizing .erg/workflow.yaml configuration files.`,
 }
 
 var workflowValidateCmd = &cobra.Command{
 	Use:   "validate",
-	Short: "Validate .plural/workflow.yaml",
+	Short: "Validate .erg/workflow.yaml",
 	Long:  `Loads and validates the workflow configuration file in the specified repository.`,
 	RunE:  runWorkflowValidate,
 }
 
 var workflowInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Generate a .plural/workflow.yaml template",
-	Long: `Creates a .plural/workflow.yaml file with sensible defaults and commented
+	Short: "Generate a .erg/workflow.yaml template",
+	Long: `Creates a .erg/workflow.yaml file with sensible defaults and commented
 optional sections. Run this in your repository root (or use --repo) to get started
 with a customizable agent workflow.
 
@@ -68,7 +68,7 @@ func runWorkflowValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	if cfg == nil {
-		fmt.Fprintln(os.Stderr, "No .plural/workflow.yaml found, using defaults.")
+		fmt.Fprintln(os.Stderr, "No .erg/workflow.yaml found, using defaults.")
 		cfg = workflow.DefaultConfig()
 	}
 

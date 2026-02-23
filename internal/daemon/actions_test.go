@@ -968,9 +968,9 @@ func TestParseWorktreeForBranch(t *testing.T) {
 	}{
 		{
 			name: "finds matching branch",
-			porcelainOutput: "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n\nworktree /home/user/.plural/worktrees/uuid1\nHEAD def456\nbranch refs/heads/issue-10\n\n",
+			porcelainOutput: "worktree /home/user/repo\nHEAD abc123\nbranch refs/heads/main\n\nworktree /home/user/.erg/worktrees/uuid1\nHEAD def456\nbranch refs/heads/issue-10\n\n",
 			branchName:      "issue-10",
-			expectedPath:    "/home/user/.plural/worktrees/uuid1",
+			expectedPath:    "/home/user/.erg/worktrees/uuid1",
 		},
 		{
 			name:            "no matching branch",

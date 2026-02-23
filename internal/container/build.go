@@ -45,7 +45,7 @@ func releaseArch() string {
 // toolchains at their specified versions (or defaults).
 // Node.js is always included since it's required for Claude Code.
 // If version is non-empty (and not "dev"), the erg binary is downloaded
-// from the GitHub release and installed as /usr/local/bin/plural.
+// from the GitHub release and installed as /usr/local/bin/erg.
 func GenerateDockerfile(langs []DetectedLang, version string) string {
 	var b strings.Builder
 

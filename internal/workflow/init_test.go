@@ -15,7 +15,7 @@ func TestWriteTemplate_CreatesFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := filepath.Join(dir, ".plural", "workflow.yaml")
+	expected := filepath.Join(dir, ".erg", "workflow.yaml")
 	if fp != expected {
 		t.Errorf("expected path %s, got %s", expected, fp)
 	}
@@ -83,12 +83,12 @@ func TestWriteTemplate_CreatesDirectory(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(dir, ".plural"))
+	info, err := os.Stat(filepath.Join(dir, ".erg"))
 	if err != nil {
-		t.Fatalf("expected .plural directory to exist: %v", err)
+		t.Fatalf("expected .erg directory to exist: %v", err)
 	}
 	if !info.IsDir() {
-		t.Error("expected .plural to be a directory")
+		t.Error("expected .erg to be a directory")
 	}
 }
 
@@ -96,11 +96,11 @@ func TestWriteTemplate_ErrorsIfFileExists(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create the file first
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte("existing"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte("existing"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +113,7 @@ func TestWriteTemplate_ErrorsIfFileExists(t *testing.T) {
 	}
 
 	// Verify original content was not overwritten
-	data, err := os.ReadFile(filepath.Join(pluralDir, "workflow.yaml"))
+	data, err := os.ReadFile(filepath.Join(ergDir, "workflow.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

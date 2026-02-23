@@ -10,12 +10,12 @@ import (
 )
 
 // setupAgentCleanTest sets up isolated temp dirs for paths resolution.
-// HOME is set to a temp dir (no ~/.plural/) so XDG vars are respected.
+// HOME is set to a temp dir (no ~/.erg/) so XDG vars are respected.
 func setupAgentCleanTest(t *testing.T) (dataDir, stateDir string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	// Set HOME to tmpDir so ~/.plural doesn't exist → XDG vars take effect
+	// Set HOME to tmpDir so ~/.erg doesn't exist → XDG vars take effect
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, "data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpDir, "state"))

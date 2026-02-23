@@ -7,10 +7,10 @@ import (
 )
 
 // Template is the default workflow.yaml content with the step-functions format.
-const Template = `# Plural Agent Workflow Configuration
+const Template = `# Erg Workflow Configuration
 # See: https://github.com/zhubert/erg for full documentation
 #
-# This file defines a state machine that controls how the plural agent
+# This file defines a state machine that controls how the erg
 # daemon processes issues. States are nodes connected by next (success)
 # and error (failure) edges.
 #
@@ -124,13 +124,13 @@ states:
 
 # Agent settings (optional — override defaults for this repo)
 # settings:
-#   container_image: ghcr.io/zhubert/plural-claude
-#   branch_prefix: plural/
+#   container_image: ghcr.io/zhubert/erg-claude
+#   branch_prefix: erg/
 #   max_concurrent: 3
 #   cleanup_merged: true
 `
 
-// WriteTemplate writes the default workflow.yaml template to repoPath/.plural/workflow.yaml.
+// WriteTemplate writes the default workflow.yaml template to repoPath/.erg/workflow.yaml.
 // Returns an error if the file already exists.
 func WriteTemplate(repoPath string) (string, error) {
 	dir := filepath.Join(repoPath, workflowDir)

@@ -34,7 +34,7 @@ states:
       max_turns: 100
       max_duration: 60m
       supervisor: true                                   # Enable multi-session coordination
-      system_prompt: "file:.plural/prompts/feature.md"  # Architecture + style guidelines
+      system_prompt: "file:.erg/prompts/feature.md"  # Architecture + style guidelines
     before:
       - run: "make deps"      # Install dependencies before Claude starts (blocks on failure)
       - run: "make generate"  # Run code generation (blocks on failure)
@@ -78,7 +78,7 @@ states:
     params:
       auto_address: true
       max_feedback_rounds: 5  # Allow more review rounds for complex features
-      system_prompt: "file:.plural/prompts/review-feedback.md"
+      system_prompt: "file:.erg/prompts/review-feedback.md"
     next: merge
     error: failed
 
@@ -102,7 +102,7 @@ states:
       - run: |
           curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H 'Content-type: application/json' \
-            --data "{\"text\": \"Feature merged: <$PLURAL_PR_URL|$PLURAL_ISSUE_TITLE>\"}"
+            --data "{\"text\": \"Feature merged: <$ERG_PR_URL|$ERG_ISSUE_TITLE>\"}"
     next: done
 
   # Post a comment when a container error prevents coding, then fail.

@@ -18,7 +18,7 @@ func LockFilePath(repoPath string) string {
 	dir, err := paths.StateDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".plural")
+		dir = filepath.Join(home, ".erg")
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(repoPath)))
 	return filepath.Join(dir, fmt.Sprintf("daemon-%s.lock", hash[:12]))

@@ -27,8 +27,8 @@ func TestWorkflowValidateCmd_NoFile(t *testing.T) {
 
 func TestWorkflowValidateCmd_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ states:
   failed:
     type: fail
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,8 +62,8 @@ states:
 
 func TestWorkflowValidateCmd_InvalidFile(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,7 +71,7 @@ func TestWorkflowValidateCmd_InvalidFile(t *testing.T) {
 source:
   provider: jira
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,8 +111,8 @@ func TestWorkflowVisualizeCmd(t *testing.T) {
 
 func TestWorkflowVisualizeCmd_WithFile(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,7 +143,7 @@ states:
   failed:
     type: fail
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

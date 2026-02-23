@@ -104,7 +104,7 @@ states:
       - run: |
           curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H 'Content-type: application/json' \
-            --data "{\"text\": \"Merged: $PLURAL_ISSUE_TITLE\\n$PLURAL_PR_URL\"}"
+            --data "{\"text\": \"Merged: $ERG_ISSUE_TITLE\\n$ERG_PR_URL\"}"
     next: done
 
   done:

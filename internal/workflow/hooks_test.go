@@ -70,7 +70,7 @@ func TestRunHooks_EnvironmentVariables(t *testing.T) {
 	outFile := filepath.Join(dir, "env.txt")
 
 	hooks := []HookConfig{
-		{Run: "echo $PLURAL_BRANCH > " + outFile},
+		{Run: "echo $ERG_BRANCH > " + outFile},
 	}
 
 	hookCtx := HookContext{
@@ -120,15 +120,15 @@ func TestHookContext_EnvVars(t *testing.T) {
 
 	vars := hc.envVars()
 	expected := map[string]string{
-		"PLURAL_REPO_PATH":   "/repo",
-		"PLURAL_BRANCH":      "main",
-		"PLURAL_SESSION_ID":  "abc123",
-		"PLURAL_ISSUE_ID":    "42",
-		"PLURAL_ISSUE_TITLE": "Fix bug",
-		"PLURAL_ISSUE_URL":   "https://github.com/test/repo/issues/42",
-		"PLURAL_PR_URL":      "https://github.com/test/repo/pull/1",
-		"PLURAL_WORKTREE":    "/worktree",
-		"PLURAL_PROVIDER":    "github",
+		"ERG_REPO_PATH":   "/repo",
+		"ERG_BRANCH":      "main",
+		"ERG_SESSION_ID":  "abc123",
+		"ERG_ISSUE_ID":    "42",
+		"ERG_ISSUE_TITLE": "Fix bug",
+		"ERG_ISSUE_URL":   "https://github.com/test/repo/issues/42",
+		"ERG_PR_URL":      "https://github.com/test/repo/pull/1",
+		"ERG_WORKTREE":    "/worktree",
+		"ERG_PROVIDER":    "github",
 	}
 
 	varMap := make(map[string]string)

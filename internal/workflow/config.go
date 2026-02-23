@@ -1,5 +1,5 @@
-// Package workflow provides configurable workflow definitions for the Plural agent daemon.
-// Workflows are defined in .plural/workflow.yaml per repository.
+// Package workflow provides configurable workflow definitions for the erg daemon.
+// Workflows are defined in .erg/workflow.yaml per repository.
 package workflow
 
 import (

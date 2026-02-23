@@ -1,5 +1,5 @@
 // Package container provides auto-detection of repository languages and
-// automatic container image building for the Plural agent.
+// automatic container image building for the erg agent.
 package container
 
 import (
@@ -328,7 +328,7 @@ func parseRemoteVersion(ctx context.Context, repo string, lang Language) string 
 	}
 
 	// Create a temp dir to store fetched files, then reuse local parsers
-	tmpDir, err := os.MkdirTemp("", "plural-detect-*")
+	tmpDir, err := os.MkdirTemp("", "erg-detect-*")
 	if err != nil {
 		return ""
 	}

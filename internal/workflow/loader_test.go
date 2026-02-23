@@ -19,8 +19,8 @@ func TestLoad_FileNotExists(t *testing.T) {
 
 func TestLoad_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -46,7 +46,7 @@ states:
   failed:
     type: fail
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,12 +78,12 @@ states:
 
 func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte("{{invalid yaml"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte("{{invalid yaml"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,8 +95,8 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 func TestLoad_OldFormatDetection(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +112,7 @@ workflow:
   merge:
     method: rebase
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(oldYAML), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(oldYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,8 +127,8 @@ workflow:
 
 func TestLoad_SourceOnlyNotOldFormat(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,7 +140,7 @@ source:
   filter:
     label: "queued"
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(sourceOnlyYAML), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(sourceOnlyYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -175,8 +175,8 @@ func TestLoadAndMerge_NoFile(t *testing.T) {
 
 func TestLoad_SettingsBlock(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,7 +212,7 @@ states:
   failed:
     type: fail
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -251,8 +251,8 @@ states:
 
 func TestLoadAndMerge_PartialFile(t *testing.T) {
 	dir := t.TempDir()
-	pluralDir := filepath.Join(dir, ".plural")
-	if err := os.MkdirAll(pluralDir, 0o755); err != nil {
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +270,7 @@ states:
       method: squash
     next: done
 `
-	if err := os.WriteFile(filepath.Join(pluralDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ergDir, "workflow.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

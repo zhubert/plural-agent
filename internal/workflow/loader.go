@@ -9,9 +9,9 @@ import (
 )
 
 const workflowFileName = "workflow.yaml"
-const workflowDir = ".plural"
+const workflowDir = ".erg"
 
-// Load reads and parses .plural/workflow.yaml from the given repo path.
+// Load reads and parses .erg/workflow.yaml from the given repo path.
 // Returns nil, nil if the file does not exist.
 func Load(repoPath string) (*Config, error) {
 	fp := filepath.Join(repoPath, workflowDir, workflowFileName)
@@ -29,8 +29,8 @@ func Load(repoPath string) (*Config, error) {
 		return nil, fmt.Errorf(
 			"workflow config uses the old flat format which is no longer supported. " +
 				"Please migrate to the new step-functions format. " +
-				"Run `plural workflow init` to see the new format, " +
-				"or see https://github.com/zhubert/plural for migration docs",
+				"Run `erg workflow init` to see the new format, " +
+				"or see https://github.com/zhubert/erg for migration docs",
 		)
 	}
 

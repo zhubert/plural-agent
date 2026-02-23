@@ -79,7 +79,7 @@ func StateFilePath(repoPath string) string {
 	if err != nil {
 		// Fall back to home dir
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".plural")
+		dir = filepath.Join(home, ".erg")
 	}
 	if repoPath == "" {
 		return filepath.Join(dir, "daemon-state.json")
@@ -348,7 +348,7 @@ func StateExists() bool {
 	dir, err := paths.DataDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".plural")
+		dir = filepath.Join(home, ".erg")
 	}
 	// Check for both legacy and per-repo state files
 	matches, _ := filepath.Glob(filepath.Join(dir, "daemon-state*.json"))
@@ -361,7 +361,7 @@ func ClearState() error {
 	dir, err := paths.DataDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".plural")
+		dir = filepath.Join(home, ".erg")
 	}
 	matches, _ := filepath.Glob(filepath.Join(dir, "daemon-state*.json"))
 	for _, match := range matches {

@@ -25,12 +25,12 @@ var rootCmd = &cobra.Command{
 picking up issues, coding, PR creation, review feedback cycles, and final merge.
 
 The daemon is stoppable and restartable without losing track of in-flight work.
-State is persisted to ~/.plural/daemon-state.json.
+State is persisted to ~/.erg/daemon-state.json.
 
 If --repo is not specified and the current directory is inside a git repository,
 that repository is used as the default.
 
-Behavior is configured via .plural/workflow.yaml in your repository. Settings such
+Behavior is configured via .erg/workflow.yaml in your repository. Settings such
 as max_turns, max_duration, merge_method, and auto_merge can all be specified there.
 
 All sessions are containerized (container = sandbox).
