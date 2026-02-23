@@ -212,37 +212,52 @@ func (d *Daemon) tick(ctx context.Context) {
 
 // collectCompletedWorkers checks for finished Claude sessions and advances work items.
 func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
+	// Phase 1: collect finished workers under lock and remove them from d.workers.
+	// We release d.mu before processing because the handlers (handleAsyncComplete,
+	// handleFeedbackComplete) can re-acquire d.mu via executeSyncChain → action →
+	// createWorkerWithPrompt/refreshStaleSession. sync.Mutex is not reentrant, so
+	// holding it here while calling handlers would cause a deadlock in any custom
+	// workflow that routes the sync chain through an async action (ai.code, ai.fix_ci).
+	var completed []struct {
+		workItemID string
+		exitErr    error
+	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	for workItemID, w := range d.workers {
 		if !w.Done() {
 			continue
 		}
+		completed = append(completed, struct {
+			workItemID string
+			exitErr    error
+		}{workItemID, w.ExitError()})
+		delete(d.workers, workItemID)
+	}
+	d.mu.Unlock()
 
-		item := d.state.GetWorkItem(workItemID)
+	// Phase 2: process each completed worker without holding d.mu.
+	for _, cw := range completed {
+		item := d.state.GetWorkItem(cw.workItemID)
 		if item == nil {
-			delete(d.workers, workItemID)
 			continue
 		}
 
-		exitErr := w.ExitError()
-		if exitErr != nil {
-			d.logger.Warn("worker completed with error", "workItem", workItemID, "step", item.CurrentStep, "phase", item.Phase, "error", exitErr)
+		if cw.exitErr != nil {
+			d.logger.Warn("worker completed with error", "workItem", cw.workItemID, "step", item.CurrentStep, "phase", item.Phase, "error", cw.exitErr)
 		} else {
-			d.logger.Info("worker completed", "workItem", workItemID, "step", item.CurrentStep, "phase", item.Phase)
+			d.logger.Info("worker completed", "workItem", cw.workItemID, "step", item.CurrentStep, "phase", item.Phase)
 		}
 
 		switch item.Phase {
 		case "async_pending":
 			// Main async action completed (e.g., coding)
-			d.handleAsyncComplete(ctx, item, exitErr)
+			d.handleAsyncComplete(ctx, item, cw.exitErr)
 
 		case "addressing_feedback":
 			// Feedback addressing completed — push changes (skip if worker failed)
-			if exitErr != nil {
-				d.logger.Warn("skipping push after failed feedback session", "workItem", workItemID, "error", exitErr)
-				d.state.SetErrorMessage(item.ID, fmt.Sprintf("feedback session failed: %v", exitErr))
+			if cw.exitErr != nil {
+				d.logger.Warn("skipping push after failed feedback session", "workItem", cw.workItemID, "error", cw.exitErr)
+				d.state.SetErrorMessage(item.ID, fmt.Sprintf("feedback session failed: %v", cw.exitErr))
 				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
 					it.Phase = "idle"
 					it.UpdatedAt = time.Now()
@@ -251,8 +266,6 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 				d.handleFeedbackComplete(ctx, item)
 			}
 		}
-
-		delete(d.workers, workItemID)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -1316,6 +1317,104 @@ func TestDaemon_CollectCompletedWorkers_FeedbackError(t *testing.T) {
 	// Error message should be persisted for operator visibility
 	if item.ErrorMessage == "" {
 		t.Error("expected error message to be set after failed feedback")
+	}
+}
+
+// mutexAcquiringAction is a workflow action that tries to acquire d.mu.
+// It is used to simulate the deadlock scenario: collectCompletedWorkers → executeSyncChain →
+// action → createWorkerWithPrompt/refreshStaleSession → d.mu.Lock().
+type mutexAcquiringAction struct {
+	mu       *sync.Mutex
+	acquired chan struct{}
+}
+
+func (a *mutexAcquiringAction) Execute(_ context.Context, _ *workflow.ActionContext) workflow.ActionResult {
+	a.mu.Lock()
+	select {
+	case a.acquired <- struct{}{}:
+	default:
+	}
+	a.mu.Unlock()
+	return workflow.ActionResult{Success: true}
+}
+
+func TestDaemon_CollectCompletedWorkers_NoDeadlockWhenHandlerAcquiresMutex(t *testing.T) {
+	// Regression test for issue #51: collectCompletedWorkers must release d.mu before
+	// calling handlers. Custom workflows that route the sync chain through an action
+	// that re-acquires d.mu (e.g., createWorkerWithPrompt, refreshStaleSession) would
+	// deadlock because sync.Mutex is not reentrant.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "coding",
+	})
+	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
+
+	// Register a custom action that acquires d.mu. This simulates what
+	// createWorkerWithPrompt and refreshStaleSession do when called from
+	// executeSyncChain → action.Execute().
+	mutexAcquired := make(chan struct{}, 1)
+	lockAction := &mutexAcquiringAction{mu: &d.mu, acquired: mutexAcquired}
+
+	// Custom workflow: after coding (async) succeeds, run acquire_mutex (sync task) → done.
+	// In the default workflow executeSyncChain stops at wait states before reaching
+	// ai.code/ai.fix_ci, so the deadlock never triggers there. This custom workflow
+	// exercises the latent path.
+	customCfg := &workflow.Config{
+		Start: "coding",
+		States: map[string]*workflow.State{
+			"coding": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.code",
+				Next:   "acquire_mutex",
+				Error:  "failed",
+			},
+			"acquire_mutex": {
+				Type:   workflow.StateTypeTask,
+				Action: "test.acquire_mutex",
+				Next:   "done",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	registry.Register("test.acquire_mutex", lockAction)
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.workers["item-1"] = newMockDoneWorker()
+
+	// Run collectCompletedWorkers in a goroutine with a timeout.
+	// Before the fix, this deadlocked because d.mu was held while calling
+	// handleAsyncComplete → executeSyncChain → acquire_mutex action → d.mu.Lock().
+	done := make(chan struct{})
+	go func() {
+		d.collectCompletedWorkers(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — no deadlock
+	case <-time.After(2 * time.Second):
+		t.Fatal("collectCompletedWorkers deadlocked: d.mu was held while calling handlers")
+	}
+
+	// Verify the mutex-acquiring action actually ran (i.e., executeSyncChain was called).
+	select {
+	case <-mutexAcquired:
+		// success
+	default:
+		t.Error("expected acquire_mutex action to be called, but it was not")
 	}
 }
 
