@@ -291,8 +291,6 @@ func formatStep(item *daemonstate.WorkItem) string {
 	switch item.State {
 	case daemonstate.WorkItemFailed:
 		return "(failed)"
-	case daemonstate.WorkItemAbandoned:
-		return "(abandoned)"
 	case daemonstate.WorkItemQueued:
 		if item.CurrentStep != "" {
 			return item.CurrentStep

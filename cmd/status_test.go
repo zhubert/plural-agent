@@ -123,7 +123,7 @@ func TestFormatIssue_Truncation(t *testing.T) {
 
 func TestFormatStep_Active(t *testing.T) {
 	item := &daemonstate.WorkItem{
-		State:       daemonstate.WorkItemCoding,
+		State:       daemonstate.WorkItemActive,
 		CurrentStep: "coding",
 	}
 	got := formatStep(item)
@@ -143,13 +143,14 @@ func TestFormatStep_Failed(t *testing.T) {
 	}
 }
 
-func TestFormatStep_Abandoned(t *testing.T) {
+func TestFormatStep_Completed(t *testing.T) {
 	item := &daemonstate.WorkItem{
-		State: daemonstate.WorkItemAbandoned,
+		State:       daemonstate.WorkItemCompleted,
+		CurrentStep: "done",
 	}
 	got := formatStep(item)
-	if got != "(abandoned)" {
-		t.Errorf("expected '(abandoned)', got %q", got)
+	if got != "done" {
+		t.Errorf("expected 'done', got %q", got)
 	}
 }
 
@@ -219,7 +220,7 @@ func TestPrintTableView_Basic(t *testing.T) {
 	items := []*daemonstate.WorkItem{
 		{
 			IssueRef:      config.IssueRef{Source: "github", ID: "42", Title: "Fix login bug"},
-			State:         daemonstate.WorkItemAwaitingReview,
+			State:         daemonstate.WorkItemActive,
 			CurrentStep:   "await_review",
 			Phase:         "idle",
 			StepEnteredAt: now.Add(-12 * time.Minute),
@@ -227,7 +228,7 @@ func TestPrintTableView_Basic(t *testing.T) {
 		},
 		{
 			IssueRef:      config.IssueRef{Source: "github", ID: "38", Title: "Add dark mode"},
-			State:         daemonstate.WorkItemCoding,
+			State:         daemonstate.WorkItemActive,
 			CurrentStep:   "coding",
 			Phase:         "async_pending",
 			StepEnteredAt: now.Add(-3 * time.Minute),
@@ -284,7 +285,7 @@ func TestPrintTableView_EmptyPhase(t *testing.T) {
 	items := []*daemonstate.WorkItem{
 		{
 			IssueRef:      config.IssueRef{Source: "github", ID: "5", Title: "Test"},
-			State:         daemonstate.WorkItemCoding,
+			State:         daemonstate.WorkItemActive,
 			CurrentStep:   "coding",
 			Phase:         "", // empty phase should default to "idle"
 			StepEnteredAt: now.Add(-2 * time.Minute),
@@ -398,14 +399,14 @@ func TestPrintMapView_DefaultConfig(t *testing.T) {
 	items := []*daemonstate.WorkItem{
 		{
 			IssueRef:      config.IssueRef{Source: "github", ID: "38", Title: "Add dark mode"},
-			State:         daemonstate.WorkItemCoding,
+			State:         daemonstate.WorkItemActive,
 			CurrentStep:   "coding",
 			Phase:         "async_pending",
 			StepEnteredAt: now.Add(-3 * time.Minute),
 		},
 		{
 			IssueRef:      config.IssueRef{Source: "github", ID: "42", Title: "Fix login bug"},
-			State:         daemonstate.WorkItemAwaitingReview,
+			State:         daemonstate.WorkItemActive,
 			CurrentStep:   "await_review",
 			Phase:         "idle",
 			StepEnteredAt: now.Add(-12 * time.Minute),
@@ -458,7 +459,7 @@ func TestPrintMapView_OffPathItem(t *testing.T) {
 	items := []*daemonstate.WorkItem{
 		{
 			IssueRef:    config.IssueRef{Source: "github", ID: "99", Title: "CI fix"},
-			State:       daemonstate.WorkItemCoding,
+			State:       daemonstate.WorkItemActive,
 			CurrentStep: "fix_ci", // off the primary happy path
 			Phase:       "async_pending",
 		},
