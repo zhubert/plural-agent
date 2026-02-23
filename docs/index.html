@@ -503,6 +503,60 @@
         .code-block .cs { color: var(--green); }
         .code-block .ca { color: var(--violet); }
 
+        /* ---- Example tabs ---- */
+
+        .example-tabs {
+            margin: 1rem 0 1.5rem;
+        }
+
+        .tab-bar {
+            display: flex;
+            gap: 0.35rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-dim);
+            padding: 0.3rem 0.8rem;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.73rem;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
+        }
+
+        .tab-btn.active {
+            color: var(--accent);
+            border-color: var(--accent-border);
+            background: var(--accent-bg);
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: var(--text-muted);
+            border-color: var(--border-light);
+        }
+
+        .example-tabs [data-panel="yaml"] .code-block {
+            margin: 0;
+        }
+
+        .diagram-panel {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem 1rem;
+            overflow-x: auto;
+        }
+
+        .diagram-panel svg {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
         /* ---- Info cards ---- */
 
         .info-grid {
@@ -732,6 +786,7 @@
             }
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </head>
 <body>
 
@@ -951,6 +1006,12 @@
 
         <h3 id="example-minimal">Minimal</h3>
         <p>Simple pipeline: code, open PR, wait for review + CI to pass together, merge. Uses <code>pr.mergeable</code> to combine approval and CI into a single wait state. The best starting point for most projects.</p>
+        <div class="example-tabs">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
+                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
+            </div>
+            <div data-panel="yaml">
         <div class="code-block">
             <div class="code-header">
                 <span class="code-filename">examples/minimal.yaml</span>
@@ -1035,9 +1096,35 @@ states:
   failed:
     type: fail</pre>
         </div>
+            </div>
+            <div data-panel="diagram" style="display:none">
+                <div class="diagram-panel">
+                    <pre class="mermaid">stateDiagram-v2
+    [*] --> coding
+    coding --> open_pr : ai.code
+    coding --> failed : error
+    open_pr --> await_merge : github.create_pr
+    open_pr --> failed : error
+    await_merge --> merge : pr.mergeable (timeout: 72h0m0s)
+    await_merge --> timed_out : timeout
+    await_merge --> failed : error
+    timed_out --> failed : github.comment_pr
+    timed_out --> failed : error
+    merge --> done : github.merge
+    done --> [*]
+    failed --> [*]</pre>
+                </div>
+            </div>
+        </div>
 
         <h3 id="example-supervised">Supervised</h3>
         <p>For complex features spanning multiple files. Claude acts as a supervisor that can spawn child sessions for parallel work. Includes hooks, retry with exponential backoff, <code>catch</code>-based error routing, and a Slack notification after merge.</p>
+        <div class="example-tabs">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
+                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
+            </div>
+            <div data-panel="yaml">
         <div class="code-block">
             <div class="code-header">
                 <span class="code-filename">examples/supervised.yaml</span>
@@ -1165,9 +1252,42 @@ states:
   failed:
     type: fail</pre>
         </div>
+            </div>
+            <div data-panel="diagram" style="display:none">
+                <div class="diagram-panel">
+                    <pre class="mermaid">stateDiagram-v2
+    [*] --> coding
+    coding_before --> coding : before hooks
+    coding --> coding_hooks : after hooks
+    coding --> open_pr : ai.code
+    coding --> failed : error
+    open_pr --> await_ci : github.create_pr
+    open_pr --> failed : error
+    await_ci --> await_review : ci.complete (timeout: 3h0m0s)
+    await_ci --> failed : error
+    await_review --> merge : pr.reviewed (timeout: 72h0m0s)
+    await_review --> review_overdue : timeout
+    await_review --> failed : error
+    review_overdue --> failed : github.comment_pr
+    review_overdue --> failed : error
+    merge --> done : github.merge
+    merge --> merge_hooks : after hooks
+    notify_container_failure --> failed : github.comment_issue
+    notify_container_failure --> failed : error
+    done --> [*]
+    failed --> [*]</pre>
+                </div>
+            </div>
+        </div>
 
         <h3 id="example-ci-gate">CI gate</h3>
         <p>CI must pass before a reviewer is assigned. A <code>choice</code> state routes on the CI result: green goes to review, red triggers a Claude fix loop that retries up to three times before giving up.</p>
+        <div class="example-tabs">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
+                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
+            </div>
+            <div data-panel="yaml">
         <div class="code-block">
             <div class="code-header">
                 <span class="code-filename">examples/ci-gate.yaml</span>
@@ -1311,9 +1431,51 @@ states:
   failed:
     type: fail</pre>
         </div>
+            </div>
+            <div data-panel="diagram" style="display:none">
+                <div class="diagram-panel">
+                    <pre class="mermaid">stateDiagram-v2
+    [*] --> coding
+    coding --> open_pr : ai.code
+    coding --> failed : error
+    open_pr --> await_ci : github.create_pr
+    open_pr --> failed : error
+    await_ci --> check_ci : ci.complete (timeout: 2h0m0s)
+    await_ci --> ci_timed_out : timeout
+    await_ci --> failed : error
+    check_ci --> request_reviewer : ci_passed == true
+    check_ci --> fix_ci : ci_failed == true
+    check_ci --> failed : default
+    fix_ci --> push_ci_fix : ai.fix_ci
+    fix_ci --> ci_unfixable : error
+    push_ci_fix --> await_ci : github.push
+    push_ci_fix --> failed : error
+    ci_unfixable --> failed : github.comment_pr
+    ci_unfixable --> failed : error
+    ci_timed_out --> failed : github.comment_pr
+    ci_timed_out --> failed : error
+    request_reviewer --> await_review : github.request_review
+    request_reviewer --> await_review : error
+    await_review --> merge : pr.reviewed (timeout: 48h0m0s)
+    await_review --> review_overdue : timeout
+    await_review --> failed : error
+    review_overdue --> failed : github.comment_issue
+    review_overdue --> failed : error
+    merge --> done : github.merge
+    done --> [*]
+    failed --> [*]</pre>
+                </div>
+            </div>
+        </div>
 
         <h3 id="example-label-tracking">Label tracking</h3>
         <p>Issues move through GitHub labels as they advance: <code>queued</code> → <code>in-progress</code> → <code>in-review</code>. A <code>pass</code> state injects config flags, and a <code>choice</code> state reads them to conditionally close the source issue after merge.</p>
+        <div class="example-tabs">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
+                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
+            </div>
+            <div data-panel="yaml">
         <div class="code-block">
             <div class="code-header">
                 <span class="code-filename">examples/label-tracking.yaml</span>
@@ -1449,9 +1611,48 @@ states:
   failed:
     type: fail</pre>
         </div>
+            </div>
+            <div data-panel="diagram" style="display:none">
+                <div class="diagram-panel">
+                    <pre class="mermaid">stateDiagram-v2
+    [*] --> configure
+    configure --> start_coding : pass
+    start_coding --> label_in_progress : github.remove_label
+    start_coding --> label_in_progress : error
+    label_in_progress --> coding : github.add_label
+    label_in_progress --> coding : error
+    coding --> label_in_review : ai.code
+    coding --> label_failed : error
+    label_in_review --> add_in_review : github.remove_label
+    label_in_review --> add_in_review : error
+    add_in_review --> open_pr : github.add_label
+    add_in_review --> open_pr : error
+    open_pr --> await_merge : github.create_pr
+    open_pr --> label_failed : error
+    await_merge --> merge : pr.mergeable (timeout: 72h0m0s)
+    await_merge --> label_failed : timeout
+    await_merge --> label_failed : error
+    merge --> check_close : github.merge
+    check_close --> close_issue : close_issue_on_merge == true
+    check_close --> done : default
+    close_issue --> done : github.close_issue
+    close_issue --> done : error
+    label_failed --> failed : github.add_label
+    label_failed --> failed : error
+    done --> [*]
+    failed --> [*]</pre>
+                </div>
+            </div>
+        </div>
 
         <h3 id="example-linear">Linear</h3>
         <p>For teams that track work in Linear instead of GitHub Issues. Polls a Linear team for issues, runs an inline system prompt, auto-formats code before opening the PR, and posts a Slack notification after merge.</p>
+        <div class="example-tabs">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
+                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
+            </div>
+            <div data-panel="yaml">
         <div class="code-block">
             <div class="code-header">
                 <span class="code-filename">examples/linear.yaml</span>
@@ -1572,6 +1773,31 @@ states:
   failed:
     type: fail</pre>
         </div>
+            </div>
+            <div data-panel="diagram" style="display:none">
+                <div class="diagram-panel">
+                    <pre class="mermaid">stateDiagram-v2
+    [*] --> coding
+    coding --> format : ai.code
+    coding --> failed : error
+    format --> open_pr : git.format
+    format --> open_pr : error
+    open_pr --> await_ci : github.create_pr
+    open_pr --> failed : error
+    await_ci --> await_review : ci.complete (timeout: 2h0m0s)
+    await_ci --> failed : error
+    await_review --> merge : pr.reviewed (timeout: 48h0m0s)
+    await_review --> review_overdue : timeout
+    await_review --> failed : error
+    review_overdue --> failed : github.comment_pr
+    review_overdue --> failed : error
+    merge --> done : github.merge
+    merge --> merge_hooks : after hooks
+    done --> [*]
+    failed --> [*]</pre>
+                </div>
+            </div>
+        </div>
 
         <!-- CLI reference -->
         <h2 id="cli">CLI commands</h2>
@@ -1623,6 +1849,22 @@ states:
 </div>
 
 <script>
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+function switchTab(btn, tab) {
+    var tabs = btn.closest('.example-tabs');
+    tabs.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    tabs.querySelectorAll('[data-panel]').forEach(function(p) { p.style.display = 'none'; });
+    var panel = tabs.querySelector('[data-panel="' + tab + '"]');
+    if (panel) panel.style.display = '';
+    if (tab === 'diagram' && !tabs.dataset.rendered) {
+        tabs.dataset.rendered = '1';
+        var el = tabs.querySelector('.mermaid');
+        if (el) mermaid.run({ nodes: [el] });
+    }
+}
+
 function copyCmd(btn, cmd) {
     navigator.clipboard.writeText(cmd).then(function() {
         btn.textContent = 'copied';
