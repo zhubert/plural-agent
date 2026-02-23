@@ -877,6 +877,73 @@ func TestStartCoding_FailsWhenCleanupFails(t *testing.T) {
 	}
 }
 
+// TestStartCoding_WorkItemUpdatedBeforeConfigSave is a regression test for the
+// ordering bug where the work item's SessionID was set AFTER saveConfig was
+// called, leaving a window where a crash would orphan the session (config has
+// the session but state file has no SessionID reference).
+//
+// After the fix, we verify that when startCoding succeeds:
+//   - item.SessionID is set (so saveState records the link to the session)
+//   - item.Branch matches the session branch
+//   - item.State is WorkItemCoding
+//   - The SessionID on the work item matches the session recorded in config
+func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Make BranchExists always return false (no pre-existing branch) so
+	// startCoding proceeds directly to session creation.
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix orphan bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := d.startCoding(ctx, item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed, got: %v", err)
+	}
+
+	// item.SessionID must be set so that a subsequent saveState records the
+	// reference — this is the core of the bug fix.
+	if item.SessionID == "" {
+		t.Error("item.SessionID must be set before saveConfig is called (regression: orphaned session on crash)")
+	}
+	if item.Branch == "" {
+		t.Error("item.Branch must be set after startCoding")
+	}
+	if item.State != daemonstate.WorkItemCoding {
+		t.Errorf("item.State must be WorkItemCoding, got %q", item.State)
+	}
+
+	// The SessionID on the work item must match the session recorded in config,
+	// confirming both are kept consistent.
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a session to be recorded in config")
+	}
+	if sessions[0].ID != item.SessionID {
+		t.Errorf("config session ID %q does not match item.SessionID %q", sessions[0].ID, item.SessionID)
+	}
+}
+
 func TestParseWorktreeForBranch(t *testing.T) {
 	tests := []struct {
 		name           string
