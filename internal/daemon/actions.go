@@ -960,7 +960,8 @@ func (d *Daemon) commentOnPR(ctx context.Context, item *daemonstate.WorkItem, pa
 	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", body, "--repo", sess.RepoPath)
+	cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", body)
+	cmd.Dir = sess.RepoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh pr comment failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1042,7 +1043,8 @@ func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) err
 	closeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID, "--repo", repoPath)
+	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID)
+	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh issue close failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1095,7 +1097,8 @@ func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
 	prCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := osexec.CommandContext(prCtx, "gh", "pr", "view", branch, "--json", "url", "--repo", repoPath)
+	cmd := osexec.CommandContext(prCtx, "gh", "pr", "view", branch, "--json", "url")
+	cmd.Dir = repoPath
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh pr view failed: %w", err)
@@ -1126,7 +1129,8 @@ func (d *Daemon) requestReview(ctx context.Context, item *daemonstate.WorkItem, 
 	reviewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer, "--repo", sess.RepoPath)
+	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer)
+	cmd.Dir = sess.RepoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh pr edit --add-reviewer failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
@@ -1250,8 +1254,8 @@ func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, e
 		"--status", "failure",
 		"--limit", "1",
 		"--json", "databaseId",
-		"--repo", repoPath,
 	)
+	listCmd.Dir = repoPath
 	listOutput, err := listCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to list CI runs: %w", err)
@@ -1271,8 +1275,8 @@ func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, e
 	runID := fmt.Sprintf("%d", runs[0].DatabaseID)
 	logCmd := osexec.CommandContext(fetchCtx, "gh", "run", "view", runID,
 		"--log-failed",
-		"--repo", repoPath,
 	)
+	logCmd.Dir = repoPath
 	logOutput, err := logCmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch CI logs: %w", err)
