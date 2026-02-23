@@ -93,8 +93,8 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 			if !strings.Contains(df, "npm install -g @anthropic-ai/claude-code@latest") {
 				t.Error("expected Claude Code install @latest in entrypoint script")
 			}
-			if !strings.Contains(df, "PLURAL_SKIP_UPDATE") {
-				t.Error("expected PLURAL_SKIP_UPDATE check in entrypoint script")
+			if !strings.Contains(df, "ERG_SKIP_UPDATE") {
+				t.Error("expected ERG_SKIP_UPDATE check in entrypoint script")
 			}
 			if !strings.Contains(df, `exec claude`) {
 				t.Error("expected exec claude in entrypoint script")
@@ -181,6 +181,9 @@ func TestGenerateDockerfile_IncludesPluralBinary(t *testing.T) {
 			}
 			if !strings.Contains(df, "/usr/local/bin/erg") {
 				t.Error("expected erg binary install path in Dockerfile")
+			}
+			if !strings.Contains(df, "ln -s /usr/local/bin/erg /usr/local/bin/plural") {
+				t.Error("expected plural -> erg symlink for MCP config backward compatibility")
 			}
 		})
 	}

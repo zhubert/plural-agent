@@ -87,14 +87,17 @@ func GenerateDockerfile(langs []DetectedLang, version string) string {
 			" | tar -xz -C /tmp && mv /tmp/erg /usr/local/bin/erg\n",
 			releaseArch())
 	}
+	// Symlink plural -> erg for backward compatibility with plural-core's MCP config,
+	// which hardcodes /usr/local/bin/plural as the MCP server command.
+	b.WriteString("RUN ln -s /usr/local/bin/erg /usr/local/bin/plural\n")
 
 	// Entrypoint script: install latest Claude Code on boot (keeps cached image fresh),
 	// then exec into claude with all original arguments.
 	// Uses `npm install @latest` instead of `npm update` because npm update respects
 	// semver ranges and won't cross major version boundaries.
 	// Redirects both stdout and stderr to avoid polluting the JSON stream.
-	// Checks PLURAL_SKIP_UPDATE to allow developers to skip the update.
-	b.WriteString("RUN printf '#!/bin/sh\\nif [ -z \"$PLURAL_SKIP_UPDATE\" ]; then npm install -g @anthropic-ai/claude-code@latest >/dev/null 2>&1; fi\\nexec claude \"$@\"\\n' > /usr/local/bin/entrypoint.sh \\\n")
+	// Checks ERG_SKIP_UPDATE to allow developers to skip the update.
+	b.WriteString("RUN printf '#!/bin/sh\\nif [ -z \"$ERG_SKIP_UPDATE\" ]; then npm install -g @anthropic-ai/claude-code@latest >/dev/null 2>&1; fi\\nexec claude \"$@\"\\n' > /usr/local/bin/entrypoint.sh \\\n")
 	b.WriteString("    && chmod +x /usr/local/bin/entrypoint.sh\n")
 	b.WriteString("ENTRYPOINT [\"/usr/local/bin/entrypoint.sh\"]\n")
 
