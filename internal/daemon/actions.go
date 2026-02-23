@@ -641,6 +641,12 @@ func (d *Daemon) mergePR(ctx context.Context, item *daemonstate.WorkItem) error 
 	d.config.MarkSessionPRMerged(item.SessionID)
 	d.saveConfig("mergePR")
 
+	// Persist the repo path before cleanup so workItemView can find it
+	// after the session is removed from config.
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["_repo_path"] = sess.RepoPath
+	})
+
 	// Auto-cleanup if enabled
 	if d.config.GetAutoCleanupMerged() {
 		d.cleanupSession(ctx, item.SessionID)

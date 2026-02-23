@@ -86,7 +86,7 @@ func (c *EventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 	}
 
 	if result.CommentCount > item.CommentsAddressed {
-		log.Info("new review comments detected",
+		log.Debug("new comments detected, checking for review feedback",
 			"addressed", item.CommentsAddressed,
 			"current", result.CommentCount,
 		)
@@ -149,7 +149,7 @@ func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 
 	ciStatus, err := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
 	if err != nil {
-		log.Debug("failed to check CI status", "error", err)
+		log.Debug("CI checks not available yet", "error", err)
 		return false, nil, nil
 	}
 
@@ -235,7 +235,7 @@ func (c *EventChecker) checkPRMergeable(ctx context.Context, params *workflow.Pa
 	if requireCI {
 		ciStatus, err := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
 		if err != nil {
-			log.Debug("failed to check CI status", "error", err)
+			log.Debug("CI checks not available yet", "error", err)
 			return false, nil, nil
 		}
 		if ciStatus == git.CIStatusPending {

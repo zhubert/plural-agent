@@ -1196,6 +1196,29 @@ func TestDaemon_WorkItemView_FallsBackToRepoFilter(t *testing.T) {
 	}
 }
 
+func TestDaemon_WorkItemView_UsesStepDataRepoPath(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/fallback/repo"
+
+	// No session — simulates post-merge cleanup where session was removed
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "cleaned-up-session",
+		Branch:      "feature-1",
+		CurrentStep: "done",
+		StepData:    map[string]any{"_repo_path": "/actual/repo/path"},
+	})
+
+	item := d.state.GetWorkItem("item-1")
+	view := d.workItemView(item)
+
+	if view.RepoPath != "/actual/repo/path" {
+		t.Errorf("expected step data repo path /actual/repo/path, got %s", view.RepoPath)
+	}
+}
+
 func TestDaemon_SaveConfig_ResetOnSuccess(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)

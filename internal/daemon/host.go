@@ -58,8 +58,10 @@ func (d *Daemon) workItemView(item *daemonstate.WorkItem) *workflow.WorkItemView
 	repoPath := d.repoFilter
 	if sess := d.config.GetSession(item.SessionID); sess != nil {
 		repoPath = sess.RepoPath
+	} else if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+		repoPath = rp
 	} else if item.SessionID != "" {
-		d.logger.Warn("session not found for work item, falling back to repoFilter",
+		d.logger.Debug("session not found for work item, using repoFilter",
 			"workItem", item.ID, "sessionID", item.SessionID, "repoFilter", d.repoFilter)
 	}
 

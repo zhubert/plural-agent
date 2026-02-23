@@ -2669,3 +2669,53 @@ func TestCloseIssueGracefully_NonGitHub(t *testing.T) {
 	d.closeIssueGracefully(context.Background(), item)
 	// No assertion needed — just verifying it doesn't panic
 }
+
+func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock merge success
+	mockExec.AddPrefixMatch("gh", []string{"pr", "merge"}, exec.MockResponse{
+		Stdout: []byte("merged"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	sess.RepoPath = "/actual/repo/path"
+	cfg.AddSession(*sess)
+	cfg.AutoCleanupMerged = true
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "merge",
+		StepData:    map[string]any{},
+	})
+
+	err := d.mergePR(context.Background(), d.state.GetWorkItem("item-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Session should have been cleaned up
+	if cfg.GetSession("sess-1") != nil {
+		t.Error("expected session to be cleaned up after merge")
+	}
+
+	// Repo path should be preserved in step data
+	item := d.state.GetWorkItem("item-1")
+	repoPath, ok := item.StepData["_repo_path"].(string)
+	if !ok || repoPath != "/actual/repo/path" {
+		t.Errorf("expected _repo_path=/actual/repo/path in step data, got %v", item.StepData["_repo_path"])
+	}
+
+	// workItemView should use the step data repo path
+	view := d.workItemView(item)
+	if view.RepoPath != "/actual/repo/path" {
+		t.Errorf("expected workItemView to use step data repo path, got %s", view.RepoPath)
+	}
+}
