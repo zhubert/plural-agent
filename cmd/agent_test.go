@@ -254,28 +254,6 @@ func TestBuildDaemonArgs_HiddenFlagAppended(t *testing.T) {
 
 // ---- runAgent flag logic ----
 
-func TestOnceImpliesForeground(t *testing.T) {
-	// Save and restore
-	origOnce := agentOnce
-	origFg := agentForeground
-	defer func() {
-		agentOnce = origOnce
-		agentForeground = origFg
-	}()
-
-	agentOnce = true
-	agentForeground = false
-
-	// runAgent will set agentForeground=true before dispatching.
-	// We can't run the full runAgent (needs prereqs), but we can test the flag logic.
-	if agentOnce {
-		agentForeground = true
-	}
-	if !agentForeground {
-		t.Error("expected --once to imply foreground mode")
-	}
-}
-
 func TestDaemonFlagIsHidden(t *testing.T) {
 	flag := rootCmd.Flags().Lookup("_daemon")
 	if flag == nil {
@@ -283,16 +261,6 @@ func TestDaemonFlagIsHidden(t *testing.T) {
 	}
 	if !flag.Hidden {
 		t.Error("expected --_daemon flag to be hidden")
-	}
-}
-
-func TestForegroundFlagExists(t *testing.T) {
-	flag := rootCmd.Flags().Lookup("foreground")
-	if flag == nil {
-		t.Fatal("expected --foreground flag to exist")
-	}
-	if flag.Shorthand != "f" {
-		t.Errorf("expected shorthand 'f', got %q", flag.Shorthand)
 	}
 }
 

@@ -38,24 +38,18 @@ func init() {
 	rootCmd.RunE = runAgent
 	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
-	rootCmd.Flags().BoolVarP(&agentForeground, "foreground", "f", false, "Stay in foreground with live status display")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
 	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
+	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
+	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
-	// --once implies foreground
-	if agentOnce {
-		agentForeground = true
-	}
-
 	if agentDaemonMode {
 		return runDaemonChild(cmd, args)
 	}
-	if agentForeground {
-		return runForeground(cmd, args)
-	}
-	return daemonize(cmd, args)
+	// When called as root command without --_daemon, show help
+	return cmd.Help()
 }
 
 // daemonize performs all setup visible to the user (prereqs, image build),
