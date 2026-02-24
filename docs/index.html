@@ -1128,6 +1128,46 @@
           </li>
         </ol>
 
+        <!-- Installation -->
+        <h2 id="install">Installation</h2>
+        <h3>Homebrew</h3>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>brew install zhubert/tap/erg</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
+          >
+            copy
+          </button>
+        </div>
+
+        <h3>Build from source</h3>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>go build -o erg .</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
+            copy
+          </button>
+        </div>
+
+        <h3>Quick start</h3>
+        <p>After installation, start the daemon pointed at your repo:</p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>erg --repo owner/repo</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'erg --repo owner/repo')"
+          >
+            copy
+          </button>
+        </div>
+        <p>
+          Label a GitHub issue with <code>queued</code> and the agent will pick
+          it up on the next poll cycle.
+        </p>
+
         <!-- Workflow configuration -->
         <h2 id="workflow">Workflow configuration</h2>
         <p>
@@ -3184,46 +3224,6 @@ stateDiagram-v2
             </table>
           </div>
         </div>
-
-        <!-- Installation -->
-        <h2 id="install">Installation</h2>
-        <h3>Homebrew</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>brew install zhubert/tap/erg</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
-          >
-            copy
-          </button>
-        </div>
-
-        <h3>Build from source</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>go build -o erg .</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
-            copy
-          </button>
-        </div>
-
-        <h3>Quick start</h3>
-        <p>After installation, start the daemon pointed at your repo:</p>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>erg --repo owner/repo</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'erg --repo owner/repo')"
-          >
-            copy
-          </button>
-        </div>
-        <p>
-          Label a GitHub issue with <code>queued</code> and the agent will pick
-          it up on the next poll cycle.
-        </p>
 
         <div
           style="
