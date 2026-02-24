@@ -158,8 +158,11 @@ func TestFitLine_Empty(t *testing.T) {
 func writeStreamLog(t *testing.T, sessionID string, entries []map[string]any) func() {
 	t.Helper()
 
-	// Set up a temp dir for logs
+	// Set up a temp dir for logs.
+	// HOME must also be overridden so ~/.erg/ doesn't exist,
+	// allowing the XDG_STATE_HOME override to take effect.
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 	t.Setenv("XDG_STATE_HOME", tmpDir)
 	paths.Reset()
 
@@ -283,6 +286,7 @@ func TestReadStreamLogLines_EmptySessionID(t *testing.T) {
 func TestReadStreamLogLines_MissingFile(t *testing.T) {
 	// Use a temp dir with no log files
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 	t.Setenv("XDG_STATE_HOME", tmpDir)
 	paths.Reset()
 	defer paths.Reset()
