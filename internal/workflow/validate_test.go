@@ -280,6 +280,54 @@ func TestValidate(t *testing.T) {
 			wantFields: nil,
 		},
 		{
+			name: "ai.code empty format_command rejected",
+			cfg: &Config{
+				Start:  "c",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"c":    {Type: StateTypeTask, Action: "ai.code", Params: map[string]any{"format_command": ""}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.c.params.format_command"},
+		},
+		{
+			name: "ai.code non-string format_command rejected",
+			cfg: &Config{
+				Start:  "c",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"c":    {Type: StateTypeTask, Action: "ai.code", Params: map[string]any{"format_command": 42}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.c.params.format_command"},
+		},
+		{
+			name: "ai.code valid format_command accepted",
+			cfg: &Config{
+				Start:  "c",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"c":    {Type: StateTypeTask, Action: "ai.code", Params: map[string]any{"format_command": "go fmt ./..."}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
+			name: "ai.code valid format_command with format_message accepted",
+			cfg: &Config{
+				Start:  "c",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"c":    {Type: StateTypeTask, Action: "ai.code", Params: map[string]any{"format_command": "go fmt ./...", "format_message": "chore: go fmt"}, Next: "done"},
+					"done": {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
 			name: "unknown state type",
 			cfg: &Config{
 				Start:  "x",

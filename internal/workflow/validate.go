@@ -303,6 +303,24 @@ func validateCodingParams(prefix string, params map[string]any) []ValidationErro
 		}
 	}
 
+	// Validate format_command if present (must be a non-empty string)
+	if fc, ok := params["format_command"]; ok {
+		switch v := fc.(type) {
+		case string:
+			if v == "" {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.format_command",
+					Message: "format_command must not be empty",
+				})
+			}
+		default:
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".params.format_command",
+				Message: "format_command must be a string",
+			})
+		}
+	}
+
 	return errs
 }
 

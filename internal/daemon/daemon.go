@@ -324,6 +324,27 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 		return
 	}
 
+	// If a format_command was configured on the coding action, run the formatter
+	// now (after coding succeeds, before the PR is created). This is a
+	// daemon-side safety net: Claude is also instructed to run the formatter
+	// before each commit, but this ensures any uncommitted formatting changes
+	// are captured even if Claude skipped that step.
+	if exitErr == nil {
+		if formatCmd, ok := item.StepData["_format_command"].(string); ok && formatCmd != "" {
+			formatMsg, _ := item.StepData["_format_message"].(string)
+			if formatMsg == "" {
+				formatMsg = "Apply auto-formatting"
+			}
+			formatParams := workflow.NewParamHelper(map[string]any{
+				"command": formatCmd,
+				"message": formatMsg,
+			})
+			if fmtErr := d.runFormatter(ctx, item, formatParams); fmtErr != nil {
+				log.Warn("post-coding formatter failed (non-fatal)", "error", fmtErr)
+			}
+		}
+	}
+
 	// Normal async completion — advance via engine
 	view := d.workItemView(item)
 	success := exitErr == nil

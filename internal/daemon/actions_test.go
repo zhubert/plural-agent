@@ -2719,3 +2719,132 @@ func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
 		t.Errorf("expected workItemView to use step data repo path, got %s", view.RepoPath)
 	}
 }
+
+// TestHandleAsyncComplete_RunsFormatterOnSuccess verifies that when
+// _format_command is stored in step data and the worker exits successfully,
+// handleAsyncComplete runs the formatter (producing a formatting commit).
+func TestHandleAsyncComplete_RunsFormatterOnSuccess(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.RepoPath = workDir
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.loadWorkflowConfigs()
+
+	item := &daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "coding",
+		State:       daemonstate.WorkItemActive,
+		StepData: map[string]any{
+			"_format_command": "echo 'formatted' > fmt.txt",
+			"_format_message": "style: auto-format",
+			"_repo_path":      workDir,
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	// exitErr == nil → success path → formatter should run
+	d.handleAsyncComplete(context.Background(), item, nil)
+
+	// Verify the formatting commit was created
+	cmd := osexec.Command("git", "log", "--format=%s", "-1")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	msg := strings.TrimSpace(string(out))
+	if msg != "style: auto-format" {
+		t.Errorf("expected formatting commit with custom message, got: %q", msg)
+	}
+}
+
+// TestHandleAsyncComplete_SkipsFormatterOnFailure verifies that the formatter
+// is NOT run when the coding worker exits with an error.
+func TestHandleAsyncComplete_SkipsFormatterOnFailure(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.RepoPath = workDir
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.loadWorkflowConfigs()
+
+	item := &daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "coding",
+		State:       daemonstate.WorkItemActive,
+		StepData: map[string]any{
+			"_format_command": "echo 'formatted' > fmt.txt",
+			"_repo_path":      workDir,
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	// exitErr != nil → failure path → formatter should NOT run
+	d.handleAsyncComplete(context.Background(), item, errors.New("worker failed"))
+
+	// Verify no formatting commit was added (only the initial commit)
+	cmd := osexec.Command("git", "log", "--oneline")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected only 1 commit (initial), got %d: %s", len(lines), out)
+	}
+}
+
+// TestHandleAsyncComplete_NoFormatCommandSkipsFormatter verifies that when
+// no _format_command is in step data, no formatter is run.
+func TestHandleAsyncComplete_NoFormatCommandSkipsFormatter(t *testing.T) {
+	workDir := initTestGitRepo(t)
+
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	sess.RepoPath = workDir
+	sess.WorkTree = workDir
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.loadWorkflowConfigs()
+
+	item := &daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "coding",
+		State:       daemonstate.WorkItemActive,
+		StepData: map[string]any{
+			"_repo_path": workDir,
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	d.handleAsyncComplete(context.Background(), item, nil)
+
+	// Verify no extra commits
+	cmd := osexec.Command("git", "log", "--oneline")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected only 1 commit (initial), got %d: %s", len(lines), out)
+	}
+}

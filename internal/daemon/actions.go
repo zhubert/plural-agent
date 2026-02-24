@@ -408,6 +408,20 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 		codingPrompt = DefaultCodingSystemPrompt
 	}
 
+	// If a format_command is configured, store it in step data so
+	// handleAsyncComplete can run it after coding finishes, and inject
+	// instructions into the system prompt so Claude also runs it before
+	// each commit.
+	formatCommand := params.String("format_command", "")
+	if formatCommand != "" {
+		item.StepData["_format_command"] = formatCommand
+		formatMessage := params.String("format_message", "Apply auto-formatting")
+		item.StepData["_format_message"] = formatMessage
+		d.saveState()
+
+		codingPrompt = codingPrompt + "\n\nFORMATTING: Before committing any changes, run the following formatter command:\n  " + formatCommand + "\nStage and include all formatting changes in your commit."
+	}
+
 	// Start worker, applying any per-session limits from workflow params
 	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, codingPrompt)
 	maxTurns := params.Int("max_turns", 0)
