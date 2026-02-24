@@ -383,6 +383,40 @@ func TestLoggerWithAttrs(t *testing.T) {
 	}
 }
 
+func TestSetDebug_BeforeInit_EnablesDebugLevel(t *testing.T) {
+	// Regression: SetDebug(true) must enable DEBUG-level logging even when called
+	// before Init(). This matches the daemon child initialization pattern where
+	// SetDebug is called before Get() triggers lazy init.
+	Reset()
+	defer Reset()
+
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "debug-pre-init.log")
+
+	// Daemon child pattern: SetDebug → Init → Get
+	SetDebug(true)
+	if err := Init(logPath); err != nil {
+		t.Fatalf("Init() failed: %v", err)
+	}
+
+	log := Get()
+	log.Debug("debug-pre-init-msg")
+	log.Info("info-pre-init-msg")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+	contentStr := string(content)
+
+	if !strings.Contains(contentStr, "debug-pre-init-msg") {
+		t.Error("DEBUG message should appear when SetDebug(true) is called before Init()")
+	}
+	if !strings.Contains(contentStr, "info-pre-init-msg") {
+		t.Error("INFO message should appear in log file when SetDebug(true) called before Init()")
+	}
+}
+
 func TestEnsureInit_DefaultPath(t *testing.T) {
 	Reset()
 	defer Reset()
