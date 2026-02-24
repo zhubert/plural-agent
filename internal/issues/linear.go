@@ -105,13 +105,14 @@ type linearTeamsResponse struct {
 }
 
 // FetchIssues retrieves active issues from the Linear team.
-// The projectID should be the Linear team ID.
-func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath, projectID string) ([]Issue, error) {
+// The filter.Team should be the Linear team ID.
+func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
 	apiKey := os.Getenv(linearAPIKeyEnvVar)
 	if apiKey == "" {
 		return nil, fmt.Errorf("LINEAR_API_KEY environment variable not set")
 	}
 
+	projectID := filter.Team
 	if projectID == "" {
 		return nil, fmt.Errorf("Linear team ID not configured for this repository")
 	}

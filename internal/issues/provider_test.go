@@ -90,7 +90,7 @@ type mockProvider struct {
 func (m *mockProvider) Name() string   { return m.name }
 func (m *mockProvider) Source() Source { return m.source }
 
-func (m *mockProvider) FetchIssues(_ context.Context, _, _ string) ([]Issue, error) {
+func (m *mockProvider) FetchIssues(_ context.Context, _ string, _ FilterConfig) ([]Issue, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

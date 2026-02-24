@@ -77,13 +77,14 @@ type asanaTasksResponse struct {
 }
 
 // FetchIssues retrieves incomplete tasks from the Asana project.
-// The projectID should be the Asana project GID.
-func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath, projectID string) ([]Issue, error) {
+// The filter.Project should be the Asana project GID.
+func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
 	pat := os.Getenv(asanaPATEnvVar)
 	if pat == "" {
 		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
 	}
 
+	projectID := filter.Project
 	if projectID == "" {
 		return nil, fmt.Errorf("Asana project GID not configured for this repository")
 	}

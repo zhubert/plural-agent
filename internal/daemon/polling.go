@@ -140,11 +140,11 @@ func (d *Daemon) fetchIssuesForProvider(ctx context.Context, repoPath string, wf
 		if p == nil {
 			return nil, fmt.Errorf("provider %q not registered", provider)
 		}
-		filterID := wfCfg.Source.Filter.Project
-		if provider == issues.SourceLinear {
-			filterID = wfCfg.Source.Filter.Team
-		}
-		return p.FetchIssues(ctx, repoPath, filterID)
+		return p.FetchIssues(ctx, repoPath, issues.FilterConfig{
+			Label:   wfCfg.Source.Filter.Label,
+			Project: wfCfg.Source.Filter.Project,
+			Team:    wfCfg.Source.Filter.Team,
+		})
 
 	default:
 		return nil, fmt.Errorf("unknown provider %q", provider)

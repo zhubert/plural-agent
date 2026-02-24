@@ -101,7 +101,7 @@ func TestAsanaProvider_FetchIssues_NoPAT(t *testing.T) {
 	p := NewAsanaProvider(cfg)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "12345")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345"})
 	if err == nil {
 		t.Error("expected error without PAT")
 	}
@@ -117,7 +117,7 @@ func TestAsanaProvider_FetchIssues_NoProjectID(t *testing.T) {
 	p := NewAsanaProvider(cfg)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{})
 	if err == nil {
 		t.Error("expected error without project ID")
 	}
@@ -151,7 +151,7 @@ func TestAsanaProvider_FetchIssues_MockServer(t *testing.T) {
 	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
 
 	ctx := context.Background()
-	issues, err := p.FetchIssues(ctx, "/test/repo", "12345")
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestAsanaProvider_FetchIssues_APIError(t *testing.T) {
 	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "12345")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345"})
 	if err == nil {
 		t.Error("expected error from API error response")
 	}
