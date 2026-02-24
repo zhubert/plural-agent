@@ -42,7 +42,7 @@
       }
 
       html {
-        font-size: 15px;
+        font-size: 100%;
         scroll-behavior: smooth;
         scroll-padding-top: 2rem;
       }
@@ -96,7 +96,7 @@
       /* ---- Sidebar ---- */
 
       .sidebar {
-        width: 240px;
+        width: 15rem;
         flex-shrink: 0;
         background: var(--bg-sidebar);
         border-right: 1px solid var(--border);
@@ -764,7 +764,7 @@
       @media (max-width: 860px) {
         .sidebar {
           position: fixed;
-          left: -260px;
+          left: -16.25rem;
           z-index: 200;
           transition: left 0.25s ease;
           box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
@@ -797,6 +797,27 @@
         .feature-grid,
         .info-grid {
           grid-template-columns: 1fr;
+        }
+
+        .feature-item,
+        .info-card,
+        .action-ref {
+          overflow: hidden;
+          overflow-wrap: break-word;
+          word-break: break-word;
+          min-width: 0;
+        }
+
+        .install-block {
+          max-width: 100%;
+          flex-wrap: wrap;
+        }
+
+        .param-table,
+        .cli-table {
+          display: block;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
         }
 
         .state-flow {
@@ -923,6 +944,10 @@
       }
 
       @media (max-width: 480px) {
+        html {
+          font-size: 112.5%;
+        }
+
         .main h1 {
           font-size: 1.6rem;
         }
@@ -982,6 +1007,12 @@
             <a href="#hooks" class="sidebar-link">Hooks</a>
           </li>
           <li class="sidebar-section">
+            <span class="sidebar-section-title">Reference</span>
+            <a href="#cli" class="sidebar-link">CLI commands</a>
+            <a href="#actions" class="sidebar-link">Actions</a>
+            <a href="#events" class="sidebar-link">Wait events</a>
+          </li>
+          <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
             <a href="#example-minimal" class="sidebar-link">Minimal</a>
             <a href="#example-supervised" class="sidebar-link">Supervised</a>
@@ -991,12 +1022,6 @@
             >
             <a href="#example-asana" class="sidebar-link">Asana</a>
             <a href="#example-linear" class="sidebar-link">Linear</a>
-          </li>
-          <li class="sidebar-section">
-            <span class="sidebar-section-title">Reference</span>
-            <a href="#cli" class="sidebar-link">CLI commands</a>
-            <a href="#actions" class="sidebar-link">Actions</a>
-            <a href="#events" class="sidebar-link">Wait events</a>
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -1360,6 +1385,840 @@
           <code>$ERG_BRANCH</code>, <code>$ERG_PR_URL</code>,
           <code>$ERG_ISSUE_URL</code>, and more.
         </p>
+
+
+        <!-- CLI reference -->
+        <h2 id="cli">CLI commands</h2>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>erg --repo owner/repo</code></td>
+              <td>Fork/detach daemon for a repository (prints PID and exits)</td>
+            </tr>
+            <tr>
+              <td><code>erg -f --repo owner/repo</code></td>
+              <td>Run in foreground with live status display</td>
+            </tr>
+            <tr>
+              <td><code>erg --repo owner/repo --once</code></td>
+              <td>Process one tick and exit (implies <code>-f</code>)</td>
+            </tr>
+            <tr>
+              <td><code>erg status</code></td>
+              <td>One-shot daemon status summary (PID, uptime, counts)</td>
+            </tr>
+            <tr>
+              <td><code>erg --debug</code></td>
+              <td>Enable debug logging (on by default)</td>
+            </tr>
+            <tr>
+              <td><code>erg -q</code></td>
+              <td>Quiet mode (info level only)</td>
+            </tr>
+            <tr>
+              <td><code>erg clean</code></td>
+              <td>Clear daemon state and lock files</td>
+            </tr>
+            <tr>
+              <td><code>erg clean -y</code></td>
+              <td>Clear without confirmation prompt</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow init</code></td>
+              <td>Scaffold a new workflow config</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow validate</code></td>
+              <td>Check workflow config for errors</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow visualize</code></td>
+              <td>Emit a Mermaid diagram of the workflow</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Action reference -->
+        <h2 id="actions">Action reference</h2>
+        <p>
+          Actions are used in <code>task</code> states via the
+          <code>action:</code> key. Each action accepts typed
+          <code>params</code> and may produce output data that downstream
+          <code>choice</code> states can inspect.
+        </p>
+
+        <h3>AI actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.code</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Starts an autonomous Claude Code session that reads the issue,
+            writes code, runs tests, and commits changes locally. The daemon
+            waits for the session to complete before advancing.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_turns</td>
+                  <td>int</td>
+                  <td>50</td>
+                  <td>Maximum number of Claude turns per session.</td>
+                </tr>
+                <tr>
+                  <td>max_duration</td>
+                  <td>duration</td>
+                  <td>30m</td>
+                  <td>
+                    Hard time limit for the session, e.g. <code>20m</code>,
+                    <code>2h</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>containerized</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Run Claude inside a Docker container sandbox.</td>
+                </tr>
+                <tr>
+                  <td>supervisor</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>
+                    Enable multi-session mode — Claude can spawn child sessions
+                    for parallel subtasks.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>
+                    Inline prompt or <code>file:.erg/prompt.md</code> to load
+                    from the repo. Overrides the default coding prompt.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">
+              None. Session completion is signalled internally; the daemon
+              advances the state machine when the worker exits.
+            </p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Notes</div>
+            <ul
+              style="
+                margin: 0.35rem 0 0;
+                padding-left: 1.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              <li>
+                If the branch already has an open PR, coding is skipped and
+                the workflow advances to <code>github.create_pr</code>, which
+                detects the existing PR.
+              </li>
+              <li>
+                If the branch was already merged, the issue is closed and the
+                workflow jumps to <code>done</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.fix_ci</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Resumes the existing Claude session to fix failing CI. Fetches
+            failure logs from the most recent GitHub Actions run and passes
+            them to Claude as context.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_ci_fix_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of CI fix attempts before returning an
+                    error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the fix session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ci_fix_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3>GitHub actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.create_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Opens a pull request from the working branch to the base branch.
+            Detects and reuses an existing PR if one was already opened in a
+            previous attempt.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>link_issue</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>
+                    Add a closing reference to the source issue in the PR body
+                    (e.g. <code>Closes #42</code>).
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>pr_url</td>
+                  <td>string</td>
+                  <td>URL of the created (or existing) pull request.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Notes</div>
+            <ul
+              style="
+                margin: 0.35rem 0 0;
+                padding-left: 1.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              <li>
+                If the coding session made no commits, the issue is closed
+                automatically and the workflow skips to <code>done</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.push</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Pushes committed changes to the remote branch. Typically used
+            after Claude addresses review feedback.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.merge</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Merges the pull request into the base branch using the configured
+            strategy.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>method</td>
+                  <td>string</td>
+                  <td>rebase</td>
+                  <td>
+                    Merge strategy: <code>rebase</code>, <code>squash</code>,
+                    or <code>merge</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>cleanup</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>
+                    Delete the worktree and branch after a successful merge.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.comment_issue</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the original issue associated with the work
+            item.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load
+                    content from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.comment_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the pull request for the work item.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load
+                    content from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.add_label</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Adds a label to the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>label</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Label name to add.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.remove_label</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Removes a label from the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>label</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Label name to remove.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.close_issue</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Closes the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.request_review</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Requests a review from a specific GitHub user on the pull request.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>reviewer</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>GitHub username to request a review from.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3>Git actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.format</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Runs a formatter command in the session worktree, stages all
+            changes with <code>git add -A</code>, and commits them. Silently
+            succeeds if the formatter produces no changes.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>command</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Shell command to run, e.g. <code>gofmt -w .</code> or
+                    <code>prettier --write .</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the formatter produces changes.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <!-- Wait events reference -->
+        <h2 id="events">Wait events</h2>
+        <p>
+          Events are used in <code>wait</code> states via the
+          <code>event:</code> key. The daemon polls on each tick and advances
+          the state machine when the event fires. All wait states support
+          <code>timeout</code> and <code>timeout_next</code>.
+        </p>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">pr.reviewed</span>
+          </div>
+          <p class="action-desc">
+            Fires when the pull request receives a formal approval. While
+            waiting, the daemon automatically resumes Claude to address new
+            review comments (configurable via <code>auto_address</code>).
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>auto_address</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>
+                    Automatically resume Claude to address new review comments
+                    while waiting for approval.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_feedback_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of feedback rounds before
+                    auto-addressing stops.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_approved</td>
+                  <td>bool</td>
+                  <td>Set to <code>true</code> when a reviewer approves.</td>
+                </tr>
+                <tr>
+                  <td>pr_merged_externally</td>
+                  <td>bool</td>
+                  <td>
+                    Set to <code>true</code> if the PR was merged outside the
+                    daemon.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ci.complete</span>
+          </div>
+          <p class="action-desc">
+            Fires when all CI checks on the PR pass. Configurable behaviour
+            on CI failure lets workflows route to <code>ai.fix_ci</code> or
+            other states.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>on_failure</td>
+                  <td>string</td>
+                  <td>retry</td>
+                  <td>
+                    Action when CI fails: <code>retry</code> — keep waiting
+                    (default); <code>fix</code> — fire the event so the
+                    workflow can route to <code>ai.fix_ci</code>;
+                    <code>abandon</code> or <code>notify</code> — emit data
+                    for downstream routing without advancing.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ci_passed</td>
+                  <td>bool</td>
+                  <td>True when all checks pass.</td>
+                </tr>
+                <tr>
+                  <td>ci_failed</td>
+                  <td>bool</td>
+                  <td>True when any check fails.</td>
+                </tr>
+                <tr>
+                  <td>ci_action</td>
+                  <td>string</td>
+                  <td>
+                    The <code>on_failure</code> strategy that was applied.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">pr.mergeable</span>
+          </div>
+          <p class="action-desc">
+            Convenience event that combines <code>pr.reviewed</code> and
+            <code>ci.complete</code>. Fires only when both review approval
+            and CI pass simultaneously. Useful for minimal pipelines that
+            don't need separate wait states.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>require_review</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Require an approved review before firing.</td>
+                </tr>
+                <tr>
+                  <td>require_ci</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Require CI to pass before firing.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_approved</td>
+                  <td>bool</td>
+                  <td>True when a reviewer has approved.</td>
+                </tr>
+                <tr>
+                  <td>ci_passed</td>
+                  <td>bool</td>
+                  <td>True when all CI checks pass.</td>
+                </tr>
+                <tr>
+                  <td>ci_failed</td>
+                  <td>bool</td>
+                  <td>True when any CI check fails.</td>
+                </tr>
+                <tr>
+                  <td>pr_merged_externally</td>
+                  <td>bool</td>
+                  <td>True if the PR was merged outside the daemon.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <!-- Example workflows -->
         <h2 id="examples">Example workflows</h2>
@@ -2399,839 +3258,6 @@ stateDiagram-v2
     failed --> [*]</pre
               >
             </div>
-          </div>
-        </div>
-
-        <!-- CLI reference -->
-        <h2 id="cli">CLI commands</h2>
-        <table class="cli-table">
-          <thead>
-            <tr>
-              <th>Command</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>erg --repo owner/repo</code></td>
-              <td>Fork/detach daemon for a repository (prints PID and exits)</td>
-            </tr>
-            <tr>
-              <td><code>erg -f --repo owner/repo</code></td>
-              <td>Run in foreground with live status display</td>
-            </tr>
-            <tr>
-              <td><code>erg --repo owner/repo --once</code></td>
-              <td>Process one tick and exit (implies <code>-f</code>)</td>
-            </tr>
-            <tr>
-              <td><code>erg status</code></td>
-              <td>One-shot daemon status summary (PID, uptime, counts)</td>
-            </tr>
-            <tr>
-              <td><code>erg --debug</code></td>
-              <td>Enable debug logging (on by default)</td>
-            </tr>
-            <tr>
-              <td><code>erg -q</code></td>
-              <td>Quiet mode (info level only)</td>
-            </tr>
-            <tr>
-              <td><code>erg clean</code></td>
-              <td>Clear daemon state and lock files</td>
-            </tr>
-            <tr>
-              <td><code>erg clean -y</code></td>
-              <td>Clear without confirmation prompt</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow init</code></td>
-              <td>Scaffold a new workflow config</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow validate</code></td>
-              <td>Check workflow config for errors</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow visualize</code></td>
-              <td>Emit a Mermaid diagram of the workflow</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- Action reference -->
-        <h2 id="actions">Action reference</h2>
-        <p>
-          Actions are used in <code>task</code> states via the
-          <code>action:</code> key. Each action accepts typed
-          <code>params</code> and may produce output data that downstream
-          <code>choice</code> states can inspect.
-        </p>
-
-        <h3>AI actions</h3>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">ai.code</span>
-            <span class="badge badge-async">async</span>
-          </div>
-          <p class="action-desc">
-            Starts an autonomous Claude Code session that reads the issue,
-            writes code, runs tests, and commits changes locally. The daemon
-            waits for the session to complete before advancing.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>max_turns</td>
-                  <td>int</td>
-                  <td>50</td>
-                  <td>Maximum number of Claude turns per session.</td>
-                </tr>
-                <tr>
-                  <td>max_duration</td>
-                  <td>duration</td>
-                  <td>30m</td>
-                  <td>
-                    Hard time limit for the session, e.g. <code>20m</code>,
-                    <code>2h</code>.
-                  </td>
-                </tr>
-                <tr>
-                  <td>containerized</td>
-                  <td>bool</td>
-                  <td>true</td>
-                  <td>Run Claude inside a Docker container sandbox.</td>
-                </tr>
-                <tr>
-                  <td>supervisor</td>
-                  <td>bool</td>
-                  <td>false</td>
-                  <td>
-                    Enable multi-session mode — Claude can spawn child sessions
-                    for parallel subtasks.
-                  </td>
-                </tr>
-                <tr>
-                  <td>system_prompt</td>
-                  <td>string</td>
-                  <td><em>built-in</em></td>
-                  <td>
-                    Inline prompt or <code>file:.erg/prompt.md</code> to load
-                    from the repo. Overrides the default coding prompt.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">
-              None. Session completion is signalled internally; the daemon
-              advances the state machine when the worker exits.
-            </p>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Notes</div>
-            <ul
-              style="
-                margin: 0.35rem 0 0;
-                padding-left: 1.25rem;
-                font-size: 0.82rem;
-                color: var(--text-muted);
-              "
-            >
-              <li>
-                If the branch already has an open PR, coding is skipped and
-                the workflow advances to <code>github.create_pr</code>, which
-                detects the existing PR.
-              </li>
-              <li>
-                If the branch was already merged, the issue is closed and the
-                workflow jumps to <code>done</code>.
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">ai.fix_ci</span>
-            <span class="badge badge-async">async</span>
-          </div>
-          <p class="action-desc">
-            Resumes the existing Claude session to fix failing CI. Fetches
-            failure logs from the most recent GitHub Actions run and passes
-            them to Claude as context.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>max_ci_fix_rounds</td>
-                  <td>int</td>
-                  <td>3</td>
-                  <td>
-                    Maximum number of CI fix attempts before returning an
-                    error.
-                  </td>
-                </tr>
-                <tr>
-                  <td>system_prompt</td>
-                  <td>string</td>
-                  <td><em>built-in</em></td>
-                  <td>Custom system prompt for the fix session.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>ci_fix_rounds</td>
-                  <td>int</td>
-                  <td>
-                    Incremented on each attempt. Inspect in
-                    <code>choice</code> states to check round count.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3>GitHub actions</h3>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.create_pr</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Opens a pull request from the working branch to the base branch.
-            Detects and reuses an existing PR if one was already opened in a
-            previous attempt.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>link_issue</td>
-                  <td>bool</td>
-                  <td>true</td>
-                  <td>
-                    Add a closing reference to the source issue in the PR body
-                    (e.g. <code>Closes #42</code>).
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>pr_url</td>
-                  <td>string</td>
-                  <td>URL of the created (or existing) pull request.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Notes</div>
-            <ul
-              style="
-                margin: 0.35rem 0 0;
-                padding-left: 1.25rem;
-                font-size: 0.82rem;
-                color: var(--text-muted);
-              "
-            >
-              <li>
-                If the coding session made no commits, the issue is closed
-                automatically and the workflow skips to <code>done</code>.
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.push</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Pushes committed changes to the remote branch. Typically used
-            after Claude addresses review feedback.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <p class="param-none">None.</p>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.merge</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Merges the pull request into the base branch using the configured
-            strategy.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>method</td>
-                  <td>string</td>
-                  <td>rebase</td>
-                  <td>
-                    Merge strategy: <code>rebase</code>, <code>squash</code>,
-                    or <code>merge</code>.
-                  </td>
-                </tr>
-                <tr>
-                  <td>cleanup</td>
-                  <td>bool</td>
-                  <td>false</td>
-                  <td>
-                    Delete the worktree and branch after a successful merge.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.comment_issue</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Posts a comment on the original issue associated with the work
-            item.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>body</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>
-                    Comment text. Prefix with <code>file:</code> to load
-                    content from a repo path, e.g.
-                    <code>file:.erg/comments/msg.md</code>.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.comment_pr</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Posts a comment on the pull request for the work item.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>body</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>
-                    Comment text. Prefix with <code>file:</code> to load
-                    content from a repo path, e.g.
-                    <code>file:.erg/comments/msg.md</code>.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.add_label</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">Adds a label to the source issue.</p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>label</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>Label name to add.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.remove_label</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">Removes a label from the source issue.</p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>label</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>Label name to remove.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.close_issue</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">Closes the source issue.</p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <p class="param-none">None.</p>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">github.request_review</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Requests a review from a specific GitHub user on the pull request.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>reviewer</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>GitHub username to request a review from.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <h3>Git actions</h3>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">git.format</span>
-            <span class="badge badge-sync">sync</span>
-          </div>
-          <p class="action-desc">
-            Runs a formatter command in the session worktree, stages all
-            changes with <code>git add -A</code>, and commits them. Silently
-            succeeds if the formatter produces no changes.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>command</td>
-                  <td>string</td>
-                  <td><em>required</em></td>
-                  <td>
-                    Shell command to run, e.g. <code>gofmt -w .</code> or
-                    <code>prettier --write .</code>.
-                  </td>
-                </tr>
-                <tr>
-                  <td>message</td>
-                  <td>string</td>
-                  <td>Apply auto-formatting</td>
-                  <td>
-                    Commit message used when the formatter produces changes.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <p class="param-none">None.</p>
-          </div>
-        </div>
-
-        <!-- Wait events reference -->
-        <h2 id="events">Wait events</h2>
-        <p>
-          Events are used in <code>wait</code> states via the
-          <code>event:</code> key. The daemon polls on each tick and advances
-          the state machine when the event fires. All wait states support
-          <code>timeout</code> and <code>timeout_next</code>.
-        </p>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">pr.reviewed</span>
-          </div>
-          <p class="action-desc">
-            Fires when the pull request receives a formal approval. While
-            waiting, the daemon automatically resumes Claude to address new
-            review comments (configurable via <code>auto_address</code>).
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>auto_address</td>
-                  <td>bool</td>
-                  <td>true</td>
-                  <td>
-                    Automatically resume Claude to address new review comments
-                    while waiting for approval.
-                  </td>
-                </tr>
-                <tr>
-                  <td>max_feedback_rounds</td>
-                  <td>int</td>
-                  <td>3</td>
-                  <td>
-                    Maximum number of feedback rounds before
-                    auto-addressing stops.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>review_approved</td>
-                  <td>bool</td>
-                  <td>Set to <code>true</code> when a reviewer approves.</td>
-                </tr>
-                <tr>
-                  <td>pr_merged_externally</td>
-                  <td>bool</td>
-                  <td>
-                    Set to <code>true</code> if the PR was merged outside the
-                    daemon.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">ci.complete</span>
-          </div>
-          <p class="action-desc">
-            Fires when all CI checks on the PR pass. Configurable behaviour
-            on CI failure lets workflows route to <code>ai.fix_ci</code> or
-            other states.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>on_failure</td>
-                  <td>string</td>
-                  <td>retry</td>
-                  <td>
-                    Action when CI fails: <code>retry</code> — keep waiting
-                    (default); <code>fix</code> — fire the event so the
-                    workflow can route to <code>ai.fix_ci</code>;
-                    <code>abandon</code> or <code>notify</code> — emit data
-                    for downstream routing without advancing.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>ci_passed</td>
-                  <td>bool</td>
-                  <td>True when all checks pass.</td>
-                </tr>
-                <tr>
-                  <td>ci_failed</td>
-                  <td>bool</td>
-                  <td>True when any check fails.</td>
-                </tr>
-                <tr>
-                  <td>ci_action</td>
-                  <td>string</td>
-                  <td>
-                    The <code>on_failure</code> strategy that was applied.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="action-ref">
-          <div class="action-header">
-            <span class="action-title">pr.mergeable</span>
-          </div>
-          <p class="action-desc">
-            Convenience event that combines <code>pr.reviewed</code> and
-            <code>ci.complete</code>. Fires only when both review approval
-            and CI pass simultaneously. Useful for minimal pipelines that
-            don't need separate wait states.
-          </p>
-          <div class="param-section">
-            <div class="param-section-title">Params</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>require_review</td>
-                  <td>bool</td>
-                  <td>true</td>
-                  <td>Require an approved review before firing.</td>
-                </tr>
-                <tr>
-                  <td>require_ci</td>
-                  <td>bool</td>
-                  <td>true</td>
-                  <td>Require CI to pass before firing.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="param-section">
-            <div class="param-section-title">Output data</div>
-            <table class="param-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>review_approved</td>
-                  <td>bool</td>
-                  <td>True when a reviewer has approved.</td>
-                </tr>
-                <tr>
-                  <td>ci_passed</td>
-                  <td>bool</td>
-                  <td>True when all CI checks pass.</td>
-                </tr>
-                <tr>
-                  <td>ci_failed</td>
-                  <td>bool</td>
-                  <td>True when any CI check fails.</td>
-                </tr>
-                <tr>
-                  <td>pr_merged_externally</td>
-                  <td>bool</td>
-                  <td>True if the PR was merged outside the daemon.</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
 
