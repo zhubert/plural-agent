@@ -396,6 +396,44 @@ func TestSessionWorker_HandleStreaming_RecordsSpend(t *testing.T) {
 	}
 }
 
+func TestSessionWorker_HandleStreaming_RecordsSpend_IncludesCacheTokens(t *testing.T) {
+	// Verify that cache creation and cache read tokens are included in the recorded
+	// input token total. Previously only InputTokens (direct, non-cached) was counted,
+	// leaving the bulk of token usage untracked.
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	w.handleStreaming(claude.ResponseChunk{
+		Type: claude.ChunkTypeStreamStats,
+		Stats: &claude.StreamStats{
+			OutputTokens:        5000,
+			InputTokens:         27,    // tiny direct input
+			CacheCreationTokens: 41000, // large cache write
+			CacheReadTokens:     90000, // large cache read
+			TotalCostUSD:        0.617,
+			DurationMs:          60000, // final result chunk
+		},
+	})
+
+	expectedInput := 27 + 41000 + 90000 // 131027
+	if h.recordedInputTokens != expectedInput {
+		t.Errorf("expected input tokens %d (direct+cacheCreation+cacheRead), got %d",
+			expectedInput, h.recordedInputTokens)
+	}
+	if h.recordedOutputTokens != 5000 {
+		t.Errorf("expected output tokens 5000, got %d", h.recordedOutputTokens)
+	}
+	if h.recordedCostUSD < 0.6169 || h.recordedCostUSD > 0.6171 {
+		t.Errorf("expected cost ~0.617, got %v", h.recordedCostUSD)
+	}
+}
+
 func TestSessionWorker_SetTurns(t *testing.T) {
 	w := &SessionWorker{}
 	w.SetTurns(42)

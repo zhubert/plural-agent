@@ -745,7 +745,10 @@ type ResponseChunk struct {
 // ModelUsageEntry represents usage statistics for a specific model in the result message.
 // This includes both the parent model and any sub-agents (e.g., Haiku for Task agents).
 type ModelUsageEntry struct {
-	OutputTokens int `json:"outputTokens"`
+	InputTokens              int `json:"inputTokens"`
+	CacheCreationInputTokens int `json:"cacheCreationInputTokens"`
+	CacheReadInputTokens     int `json:"cacheReadInputTokens"`
+	OutputTokens             int `json:"outputTokens"`
 }
 
 // ensureProcessRunning starts the ProcessManager if not already running.
@@ -1101,9 +1104,13 @@ func (r *Runner) handleProcessLine(line string) {
 
 				// If modelUsage is present, sum up output tokens from all models
 				// This includes both the parent model and any sub-agents (e.g., Haiku for Task)
+				var modelUsageInputTokens, modelUsageCacheCreation, modelUsageCacheRead int
 				if len(msg.ModelUsage) > 0 {
 					for model, usage := range msg.ModelUsage {
 						totalOutputTokens += usage.OutputTokens
+						modelUsageInputTokens += usage.InputTokens
+						modelUsageCacheCreation += usage.CacheCreationInputTokens
+						modelUsageCacheRead += usage.CacheReadInputTokens
 						byModel = append(byModel, ModelTokenCount{
 							Model:        model,
 							OutputTokens: usage.OutputTokens,
@@ -1111,7 +1118,10 @@ func (r *Runner) handleProcessLine(line string) {
 					}
 					r.log.Debug("using modelUsage for token count",
 						"modelCount", len(msg.ModelUsage),
-						"totalOutputTokens", totalOutputTokens)
+						"totalOutputTokens", totalOutputTokens,
+						"totalInputTokens", modelUsageInputTokens,
+						"totalCacheCreation", modelUsageCacheCreation,
+						"totalCacheRead", modelUsageCacheRead)
 				} else if msg.Usage != nil {
 					// Fall back to streaming accumulator if no modelUsage
 					totalOutputTokens = r.tokens.AccumulatedOutput + r.tokens.LastMessageTokens
@@ -1125,9 +1135,15 @@ func (r *Runner) handleProcessLine(line string) {
 				}
 
 				if totalOutputTokens > 0 || msg.TotalCostUSD > 0 || msg.DurationMs > 0 {
-					// Get cache stats from result message (prefer result over streaming accumulator)
+					// Get input token stats. Prefer modelUsage totals when present (they include
+					// sub-agent input tokens). Fall back to top-level usage otherwise.
 					var cacheCreation, cacheRead, inputTokens int
-					if msg.Usage != nil {
+					if modelUsageInputTokens > 0 || modelUsageCacheCreation > 0 || modelUsageCacheRead > 0 {
+						// modelUsage had per-model input breakdowns — use those aggregated values
+						inputTokens = modelUsageInputTokens
+						cacheCreation = modelUsageCacheCreation
+						cacheRead = modelUsageCacheRead
+					} else if msg.Usage != nil {
 						cacheCreation = msg.Usage.CacheCreationInputTokens
 						cacheRead = msg.Usage.CacheReadInputTokens
 						inputTokens = msg.Usage.InputTokens

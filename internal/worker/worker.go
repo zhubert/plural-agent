@@ -373,12 +373,20 @@ func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 	// which is only set on the result message, not on intermediate streaming chunks).
 	if chunk.Type == claude.ChunkTypeStreamStats && chunk.Stats != nil && chunk.Stats.DurationMs > 0 {
 		s := chunk.Stats
-		w.host.RecordSpend(s.TotalCostUSD, s.OutputTokens, s.InputTokens)
+		// Total input tokens = direct input + cache creation + cache read.
+		// s.InputTokens alone is typically tiny (non-cached direct input only).
+		// The bulk of token usage is in cache creation and cache read, which
+		// must be included for an accurate count.
+		totalInputTokens := s.InputTokens + s.CacheCreationTokens + s.CacheReadTokens
+		w.host.RecordSpend(s.TotalCostUSD, s.OutputTokens, totalInputTokens)
 		w.host.Logger().Info("session spend recorded",
 			"sessionID", w.sessionID,
 			"costUSD", s.TotalCostUSD,
 			"outputTokens", s.OutputTokens,
-			"inputTokens", s.InputTokens,
+			"inputTokens", totalInputTokens,
+			"inputDirect", s.InputTokens,
+			"cacheCreation", s.CacheCreationTokens,
+			"cacheRead", s.CacheReadTokens,
 		)
 	}
 }

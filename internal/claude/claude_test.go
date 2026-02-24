@@ -1069,6 +1069,117 @@ func TestStreamMessage_NoModelUsage(t *testing.T) {
 	}
 }
 
+func TestStreamMessage_ModelUsage_WithInputTokens(t *testing.T) {
+	// Test that per-model input tokens are parsed from modelUsage entries.
+	// This covers Claude CLI output that includes inputTokens per model.
+	jsonMsg := `{
+		"type": "result",
+		"subtype": "success",
+		"total_cost_usd": 0.617,
+		"usage": {"input_tokens": 27, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 4700},
+		"modelUsage": {
+			"claude-sonnet-4-5-20251001": {
+				"inputTokens": 20,
+				"cacheCreationInputTokens": 41000,
+				"cacheReadInputTokens": 90000,
+				"outputTokens": 4700
+			}
+		}
+	}`
+
+	var msg streamMessage
+	if err := json.Unmarshal([]byte(jsonMsg), &msg); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if len(msg.ModelUsage) != 1 {
+		t.Fatalf("Expected 1 model in ModelUsage, got %d", len(msg.ModelUsage))
+	}
+
+	sonnet := msg.ModelUsage["claude-sonnet-4-5-20251001"]
+	if sonnet == nil {
+		t.Fatal("Missing sonnet model in ModelUsage")
+	}
+	if sonnet.InputTokens != 20 {
+		t.Errorf("InputTokens = %d, want 20", sonnet.InputTokens)
+	}
+	if sonnet.CacheCreationInputTokens != 41000 {
+		t.Errorf("CacheCreationInputTokens = %d, want 41000", sonnet.CacheCreationInputTokens)
+	}
+	if sonnet.CacheReadInputTokens != 90000 {
+		t.Errorf("CacheReadInputTokens = %d, want 90000", sonnet.CacheReadInputTokens)
+	}
+	if sonnet.OutputTokens != 4700 {
+		t.Errorf("OutputTokens = %d, want 4700", sonnet.OutputTokens)
+	}
+
+	// Summing input tokens from modelUsage should give the real total
+	totalInput := sonnet.InputTokens + sonnet.CacheCreationInputTokens + sonnet.CacheReadInputTokens
+	if totalInput != 131020 {
+		t.Errorf("Total input (direct+cacheCreation+cacheRead) = %d, want 131020", totalInput)
+	}
+
+	// The top-level usage.input_tokens (27) is much smaller — demonstrates the bug being fixed
+	if msg.Usage.InputTokens >= totalInput {
+		t.Errorf("usage.input_tokens (%d) should be less than modelUsage total (%d)",
+			msg.Usage.InputTokens, totalInput)
+	}
+}
+
+func TestStreamMessage_ModelUsage_MultiModel_InputTokens(t *testing.T) {
+	// Test that input tokens are correctly summed across multiple models (parent + sub-agents).
+	jsonMsg := `{
+		"type": "result",
+		"subtype": "success",
+		"total_cost_usd": 0.41071,
+		"usage": {"input_tokens": 4, "output_tokens": 926},
+		"modelUsage": {
+			"claude-haiku-4-5-20251001": {
+				"inputTokens": 500,
+				"cacheCreationInputTokens": 0,
+				"cacheReadInputTokens": 12000,
+				"outputTokens": 6944
+			},
+			"claude-opus-4-5-20251101": {
+				"inputTokens": 10,
+				"cacheCreationInputTokens": 38000,
+				"cacheReadInputTokens": 75000,
+				"outputTokens": 1461
+			}
+		}
+	}`
+
+	var msg streamMessage
+	if err := json.Unmarshal([]byte(jsonMsg), &msg); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if len(msg.ModelUsage) != 2 {
+		t.Fatalf("Expected 2 models, got %d", len(msg.ModelUsage))
+	}
+
+	var totalOut, totalIn, totalCacheCreate, totalCacheRead int
+	for _, u := range msg.ModelUsage {
+		totalOut += u.OutputTokens
+		totalIn += u.InputTokens
+		totalCacheCreate += u.CacheCreationInputTokens
+		totalCacheRead += u.CacheReadInputTokens
+	}
+
+	if totalOut != 6944+1461 {
+		t.Errorf("total output = %d, want %d", totalOut, 6944+1461)
+	}
+	if totalIn != 510 {
+		t.Errorf("total direct input = %d, want 510", totalIn)
+	}
+	if totalCacheCreate != 38000 {
+		t.Errorf("total cache creation = %d, want 38000", totalCacheCreate)
+	}
+	if totalCacheRead != 12000+75000 {
+		t.Errorf("total cache read = %d, want %d", totalCacheRead, 12000+75000)
+	}
+}
+
 func TestExtractToolInputDescription_Read(t *testing.T) {
 	input := json.RawMessage(`{"file_path":"/path/to/file.go"}`)
 	desc := extractToolInputDescription("Read", input)
