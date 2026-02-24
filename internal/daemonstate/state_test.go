@@ -531,6 +531,79 @@ func TestDaemonState_SaveAtomicity(t *testing.T) {
 	}
 }
 
+func TestDaemonState_Spend(t *testing.T) {
+	t.Run("initial values are zero", func(t *testing.T) {
+		s := NewDaemonState("/test/repo")
+		cost, out, in := s.GetSpend()
+		if cost != 0 || out != 0 || in != 0 {
+			t.Errorf("expected zero initial spend, got cost=%v out=%d in=%d", cost, out, in)
+		}
+	})
+
+	t.Run("AddSpend accumulates correctly", func(t *testing.T) {
+		s := NewDaemonState("/test/repo")
+		s.AddSpend(0.10, 100, 50)
+		s.AddSpend(0.05, 200, 150)
+
+		cost, out, in := s.GetSpend()
+		// Use approximate equality for floating-point
+		if cost < 0.1499 || cost > 0.1501 {
+			t.Errorf("expected cost ~0.15, got %v", cost)
+		}
+		if out != 300 {
+			t.Errorf("expected output tokens 300, got %d", out)
+		}
+		if in != 200 {
+			t.Errorf("expected input tokens 200, got %d", in)
+		}
+	})
+
+	t.Run("ResetSpend zeroes all counters", func(t *testing.T) {
+		s := NewDaemonState("/test/repo")
+		s.AddSpend(0.50, 1000, 500)
+		s.ResetSpend()
+
+		cost, out, in := s.GetSpend()
+		if cost != 0 || out != 0 || in != 0 {
+			t.Errorf("expected zero after reset, got cost=%v out=%d in=%d", cost, out, in)
+		}
+	})
+
+	t.Run("spend persists through Save/Load", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		fp := filepath.Join(tmpDir, "daemon-state.json")
+		s := &DaemonState{
+			Version:   stateVersion,
+			RepoPath:  "/test/repo",
+			WorkItems: make(map[string]*WorkItem),
+			StartedAt: time.Now(),
+			filePath:  fp,
+		}
+		s.AddSpend(0.1234, 500, 250)
+		if err := s.Save(); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			t.Fatalf("failed to read state file: %v", err)
+		}
+		var loaded DaemonState
+		if err := json.Unmarshal(data, &loaded); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if loaded.TotalCostUSD != 0.1234 {
+			t.Errorf("expected TotalCostUSD 0.1234, got %v", loaded.TotalCostUSD)
+		}
+		if loaded.TotalOutputTokens != 500 {
+			t.Errorf("expected TotalOutputTokens 500, got %d", loaded.TotalOutputTokens)
+		}
+		if loaded.TotalInputTokens != 250 {
+			t.Errorf("expected TotalInputTokens 250, got %d", loaded.TotalInputTokens)
+		}
+	})
+}
+
 func TestNewDaemonState(t *testing.T) {
 	state := NewDaemonState("/my/repo")
 

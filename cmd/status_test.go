@@ -182,7 +182,7 @@ func TestFormatStep_QueuedWithStep(t *testing.T) {
 
 func TestPrintFooter_WithMaxConcurrent(t *testing.T) {
 	var buf bytes.Buffer
-	printFooter(&buf, 2, 3, 1, 48291, true)
+	printFooter(&buf, 2, 3, 1, 48291, true, 0, 0)
 	out := buf.String()
 	if !strings.Contains(out, "Slots: 2/3 active") {
 		t.Errorf("expected 'Slots: 2/3 active' in output: %q", out)
@@ -197,7 +197,7 @@ func TestPrintFooter_WithMaxConcurrent(t *testing.T) {
 
 func TestPrintFooter_NoMaxConcurrent(t *testing.T) {
 	var buf bytes.Buffer
-	printFooter(&buf, 1, 0, 0, 0, false)
+	printFooter(&buf, 1, 0, 0, 0, false, 0, 0)
 	out := buf.String()
 	if !strings.Contains(out, "Slots: 1 active") {
 		t.Errorf("expected 'Slots: 1 active' in output: %q", out)
@@ -209,10 +209,31 @@ func TestPrintFooter_NoMaxConcurrent(t *testing.T) {
 
 func TestPrintFooter_DeadDaemon(t *testing.T) {
 	var buf bytes.Buffer
-	printFooter(&buf, 0, 0, 0, 12345, false)
+	printFooter(&buf, 0, 0, 0, 12345, false, 0, 0)
 	out := buf.String()
 	if !strings.Contains(out, "Daemon PID: 12345 (dead)") {
 		t.Errorf("expected '(dead)' indicator in output: %q", out)
+	}
+}
+
+func TestPrintFooter_WithSpend(t *testing.T) {
+	var buf bytes.Buffer
+	printFooter(&buf, 1, 2, 0, 999, true, 0.1234, 5500)
+	out := buf.String()
+	if !strings.Contains(out, "Spend: $0.1234") {
+		t.Errorf("expected spend in output: %q", out)
+	}
+	if !strings.Contains(out, "5.5K tokens") {
+		t.Errorf("expected token count in output: %q", out)
+	}
+}
+
+func TestPrintFooter_NoSpendWhenZero(t *testing.T) {
+	var buf bytes.Buffer
+	printFooter(&buf, 1, 2, 0, 999, true, 0, 0)
+	out := buf.String()
+	if strings.Contains(out, "Spend:") {
+		t.Errorf("expected no Spend line when cost and tokens are zero: %q", out)
 	}
 }
 

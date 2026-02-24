@@ -65,6 +65,11 @@ type DaemonState struct {
 	LastPollAt time.Time            `json:"last_poll_at"`
 	StartedAt  time.Time            `json:"started_at"`
 
+	// Spend tracking — accumulated since daemon last started (reset on restart)
+	TotalCostUSD       float64 `json:"total_cost_usd"`
+	TotalOutputTokens  int     `json:"total_output_tokens"`
+	TotalInputTokens   int     `json:"total_input_tokens"`
+
 	mu       sync.RWMutex
 	filePath string
 }
@@ -341,6 +346,34 @@ func (s *DaemonState) SetErrorMessage(id, msg string) {
 		item.ErrorCount++
 		item.UpdatedAt = time.Now()
 	}
+}
+
+// AddSpend accumulates token and cost data from a completed Claude response.
+// Thread-safe; may be called concurrently from multiple worker goroutines.
+func (s *DaemonState) AddSpend(costUSD float64, outputTokens, inputTokens int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalCostUSD += costUSD
+	s.TotalOutputTokens += outputTokens
+	s.TotalInputTokens += inputTokens
+}
+
+// ResetSpend zeroes the accumulated spend counters.
+// Called when the daemon starts to ensure cost tracking reflects only the
+// current daemon run, not previous runs.
+func (s *DaemonState) ResetSpend() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalCostUSD = 0
+	s.TotalOutputTokens = 0
+	s.TotalInputTokens = 0
+}
+
+// GetSpend returns the accumulated spend totals in a thread-safe manner.
+func (s *DaemonState) GetSpend() (costUSD float64, outputTokens, inputTokens int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TotalCostUSD, s.TotalOutputTokens, s.TotalInputTokens
 }
 
 // StateExists returns true if any daemon state file exists on disk.

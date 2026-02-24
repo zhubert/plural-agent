@@ -351,9 +351,8 @@ func (w *SessionWorker) safeChanGetReviewComments() <-chan mcp.GetReviewComments
 	return ch
 }
 
-// handleStreaming logs streaming progress.
+// handleStreaming logs streaming progress and records spend from final stats chunks.
 func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
-	// Just log text chunks at debug level for now
 	if chunk.Type == claude.ChunkTypeText && chunk.Content != "" {
 		// Detect API errors emitted as text content (e.g., 500 errors from
 		// the Anthropic API that the runner surfaces as text rather than
@@ -368,6 +367,19 @@ func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 			preview = preview[:100] + "..."
 		}
 		w.host.Logger().Debug("streaming", "sessionID", w.sessionID, "content", preview)
+	}
+
+	// Record spend from the final stats chunk (identified by DurationMs > 0,
+	// which is only set on the result message, not on intermediate streaming chunks).
+	if chunk.Type == claude.ChunkTypeStreamStats && chunk.Stats != nil && chunk.Stats.DurationMs > 0 {
+		s := chunk.Stats
+		w.host.RecordSpend(s.TotalCostUSD, s.OutputTokens, s.InputTokens)
+		w.host.Logger().Info("session spend recorded",
+			"sessionID", w.sessionID,
+			"costUSD", s.TotalCostUSD,
+			"outputTokens", s.OutputTokens,
+			"inputTokens", s.InputTokens,
+		)
 	}
 }
 

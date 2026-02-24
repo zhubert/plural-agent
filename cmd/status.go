@@ -109,8 +109,10 @@ func displayDashboard(repo string) error {
 		printMatrixView(w, items, wfCfg)
 	}
 
+	costUSD, outputTokens, inputTokens := state.GetSpend()
+
 	fmt.Fprintln(w)
-	printFooter(w, state.ActiveSlotCount(), maxConcurrent, queuedCount, pid, running)
+	printFooter(w, state.ActiveSlotCount(), maxConcurrent, queuedCount, pid, running, costUSD, outputTokens+inputTokens)
 	fmt.Fprintf(w, "  Updated: %s  (every 5s)\n", time.Now().Format("15:04:05"))
 	return nil
 }
@@ -373,15 +375,18 @@ func primaryWorkflowPath(cfg *workflow.Config) []string {
 	return path
 }
 
-// printFooter prints slot usage, queue depth, and daemon PID status.
-func printFooter(w io.Writer, slotCount, maxConcurrent, queuedCount, pid int, running bool) {
-	parts := make([]string, 0, 3)
+// printFooter prints slot usage, queue depth, daemon PID status, and spend.
+func printFooter(w io.Writer, slotCount, maxConcurrent, queuedCount, pid int, running bool, costUSD float64, totalTokens int) {
+	parts := make([]string, 0, 4)
 	if maxConcurrent > 0 {
 		parts = append(parts, fmt.Sprintf("Slots: %d/%d active", slotCount, maxConcurrent))
 	} else {
 		parts = append(parts, fmt.Sprintf("Slots: %d active", slotCount))
 	}
 	parts = append(parts, fmt.Sprintf("Queued: %d", queuedCount))
+	if costUSD > 0 || totalTokens > 0 {
+		parts = append(parts, fmt.Sprintf("Spend: $%.4f (%s tokens)", costUSD, formatTokenCount(totalTokens)))
+	}
 	if pid > 0 {
 		status := "running"
 		if !running {
@@ -426,6 +431,18 @@ func formatStep(item *daemonstate.WorkItem) string {
 		return "(queued)"
 	default:
 		return item.CurrentStep
+	}
+}
+
+// formatTokenCount formats a token count with K/M suffix for readability.
+func formatTokenCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
 	}
 }
 

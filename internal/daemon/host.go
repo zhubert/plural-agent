@@ -51,6 +51,15 @@ func (d *Daemon) IsWorkerRunning(sessionID string) bool {
 	return exists && !w.Done()
 }
 
+// RecordSpend adds token and cost data to the daemon's running totals and
+// persists the updated state to disk so that `erg status` reflects current spend.
+func (d *Daemon) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
+	d.state.AddSpend(costUSD, outputTokens, inputTokens)
+	if err := d.state.Save(); err != nil {
+		d.logger.Warn("failed to save state after recording spend", "error", err)
+	}
+}
+
 // workItemView creates a read-only view of a work item for the engine.
 func (d *Daemon) workItemView(item *daemonstate.WorkItem) *workflow.WorkItemView {
 	// Use the session's actual repo path rather than d.repoFilter,

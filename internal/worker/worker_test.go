@@ -30,7 +30,10 @@ type mockHost struct {
 	mergeMethod           string
 	autoAddressPRComments bool
 
-	cleanupCalled map[string]bool
+	cleanupCalled  map[string]bool
+	recordedCostUSD    float64
+	recordedOutputTokens int
+	recordedInputTokens  int
 }
 
 func newMockHost(mockExec *exec.MockExecutor) *mockHost {
@@ -80,6 +83,12 @@ func (h *mockHost) CleanupSession(ctx context.Context, sessionID string) error {
 func (h *mockHost) SaveRunnerMessages(sessionID string, runner claude.RunnerInterface) {}
 
 func (h *mockHost) IsWorkerRunning(sessionID string) bool { return false }
+
+func (h *mockHost) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
+	h.recordedCostUSD += costUSD
+	h.recordedOutputTokens += outputTokens
+	h.recordedInputTokens += inputTokens
+}
 
 func TestNewSessionWorker(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
@@ -325,6 +334,66 @@ func TestSessionWorker_HandleStreaming(t *testing.T) {
 		Type:    claude.ChunkTypeText,
 		Content: string(longContent),
 	})
+}
+
+func TestSessionWorker_HandleStreaming_RecordsSpend(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	// Intermediate stats chunk (DurationMs == 0) should NOT record spend.
+	w.handleStreaming(claude.ResponseChunk{
+		Type: claude.ChunkTypeStreamStats,
+		Stats: &claude.StreamStats{
+			OutputTokens: 100,
+			InputTokens:  50,
+			TotalCostUSD: 0.01,
+			DurationMs:   0, // intermediate chunk
+		},
+	})
+	if h.recordedCostUSD != 0 {
+		t.Errorf("expected no spend recorded for intermediate stats chunk, got %v", h.recordedCostUSD)
+	}
+
+	// Final stats chunk (DurationMs > 0) should record spend.
+	w.handleStreaming(claude.ResponseChunk{
+		Type: claude.ChunkTypeStreamStats,
+		Stats: &claude.StreamStats{
+			OutputTokens: 200,
+			InputTokens:  150,
+			TotalCostUSD: 0.05,
+			DurationMs:   3000, // final result chunk
+		},
+	})
+	if h.recordedCostUSD != 0.05 {
+		t.Errorf("expected recorded cost 0.05, got %v", h.recordedCostUSD)
+	}
+	if h.recordedOutputTokens != 200 {
+		t.Errorf("expected output tokens 200, got %d", h.recordedOutputTokens)
+	}
+	if h.recordedInputTokens != 150 {
+		t.Errorf("expected input tokens 150, got %d", h.recordedInputTokens)
+	}
+
+	// Second final stats chunk accumulates.
+	w.handleStreaming(claude.ResponseChunk{
+		Type: claude.ChunkTypeStreamStats,
+		Stats: &claude.StreamStats{
+			OutputTokens: 50,
+			InputTokens:  30,
+			TotalCostUSD: 0.01,
+			DurationMs:   1000,
+		},
+	})
+	// Use approximate equality for floating-point accumulation.
+	if h.recordedCostUSD < 0.0599 || h.recordedCostUSD > 0.0601 {
+		t.Errorf("expected accumulated cost ~0.06, got %v", h.recordedCostUSD)
+	}
 }
 
 func TestSessionWorker_SetTurns(t *testing.T) {

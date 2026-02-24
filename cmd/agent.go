@@ -492,6 +492,17 @@ func displaySummary(repo string) error {
 		}
 		fmt.Printf("Active: %d  |  Queued: %d  |  Completed: %d  |  Failed: %d\n",
 			activeCount, queuedCount, completedCount, failedCount)
+
+		costUSD, outputTokens, inputTokens := state.GetSpend()
+		totalTokens := outputTokens + inputTokens
+		if costUSD > 0 || totalTokens > 0 {
+			fmt.Printf("Spend:  $%.4f  |  Tokens: %s (in: %s, out: %s)\n",
+				costUSD,
+				formatTokenCount(totalTokens),
+				formatTokenCount(inputTokens),
+				formatTokenCount(outputTokens),
+			)
+		}
 	}
 
 	logPath, _ := logger.DefaultLogPath()

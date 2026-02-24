@@ -156,6 +156,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.state = state
 
+	// Reset spend tracking so it reflects only the current daemon run.
+	d.state.ResetSpend()
+	if err := d.state.Save(); err != nil {
+		d.logger.Warn("failed to save state after resetting spend", "error", err)
+	}
+
 	// Load workflow configs for all repos
 	d.loadWorkflowConfigs()
 

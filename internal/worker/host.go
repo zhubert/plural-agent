@@ -37,6 +37,10 @@ type Host interface {
 	CleanupSession(ctx context.Context, sessionID string) error
 	SaveRunnerMessages(sessionID string, runner claude.RunnerInterface)
 	IsWorkerRunning(sessionID string) bool
+
+	// RecordSpend adds token and cost data from a completed Claude response
+	// to the daemon's running totals.
+	RecordSpend(costUSD float64, outputTokens, inputTokens int)
 }
 
 // SessionInfo holds the minimal info needed after creating a child session.
