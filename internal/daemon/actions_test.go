@@ -2808,6 +2808,253 @@ func TestHandleAsyncComplete_SkipsFormatterOnFailure(t *testing.T) {
 	}
 }
 
+// --- startFixCI format_command tests ---
+
+// TestStartFixCI_FormatCommandStoredInStepData verifies that when the fix_ci
+// workflow state has a format_command param, it is stored in item.StepData.
+func TestStartFixCI_FormatCommandStoredInStepData(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+
+	// Custom workflow config: fix_ci state has format_command + format_message.
+	d.workflowConfigs = map[string]*workflow.Config{
+		"/test/repo": {
+			States: map[string]*workflow.State{
+				"fix_ci": {
+					Params: map[string]any{
+						"format_command": "gofmt -l -w .",
+						"format_message": "style: gofmt",
+					},
+				},
+			},
+		},
+	}
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed: test failure")
+
+	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
+	}
+	if got, _ := item.StepData["_format_message"].(string); got != "style: gofmt" {
+		t.Errorf("expected _format_message=%q, got %q", "style: gofmt", got)
+	}
+}
+
+// TestStartFixCI_FormatCommandDefaultMessage verifies that when fix_ci has
+// format_command but no format_message, the default message is used.
+func TestStartFixCI_FormatCommandDefaultMessage(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.workflowConfigs = map[string]*workflow.Config{
+		"/test/repo": {
+			States: map[string]*workflow.State{
+				"fix_ci": {
+					Params: map[string]any{
+						"format_command": "gofmt -l -w .",
+						// no format_message
+					},
+				},
+			},
+		},
+	}
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+
+	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
+	}
+	if got, _ := item.StepData["_format_message"].(string); got != "Apply auto-formatting" {
+		t.Errorf("expected default _format_message=%q, got %q", "Apply auto-formatting", got)
+	}
+}
+
+// TestStartFixCI_InheritsFormatCommandFromStepData verifies that when fix_ci
+// has no format_command param, the existing _format_command in step data
+// (set by the coding step) is preserved.
+func TestStartFixCI_InheritsFormatCommandFromStepData(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	// Use default workflow config — fix_ci has no format_command param.
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		// _format_command already set by the coding step
+		StepData: map[string]any{
+			"_format_command": "gofmt ./...",
+			"_format_message": "style: format",
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+
+	// Existing _format_command must not be cleared.
+	if got, _ := item.StepData["_format_command"].(string); got != "gofmt ./..." {
+		t.Errorf("expected _format_command=%q, got %q", "gofmt ./...", got)
+	}
+}
+
+// TestStartFixCI_FormatCommandOverridesStepData verifies that a fix_ci-specific
+// format_command replaces whatever the coding step stored in step data.
+func TestStartFixCI_FormatCommandOverridesStepData(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.workflowConfigs = map[string]*workflow.Config{
+		"/test/repo": {
+			States: map[string]*workflow.State{
+				"fix_ci": {
+					Params: map[string]any{
+						"format_command": "prettier --write .",
+						"format_message": "style: prettier",
+					},
+				},
+			},
+		},
+	}
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		// Coding step set a different formatter.
+		StepData: map[string]any{
+			"_format_command": "gofmt ./...",
+			"_format_message": "style: gofmt",
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+
+	if got, _ := item.StepData["_format_command"].(string); got != "prettier --write ." {
+		t.Errorf("expected _format_command=%q, got %q", "prettier --write .", got)
+	}
+	if got, _ := item.StepData["_format_message"].(string); got != "style: prettier" {
+		t.Errorf("expected _format_message=%q, got %q", "style: prettier", got)
+	}
+}
+
+// --- addressFeedback format_command tests ---
+
+// testPRReviewJSON is a minimal CHANGES_REQUESTED review that passes
+// FilterTranscriptComments so addressFeedback reaches the format_command logic.
+const testPRReviewJSON = `{"reviews":[{"author":{"login":"reviewer1"},"body":"Please address the issue","state":"CHANGES_REQUESTED","comments":[]}],"comments":[]}`
+
+// TestAddressFeedback_FormatCommandStoredInStepData verifies that when the
+// await_review workflow state has a format_command param, it is stored in
+// item.StepData when addressing review feedback.
+func TestAddressFeedback_FormatCommandStoredInStepData(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	mockExec := exec.NewMockExecutor(nil)
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments"},
+		exec.MockResponse{Stdout: []byte(testPRReviewJSON)})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.workflowConfigs = map[string]*workflow.Config{
+		"/test/repo": {
+			States: map[string]*workflow.State{
+				"await_review": {
+					Params: map[string]any{
+						"format_command": "gofmt -l -w .",
+						"format_message": "style: gofmt",
+					},
+				},
+			},
+		},
+	}
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	d.addressFeedback(context.Background(), item)
+
+	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
+	}
+	if got, _ := item.StepData["_format_message"].(string); got != "style: gofmt" {
+		t.Errorf("expected _format_message=%q, got %q", "style: gofmt", got)
+	}
+}
+
+// TestAddressFeedback_InheritsFormatCommandFromStepData verifies that when
+// await_review has no format_command param, the existing _format_command in
+// step data (from the coding step) is preserved.
+func TestAddressFeedback_InheritsFormatCommandFromStepData(t *testing.T) {
+	cfg := testConfig()
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	mockExec := exec.NewMockExecutor(nil)
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments"},
+		exec.MockResponse{Stdout: []byte(testPRReviewJSON)})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	// Default workflow config — await_review has no format_command param.
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		// _format_command already set by the coding step.
+		StepData: map[string]any{
+			"_format_command": "gofmt ./...",
+			"_format_message": "style: format",
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	d.addressFeedback(context.Background(), item)
+
+	// Existing _format_command must not be cleared.
+	if got, _ := item.StepData["_format_command"].(string); got != "gofmt ./..." {
+		t.Errorf("expected _format_command=%q, got %q", "gofmt ./...", got)
+	}
+}
+
 // TestHandleAsyncComplete_NoFormatCommandSkipsFormatter verifies that when
 // no _format_command is in step data, no formatter is run.
 func TestHandleAsyncComplete_NoFormatCommandSkipsFormatter(t *testing.T) {
