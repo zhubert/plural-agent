@@ -1,926 +1,1065 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>erg - autonomous headless daemon for claude code</title>
-    <meta name="description" content="Label an issue and let erg code, review, and merge autonomously. Headless daemon for Claude Code.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <meta
+      name="description"
+      content="Label an issue and let erg code, review, and merge autonomously. Headless daemon for Claude Code."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        :root {
-            --bg: #141416;
-            --bg-sidebar: #0f0f11;
-            --bg-card: #1e1e21;
-            --bg-code: #1a1a1d;
-            --bg-inset: #111113;
-            --accent: #f97316;
-            --accent-dim: #ea580c;
-            --accent-bg: rgba(249, 115, 22, 0.08);
-            --accent-border: rgba(249, 115, 22, 0.2);
-            --cyan: #22d3ee;
-            --green: #34d399;
-            --violet: #a78bfa;
-            --text: #e4e4e7;
-            --text-muted: #a1a1aa;
-            --text-dim: #71717a;
-            --border: #2a2a2e;
-            --border-light: #3f3f46;
-        }
+      :root {
+        --bg: #141416;
+        --bg-sidebar: #0f0f11;
+        --bg-card: #1e1e21;
+        --bg-code: #1a1a1d;
+        --bg-inset: #111113;
+        --accent: #f97316;
+        --accent-dim: #ea580c;
+        --accent-bg: rgba(249, 115, 22, 0.08);
+        --accent-border: rgba(249, 115, 22, 0.2);
+        --cyan: #22d3ee;
+        --green: #34d399;
+        --violet: #a78bfa;
+        --text: #e4e4e7;
+        --text-muted: #a1a1aa;
+        --text-dim: #71717a;
+        --border: #2a2a2e;
+        --border-light: #3f3f46;
+      }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-        html {
-            font-size: 15px;
-            scroll-behavior: smooth;
-            scroll-padding-top: 2rem;
-        }
+      html {
+        font-size: 15px;
+        scroll-behavior: smooth;
+        scroll-padding-top: 2rem;
+      }
 
-        body {
-            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            line-height: 1.7;
-            min-height: 100vh;
-            -webkit-font-smoothing: antialiased;
-        }
+      body {
+        font-family:
+          "IBM Plex Sans",
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+      }
 
-        ::selection {
-            background: var(--accent);
-            color: #fff;
-        }
+      ::selection {
+        background: var(--accent);
+        color: #fff;
+      }
 
-        h1, h2, h3, h4 {
-            font-family: 'Bricolage Grotesque', sans-serif;
-            letter-spacing: -0.02em;
-        }
+      h1,
+      h2,
+      h3,
+      h4 {
+        font-family: "Bricolage Grotesque", sans-serif;
+        letter-spacing: -0.02em;
+      }
 
-        code, pre {
-            font-family: 'IBM Plex Mono', monospace;
-        }
+      code,
+      pre {
+        font-family: "IBM Plex Mono", monospace;
+      }
 
-        a {
-            color: var(--accent);
-            text-decoration: none;
-        }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
 
-        a:hover {
-            text-decoration: underline;
-        }
+      a:hover {
+        text-decoration: underline;
+      }
 
-        /* ---- Two-column layout ---- */
+      /* ---- Two-column layout ---- */
 
-        .page {
-            display: flex;
-            min-height: 100vh;
-        }
+      .page {
+        display: flex;
+        min-height: 100vh;
+      }
 
-        /* ---- Sidebar ---- */
+      /* ---- Sidebar ---- */
 
+      .sidebar {
+        width: 240px;
+        flex-shrink: 0;
+        background: var(--bg-sidebar);
+        border-right: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+        padding: 1.5rem 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-logo {
+        padding: 0 1.25rem;
+        margin-bottom: 1.75rem;
+      }
+
+      .sidebar-logo a {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: var(--text);
+        text-decoration: none;
+        letter-spacing: -0.03em;
+      }
+
+      .sidebar-logo a span {
+        color: var(--accent);
+      }
+
+      .sidebar-nav {
+        list-style: none;
+        flex: 1;
+      }
+
+      .sidebar-section {
+        margin-bottom: 0.25rem;
+      }
+
+      .sidebar-section-title {
+        display: block;
+        padding: 0.4rem 1.25rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        margin-top: 0.75rem;
+      }
+
+      .sidebar-link {
+        display: block;
+        padding: 0.35rem 1.25rem 0.35rem 1.75rem;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        text-decoration: none;
+        transition:
+          color 0.15s,
+          background 0.15s;
+        border-left: 2px solid transparent;
+      }
+
+      .sidebar-link:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.03);
+        text-decoration: none;
+      }
+
+      .sidebar-link.active {
+        color: var(--accent);
+        border-left-color: var(--accent);
+        background: var(--accent-bg);
+      }
+
+      .sidebar-footer {
+        padding: 1rem 1.25rem 0;
+        border-top: 1px solid var(--border);
+        margin-top: auto;
+      }
+
+      .sidebar-footer a {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        padding: 0.2rem 0;
+        text-decoration: none;
+      }
+
+      .sidebar-footer a:hover {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
+      /* ---- Main content ---- */
+
+      .main {
+        flex: 1;
+        min-width: 0;
+        max-width: 820px;
+        padding: 2.5rem 3rem 4rem;
+      }
+
+      /* ---- Content typography ---- */
+
+      .main h1 {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: var(--text);
+        margin-bottom: 0.75rem;
+      }
+
+      .main h2 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-top: 3.5rem;
+        margin-bottom: 1rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+      }
+
+      .main h2:first-of-type {
+        margin-top: 2.5rem;
+      }
+
+      .main h3 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 2rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .main h4 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 1.5rem;
+        margin-bottom: 0.4rem;
+      }
+
+      .main p {
+        margin-bottom: 1rem;
+        color: var(--text-muted);
+      }
+
+      .main p code,
+      .main li code {
+        background: var(--bg-code);
+        color: var(--cyan);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-size: 0.85em;
+        border: 1px solid var(--border);
+      }
+
+      .main ul,
+      .main ol {
+        margin-bottom: 1rem;
+        padding-left: 1.5rem;
+        color: var(--text-muted);
+      }
+
+      .main li {
+        margin-bottom: 0.35rem;
+        font-size: 0.95rem;
+      }
+
+      /* ---- Hero area ---- */
+
+      .hero-badge {
+        display: inline-block;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        font-weight: 500;
+        color: var(--accent);
+        background: var(--accent-bg);
+        border: 1px solid var(--accent-border);
+        border-radius: 100px;
+        padding: 0.3rem 0.85rem;
+        margin-bottom: 1rem;
+        letter-spacing: 0.02em;
+      }
+
+      .hero-tagline {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 1.15rem;
+        font-weight: 500;
+        color: var(--text-dim);
+        margin-bottom: 1.5rem;
+        letter-spacing: -0.01em;
+      }
+
+      .hero-cta {
+        display: inline-flex;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.55rem 1.25rem;
+        border-radius: 6px;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.15s;
+        border: 1px solid transparent;
+      }
+
+      .btn:hover {
+        text-decoration: none;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-dim);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-muted);
+        border-color: var(--border-light);
+      }
+
+      .btn-ghost:hover {
+        color: var(--text);
+        border-color: var(--text-dim);
+      }
+
+      /* ---- Feature grid ---- */
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .feature-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.1rem 1.25rem;
+        transition: border-color 0.15s;
+      }
+
+      .feature-item:hover {
+        border-color: var(--border-light);
+      }
+
+      .feature-item h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.3rem;
+      }
+
+      .feature-item .fi-icon {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.8rem;
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+        display: block;
+      }
+
+      .feature-item p {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin: 0;
+      }
+
+      /* ---- Steps (how it works) ---- */
+
+      .steps-list {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0 1.5rem;
+        counter-reset: step;
+      }
+
+      .steps-list li {
+        counter-increment: step;
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border);
+        margin: 0;
+      }
+
+      .steps-list li:last-child {
+        border-bottom: none;
+      }
+
+      .steps-list li::before {
+        content: counter(step);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        border-radius: 50%;
+        background: var(--accent-bg);
+        border: 1px solid var(--accent-border);
+        color: var(--accent);
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 700;
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+      }
+
+      .step-body h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.15rem;
+      }
+
+      .step-body p {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin: 0;
+      }
+
+      /* ---- State diagram ---- */
+
+      .state-flow {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 1.25rem 0;
+        overflow-x: auto;
+        margin: 0.5rem 0 0.75rem;
+      }
+
+      .sf-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        flex-shrink: 0;
+      }
+
+      .sf-box {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        font-weight: 500;
+        padding: 0.4rem 0.75rem;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text);
+        white-space: nowrap;
+      }
+
+      .sf-box.sf-task {
+        border-left: 3px solid var(--accent);
+      }
+      .sf-box.sf-wait {
+        border-left: 3px solid var(--violet);
+      }
+      .sf-box.sf-done {
+        border-left: 3px solid var(--green);
+      }
+
+      .sf-type {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.65rem;
+        color: var(--text-dim);
+      }
+
+      .sf-arrow {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+        padding: 0 0.35rem;
+        flex-shrink: 0;
+        user-select: none;
+      }
+
+      .state-note {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        margin-bottom: 1.5rem;
+      }
+
+      /* ---- Code block ---- */
+
+      .code-block {
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .code-header {
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border);
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .code-filename {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+      }
+
+      .code-block pre {
+        margin: 0;
+        padding: 1rem 1.25rem;
+        font-size: 0.8rem;
+        line-height: 1.75;
+        overflow-x: auto;
+        color: var(--text-muted);
+      }
+
+      .code-block .ck {
+        color: var(--accent);
+      }
+      .code-block .cv {
+        color: var(--text);
+      }
+      .code-block .cc {
+        color: var(--text-dim);
+        font-style: italic;
+      }
+      .code-block .cs {
+        color: var(--green);
+      }
+      .code-block .ca {
+        color: var(--violet);
+      }
+
+      /* ---- Example tabs ---- */
+
+      .example-tabs {
+        margin: 1rem 0 1.5rem;
+      }
+
+      .tab-bar {
+        display: flex;
+        gap: 0.35rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .tab-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-dim);
+        padding: 0.3rem 0.8rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.73rem;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s,
+          background 0.15s;
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-color: var(--accent-border);
+        background: var(--accent-bg);
+      }
+
+      .tab-btn:hover:not(.active) {
+        color: var(--text-muted);
+        border-color: var(--border-light);
+      }
+
+      .example-tabs [data-panel="yaml"] .code-block {
+        margin: 0;
+      }
+
+      .diagram-panel {
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem 1rem;
+        overflow-x: auto;
+      }
+
+      .diagram-panel svg {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+      }
+
+      /* ---- Info cards ---- */
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .info-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.15rem;
+      }
+
+      .info-card h4 {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.3rem;
+      }
+
+      .info-card p {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin: 0;
+      }
+
+      /* ---- CLI reference table ---- */
+
+      .cli-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0 1.5rem;
+        font-size: 0.85rem;
+      }
+
+      .cli-table th {
+        text-align: left;
+        padding: 0.6rem 1rem;
+        font-weight: 600;
+        color: var(--text-dim);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border-bottom: 1px solid var(--border-light);
+        background: var(--bg-card);
+      }
+
+      .cli-table td {
+        padding: 0.6rem 1rem;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-muted);
+      }
+
+      .cli-table td code {
+        background: var(--bg-code);
+        color: var(--cyan);
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.82rem;
+        border: 1px solid var(--border);
+      }
+
+      .cli-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* ---- Install block ---- */
+
+      .install-block {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.9rem 1.25rem;
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        max-width: 520px;
+      }
+
+      .install-block .prompt-char {
+        color: var(--accent);
+        user-select: none;
+        font-family: "IBM Plex Mono", monospace;
+        font-weight: 500;
+        font-size: 0.88rem;
+      }
+
+      .install-block code {
+        font-size: 0.88rem;
+        color: var(--text);
+      }
+
+      .copy-btn {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        padding: 0.3rem 0.65rem;
+        border-radius: 4px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .copy-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .copy-btn.copied {
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      /* ---- Mobile sidebar toggle ---- */
+
+      .mobile-header {
+        display: none;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--bg-sidebar);
+        border-bottom: 1px solid var(--border);
+        padding: 0.75rem 1rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .mobile-header .logo-text {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--text);
+      }
+
+      .mobile-header .logo-text span {
+        color: var(--accent);
+      }
+
+      .menu-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        cursor: pointer;
+      }
+
+      /* ---- Responsive ---- */
+
+      @media (max-width: 860px) {
         .sidebar {
-            width: 240px;
-            flex-shrink: 0;
-            background: var(--bg-sidebar);
-            border-right: 1px solid var(--border);
-            position: sticky;
-            top: 0;
-            height: 100vh;
-            overflow-y: auto;
-            padding: 1.5rem 0;
-            display: flex;
-            flex-direction: column;
+          position: fixed;
+          left: -260px;
+          z-index: 200;
+          transition: left 0.25s ease;
+          box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
         }
 
-        .sidebar-logo {
-            padding: 0 1.25rem;
-            margin-bottom: 1.75rem;
+        .sidebar.open {
+          left: 0;
         }
 
-        .sidebar-logo a {
-            font-family: 'Bricolage Grotesque', sans-serif;
-            font-size: 1.6rem;
-            font-weight: 800;
-            color: var(--text);
-            text-decoration: none;
-            letter-spacing: -0.03em;
+        .sidebar-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 199;
         }
 
-        .sidebar-logo a span {
-            color: var(--accent);
+        .sidebar-overlay.open {
+          display: block;
         }
 
-        .sidebar-nav {
-            list-style: none;
-            flex: 1;
+        .mobile-header {
+          display: flex;
         }
-
-        .sidebar-section {
-            margin-bottom: 0.25rem;
-        }
-
-        .sidebar-section-title {
-            display: block;
-            padding: 0.4rem 1.25rem;
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-dim);
-            margin-top: 0.75rem;
-        }
-
-        .sidebar-link {
-            display: block;
-            padding: 0.35rem 1.25rem 0.35rem 1.75rem;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            text-decoration: none;
-            transition: color 0.15s, background 0.15s;
-            border-left: 2px solid transparent;
-        }
-
-        .sidebar-link:hover {
-            color: var(--text);
-            background: rgba(255,255,255,0.03);
-            text-decoration: none;
-        }
-
-        .sidebar-link.active {
-            color: var(--accent);
-            border-left-color: var(--accent);
-            background: var(--accent-bg);
-        }
-
-        .sidebar-footer {
-            padding: 1rem 1.25rem 0;
-            border-top: 1px solid var(--border);
-            margin-top: auto;
-        }
-
-        .sidebar-footer a {
-            display: block;
-            font-size: 0.78rem;
-            color: var(--text-dim);
-            padding: 0.2rem 0;
-            text-decoration: none;
-        }
-
-        .sidebar-footer a:hover {
-            color: var(--text-muted);
-            text-decoration: none;
-        }
-
-        /* ---- Main content ---- */
 
         .main {
-            flex: 1;
-            min-width: 0;
-            max-width: 820px;
-            padding: 2.5rem 3rem 4rem;
+          padding: 1.5rem 1.25rem 3rem;
         }
 
-        /* ---- Content typography ---- */
+        .feature-grid,
+        .info-grid {
+          grid-template-columns: 1fr;
+        }
 
+        .state-flow {
+          padding: 1rem 0;
+        }
+      }
+
+      @media (max-width: 480px) {
         .main h1 {
-            font-size: 2.5rem;
-            font-weight: 800;
-            color: var(--text);
-            margin-bottom: 0.75rem;
-        }
-
-        .main h2 {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: var(--text);
-            margin-top: 3.5rem;
-            margin-bottom: 1rem;
-            padding-top: 1.5rem;
-            border-top: 1px solid var(--border);
-        }
-
-        .main h2:first-of-type {
-            margin-top: 2.5rem;
-        }
-
-        .main h3 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: var(--text);
-            margin-top: 2rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .main h4 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: var(--text);
-            margin-top: 1.5rem;
-            margin-bottom: 0.4rem;
-        }
-
-        .main p {
-            margin-bottom: 1rem;
-            color: var(--text-muted);
-        }
-
-        .main p code,
-        .main li code {
-            background: var(--bg-code);
-            color: var(--cyan);
-            padding: 0.15rem 0.4rem;
-            border-radius: 4px;
-            font-size: 0.85em;
-            border: 1px solid var(--border);
-        }
-
-        .main ul, .main ol {
-            margin-bottom: 1rem;
-            padding-left: 1.5rem;
-            color: var(--text-muted);
-        }
-
-        .main li {
-            margin-bottom: 0.35rem;
-            font-size: 0.95rem;
-        }
-
-        /* ---- Hero area ---- */
-
-        .hero-badge {
-            display: inline-block;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.72rem;
-            font-weight: 500;
-            color: var(--accent);
-            background: var(--accent-bg);
-            border: 1px solid var(--accent-border);
-            border-radius: 100px;
-            padding: 0.3rem 0.85rem;
-            margin-bottom: 1rem;
-            letter-spacing: 0.02em;
-        }
-
-        .hero-tagline {
-            font-family: 'Bricolage Grotesque', sans-serif;
-            font-size: 1.15rem;
-            font-weight: 500;
-            color: var(--text-dim);
-            margin-bottom: 1.5rem;
-            letter-spacing: -0.01em;
+          font-size: 1.6rem;
         }
 
         .hero-cta {
-            display: inline-flex;
-            gap: 0.75rem;
-            margin-bottom: 0.5rem;
+          flex-direction: column;
         }
 
         .btn {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.55rem 1.25rem;
-            border-radius: 6px;
-            font-family: 'IBM Plex Sans', sans-serif;
-            font-size: 0.85rem;
-            font-weight: 500;
-            text-decoration: none;
-            transition: all 0.15s;
-            border: 1px solid transparent;
+          width: 100%;
+          justify-content: center;
+          max-width: 280px;
         }
-
-        .btn:hover { text-decoration: none; }
-
-        .btn-primary {
-            background: var(--accent);
-            color: #fff;
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-dim);
-        }
-
-        .btn-ghost {
-            background: transparent;
-            color: var(--text-muted);
-            border-color: var(--border-light);
-        }
-
-        .btn-ghost:hover {
-            color: var(--text);
-            border-color: var(--text-dim);
-        }
-
-        /* ---- Feature grid ---- */
-
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.75rem;
-            margin: 1rem 0 1.5rem;
-        }
-
-        .feature-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.1rem 1.25rem;
-            transition: border-color 0.15s;
-        }
-
-        .feature-item:hover {
-            border-color: var(--border-light);
-        }
-
-        .feature-item h4 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text);
-            margin: 0 0 0.3rem;
-        }
-
-        .feature-item .fi-icon {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.8rem;
-            color: var(--accent);
-            margin-bottom: 0.5rem;
-            display: block;
-        }
-
-        .feature-item p {
-            font-size: 0.82rem;
-            color: var(--text-muted);
-            line-height: 1.6;
-            margin: 0;
-        }
-
-        /* ---- Steps (how it works) ---- */
-
-        .steps-list {
-            list-style: none;
-            padding: 0;
-            margin: 1rem 0 1.5rem;
-            counter-reset: step;
-        }
-
-        .steps-list li {
-            counter-increment: step;
-            display: flex;
-            gap: 1rem;
-            align-items: flex-start;
-            padding: 0.75rem 0;
-            border-bottom: 1px solid var(--border);
-            margin: 0;
-        }
-
-        .steps-list li:last-child {
-            border-bottom: none;
-        }
-
-        .steps-list li::before {
-            content: counter(step);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 1.75rem;
-            height: 1.75rem;
-            border-radius: 50%;
-            background: var(--accent-bg);
-            border: 1px solid var(--accent-border);
-            color: var(--accent);
-            font-family: 'Bricolage Grotesque', sans-serif;
-            font-size: 0.78rem;
-            font-weight: 700;
-            flex-shrink: 0;
-            margin-top: 0.1rem;
-        }
-
-        .step-body h4 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text);
-            margin: 0 0 0.15rem;
-        }
-
-        .step-body p {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin: 0;
-        }
-
-        /* ---- State diagram ---- */
-
-        .state-flow {
-            display: flex;
-            align-items: center;
-            gap: 0;
-            padding: 1.25rem 0;
-            overflow-x: auto;
-            margin: 0.5rem 0 0.75rem;
-        }
-
-        .sf-node {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.25rem;
-            flex-shrink: 0;
-        }
-
-        .sf-box {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.78rem;
-            font-weight: 500;
-            padding: 0.4rem 0.75rem;
-            border-radius: 4px;
-            border: 1px solid var(--border);
-            background: var(--bg-card);
-            color: var(--text);
-            white-space: nowrap;
-        }
-
-        .sf-box.sf-task { border-left: 3px solid var(--accent); }
-        .sf-box.sf-wait { border-left: 3px solid var(--violet); }
-        .sf-box.sf-done { border-left: 3px solid var(--green); }
-
-        .sf-type {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.65rem;
-            color: var(--text-dim);
-        }
-
-        .sf-arrow {
-            color: var(--text-dim);
-            font-size: 0.75rem;
-            padding: 0 0.35rem;
-            flex-shrink: 0;
-            user-select: none;
-        }
-
-        .state-note {
-            font-size: 0.82rem;
-            color: var(--text-dim);
-            margin-bottom: 1.5rem;
-        }
-
-        /* ---- Code block ---- */
-
-        .code-block {
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-            margin: 1rem 0 1.5rem;
-        }
-
-        .code-header {
-            background: var(--bg-card);
-            border-bottom: 1px solid var(--border);
-            padding: 0.5rem 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .code-filename {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.75rem;
-            color: var(--text-dim);
-        }
-
-        .code-block pre {
-            margin: 0;
-            padding: 1rem 1.25rem;
-            font-size: 0.8rem;
-            line-height: 1.75;
-            overflow-x: auto;
-            color: var(--text-muted);
-        }
-
-        .code-block .ck { color: var(--accent); }
-        .code-block .cv { color: var(--text); }
-        .code-block .cc { color: var(--text-dim); font-style: italic; }
-        .code-block .cs { color: var(--green); }
-        .code-block .ca { color: var(--violet); }
-
-        /* ---- Example tabs ---- */
-
-        .example-tabs {
-            margin: 1rem 0 1.5rem;
-        }
-
-        .tab-bar {
-            display: flex;
-            gap: 0.35rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .tab-btn {
-            background: transparent;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text-dim);
-            padding: 0.3rem 0.8rem;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.73rem;
-            cursor: pointer;
-            transition: color 0.15s, border-color 0.15s, background 0.15s;
-        }
-
-        .tab-btn.active {
-            color: var(--accent);
-            border-color: var(--accent-border);
-            background: var(--accent-bg);
-        }
-
-        .tab-btn:hover:not(.active) {
-            color: var(--text-muted);
-            border-color: var(--border-light);
-        }
-
-        .example-tabs [data-panel="yaml"] .code-block {
-            margin: 0;
-        }
-
-        .diagram-panel {
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.5rem 1rem;
-            overflow-x: auto;
-        }
-
-        .diagram-panel svg {
-            max-width: 100%;
-            height: auto;
-            display: block;
-            margin: 0 auto;
-        }
-
-        /* ---- Info cards ---- */
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.75rem;
-            margin: 1rem 0 1.5rem;
-        }
-
-        .info-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem 1.15rem;
-        }
-
-        .info-card h4 {
-            font-size: 0.88rem;
-            font-weight: 600;
-            color: var(--text);
-            margin: 0 0 0.3rem;
-        }
-
-        .info-card p {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            line-height: 1.6;
-            margin: 0;
-        }
-
-        /* ---- CLI reference table ---- */
 
         .cli-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0 1.5rem;
-            font-size: 0.85rem;
+          font-size: 0.78rem;
         }
 
-        .cli-table th {
-            text-align: left;
-            padding: 0.6rem 1rem;
-            font-weight: 600;
-            color: var(--text-dim);
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            border-bottom: 1px solid var(--border-light);
-            background: var(--bg-card);
-        }
-
+        .cli-table th,
         .cli-table td {
-            padding: 0.6rem 1rem;
-            border-bottom: 1px solid var(--border);
-            color: var(--text-muted);
+          padding: 0.5rem 0.6rem;
         }
-
-        .cli-table td code {
-            background: var(--bg-code);
-            color: var(--cyan);
-            padding: 0.15rem 0.4rem;
-            border-radius: 3px;
-            font-size: 0.82rem;
-            border: 1px solid var(--border);
-        }
-
-        .cli-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* ---- Install block ---- */
-
-        .install-block {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.9rem 1.25rem;
-            position: relative;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin: 1rem 0;
-            max-width: 520px;
-        }
-
-        .install-block .prompt-char {
-            color: var(--accent);
-            user-select: none;
-            font-family: 'IBM Plex Mono', monospace;
-            font-weight: 500;
-            font-size: 0.88rem;
-        }
-
-        .install-block code {
-            font-size: 0.88rem;
-            color: var(--text);
-        }
-
-        .copy-btn {
-            position: absolute;
-            right: 0.75rem;
-            top: 50%;
-            transform: translateY(-50%);
-            background: var(--bg);
-            border: 1px solid var(--border);
-            color: var(--text-dim);
-            padding: 0.3rem 0.65rem;
-            border-radius: 4px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.7rem;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-
-        .copy-btn:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .copy-btn.copied {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        /* ---- Mobile sidebar toggle ---- */
-
-        .mobile-header {
-            display: none;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: var(--bg-sidebar);
-            border-bottom: 1px solid var(--border);
-            padding: 0.75rem 1rem;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .mobile-header .logo-text {
-            font-family: 'Bricolage Grotesque', sans-serif;
-            font-size: 1.1rem;
-            font-weight: 800;
-            color: var(--text);
-        }
-
-        .mobile-header .logo-text span {
-            color: var(--accent);
-        }
-
-        .menu-btn {
-            background: none;
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-            padding: 0.3rem 0.6rem;
-            border-radius: 4px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 0.75rem;
-            cursor: pointer;
-        }
-
-        /* ---- Responsive ---- */
-
-        @media (max-width: 860px) {
-            .sidebar {
-                position: fixed;
-                left: -260px;
-                z-index: 200;
-                transition: left 0.25s ease;
-                box-shadow: 4px 0 20px rgba(0,0,0,0.5);
-            }
-
-            .sidebar.open {
-                left: 0;
-            }
-
-            .sidebar-overlay {
-                display: none;
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,0.5);
-                z-index: 199;
-            }
-
-            .sidebar-overlay.open {
-                display: block;
-            }
-
-            .mobile-header {
-                display: flex;
-            }
-
-            .main {
-                padding: 1.5rem 1.25rem 3rem;
-            }
-
-            .feature-grid,
-            .info-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .state-flow {
-                padding: 1rem 0;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .main h1 {
-                font-size: 1.6rem;
-            }
-
-            .hero-cta {
-                flex-direction: column;
-            }
-
-            .btn {
-                width: 100%;
-                justify-content: center;
-                max-width: 280px;
-            }
-
-            .cli-table {
-                font-size: 0.78rem;
-            }
-
-            .cli-table th, .cli-table td {
-                padding: 0.5rem 0.6rem;
-            }
-        }
+      }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-</head>
-<body>
+  </head>
+  <body>
+    <div class="mobile-header">
+      <span class="logo-text">erg<span>.</span></span>
+      <button class="menu-btn" onclick="toggleSidebar()">menu</button>
+    </div>
 
-<div class="mobile-header">
-    <span class="logo-text">erg<span>.</span></span>
-    <button class="menu-btn" onclick="toggleSidebar()">menu</button>
-</div>
+    <div
+      class="sidebar-overlay"
+      id="sidebarOverlay"
+      onclick="toggleSidebar()"
+    ></div>
 
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
-
-<div class="page">
-    <!-- Sidebar -->
-    <nav class="sidebar" id="sidebar">
+    <div class="page">
+      <!-- Sidebar -->
+      <nav class="sidebar" id="sidebar">
         <div class="sidebar-logo">
-            <a href="#">erg<span>.</span></a>
+          <a href="#">erg<span>.</span></a>
         </div>
         <ul class="sidebar-nav">
-            <li class="sidebar-section">
-                <span class="sidebar-section-title">Getting started</span>
-                <a href="#overview" class="sidebar-link active">Overview</a>
-                <a href="#how-it-works" class="sidebar-link">How it works</a>
-                <a href="#install" class="sidebar-link">Installation</a>
-            </li>
-            <li class="sidebar-section">
-                <span class="sidebar-section-title">Workflow</span>
-                <a href="#workflow" class="sidebar-link">Configuration</a>
-                <a href="#states" class="sidebar-link">State types</a>
-                <a href="#error-handling" class="sidebar-link">Error handling</a>
-                <a href="#hooks" class="sidebar-link">Hooks</a>
-            </li>
-            <li class="sidebar-section">
-                <span class="sidebar-section-title">Examples</span>
-                <a href="#example-minimal" class="sidebar-link">Minimal</a>
-                <a href="#example-supervised" class="sidebar-link">Supervised</a>
-                <a href="#example-ci-gate" class="sidebar-link">CI gate</a>
-                <a href="#example-label-tracking" class="sidebar-link">Label tracking</a>
-                <a href="#example-asana" class="sidebar-link">Asana</a>
-                <a href="#example-linear" class="sidebar-link">Linear</a>
-            </li>
-            <li class="sidebar-section">
-                <span class="sidebar-section-title">Reference</span>
-                <a href="#cli" class="sidebar-link">CLI commands</a>
-            </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Getting started</span>
+            <a href="#overview" class="sidebar-link active">Overview</a>
+            <a href="#how-it-works" class="sidebar-link">How it works</a>
+            <a href="#install" class="sidebar-link">Installation</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Workflow</span>
+            <a href="#workflow" class="sidebar-link">Configuration</a>
+            <a href="#states" class="sidebar-link">State types</a>
+            <a href="#error-handling" class="sidebar-link">Error handling</a>
+            <a href="#hooks" class="sidebar-link">Hooks</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Examples</span>
+            <a href="#example-minimal" class="sidebar-link">Minimal</a>
+            <a href="#example-supervised" class="sidebar-link">Supervised</a>
+            <a href="#example-ci-gate" class="sidebar-link">CI gate</a>
+            <a href="#example-label-tracking" class="sidebar-link"
+              >Label tracking</a
+            >
+            <a href="#example-asana" class="sidebar-link">Asana</a>
+            <a href="#example-linear" class="sidebar-link">Linear</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Reference</span>
+            <a href="#cli" class="sidebar-link">CLI commands</a>
+          </li>
         </ul>
         <div class="sidebar-footer">
-            <a href="https://github.com/zhubert/erg">GitHub</a>
-            <a href="https://github.com/zhubert/erg/issues">Issues</a>
+          <a href="https://github.com/zhubert/erg">GitHub</a>
+          <a href="https://github.com/zhubert/erg/issues">Issues</a>
         </div>
-    </nav>
+      </nav>
 
-    <!-- Content -->
-    <main class="main">
+      <!-- Content -->
+      <main class="main">
         <!-- Overview -->
         <section id="overview">
-            <span class="hero-badge">autonomous coding daemon</span>
-            <h1>erg<span style="color: var(--accent)">.</span></h1>
-            <p class="hero-tagline">label an issue. ship a PR.</p>
-            <p>Autonomous headless daemon for Claude Code. Polls for issues, writes code in containerized sessions, opens PRs, addresses review comments, and merges &mdash; no human in the loop.</p>
-            <div class="hero-cta">
-                <a href="#install" class="btn btn-primary">install</a>
-                <a href="https://github.com/zhubert/erg" class="btn btn-ghost">view on github</a>
-            </div>
+          <span class="hero-badge">autonomous coding daemon</span>
+          <h1>erg<span style="color: var(--accent)">.</span></h1>
+          <p class="hero-tagline">label an issue. ship a PR.</p>
+          <p>
+            Autonomous headless daemon for Claude Code. Polls for issues, writes
+            code in containerized sessions, opens PRs, addresses review
+            comments, and merges &mdash; no human in the loop.
+          </p>
+          <div class="hero-cta">
+            <a href="#install" class="btn btn-primary">install</a>
+            <a href="https://github.com/zhubert/erg" class="btn btn-ghost"
+              >view on github</a
+            >
+          </div>
         </section>
 
         <div class="feature-grid">
-            <div class="feature-item">
-                <span class="fi-icon">#</span>
-                <h4>issue polling</h4>
-                <p>Polls GitHub, Asana, or Linear for new issues. Label an issue <code>queued</code> and the agent picks it up.</p>
-            </div>
-            <div class="feature-item">
-                <span class="fi-icon">[ ]</span>
-                <h4>containerized sessions</h4>
-                <p>Every session runs inside a Docker container. The container is the sandbox &mdash; Claude has full permissions.</p>
-            </div>
-            <div class="feature-item">
-                <span class="fi-icon">//</span>
-                <h4>concurrent workers</h4>
-                <p>Process multiple issues in parallel. Each gets its own branch, container, and Claude session.</p>
-            </div>
-            <div class="feature-item">
-                <span class="fi-icon">&lt;&gt;</span>
-                <h4>PR lifecycle</h4>
-                <p>Creates PRs, addresses review comments, waits for CI, and auto-merges. Full lifecycle management.</p>
-            </div>
-            <div class="feature-item">
-                <span class="fi-icon">~</span>
-                <h4>workflow engine</h4>
-                <p>Configurable state machine via <code>.erg/workflow.yaml</code>. Task, wait, choice, and pass states with retry, catch, and timeout.</p>
-            </div>
-            <div class="feature-item">
-                <span class="fi-icon">*</span>
-                <h4>child sessions</h4>
-                <p>Claude can delegate subtasks to child sessions via MCP tools. The supervisor waits for all children before creating a PR.</p>
-            </div>
+          <div class="feature-item">
+            <span class="fi-icon">#</span>
+            <h4>issue polling</h4>
+            <p>
+              Polls GitHub, Asana, or Linear for new issues. Label an issue
+              <code>queued</code> and the agent picks it up.
+            </p>
+          </div>
+          <div class="feature-item">
+            <span class="fi-icon">[ ]</span>
+            <h4>containerized sessions</h4>
+            <p>
+              Every session runs inside a Docker container. The container is the
+              sandbox &mdash; Claude has full permissions.
+            </p>
+          </div>
+          <div class="feature-item">
+            <span class="fi-icon">//</span>
+            <h4>concurrent workers</h4>
+            <p>
+              Process multiple issues in parallel. Each gets its own branch,
+              container, and Claude session.
+            </p>
+          </div>
+          <div class="feature-item">
+            <span class="fi-icon">&lt;&gt;</span>
+            <h4>PR lifecycle</h4>
+            <p>
+              Creates PRs, addresses review comments, waits for CI, and
+              auto-merges. Full lifecycle management.
+            </p>
+          </div>
+          <div class="feature-item">
+            <span class="fi-icon">~</span>
+            <h4>workflow engine</h4>
+            <p>
+              Configurable state machine via <code>.erg/workflow.yaml</code>.
+              Task, wait, choice, and pass states with retry, catch, and
+              timeout.
+            </p>
+          </div>
+          <div class="feature-item">
+            <span class="fi-icon">*</span>
+            <h4>child sessions</h4>
+            <p>
+              Claude can delegate subtasks to child sessions via MCP tools. The
+              supervisor waits for all children before creating a PR.
+            </p>
+          </div>
         </div>
 
         <!-- How it works -->
         <h2 id="how-it-works">How it works</h2>
-        <p>The daemon runs a continuous loop: poll for labeled issues, spin up containerized Claude sessions, and manage the full PR lifecycle.</p>
+        <p>
+          The daemon runs a continuous loop: poll for labeled issues, spin up
+          containerized Claude sessions, and manage the full PR lifecycle.
+        </p>
         <ol class="steps-list">
-            <li><div class="step-body"><h4>Label an issue</h4><p>Add the <code>queued</code> label to a GitHub issue.</p></div></li>
-            <li><div class="step-body"><h4>Agent picks up</h4><p>The daemon polls and starts a containerized Claude Code session on a fresh branch.</p></div></li>
-            <li><div class="step-body"><h4>Claude codes</h4><p>Autonomous coding with full tool access inside the container sandbox.</p></div></li>
-            <li><div class="step-body"><h4>PR opened</h4><p>A pull request is created with a closing reference to the original issue.</p></div></li>
-            <li><div class="step-body"><h4>Review + merge</h4><p>The agent addresses review feedback, waits for CI, and auto-merges on approval.</p></div></li>
+          <li>
+            <div class="step-body">
+              <h4>Label an issue</h4>
+              <p>Add the <code>queued</code> label to a GitHub issue.</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Agent picks up</h4>
+              <p>
+                The daemon polls and starts a containerized Claude Code session
+                on a fresh branch.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Claude codes</h4>
+              <p>
+                Autonomous coding with full tool access inside the container
+                sandbox.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>PR opened</h4>
+              <p>
+                A pull request is created with a closing reference to the
+                original issue.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Review + merge</h4>
+              <p>
+                The agent addresses review feedback, waits for CI, and
+                auto-merges on approval.
+              </p>
+            </div>
+          </li>
         </ol>
 
         <!-- Workflow configuration -->
         <h2 id="workflow">Workflow configuration</h2>
-        <p>Drop a <code>.erg/workflow.yaml</code> in your repo to define states, actions, events, and transitions. Or skip it and let the defaults handle everything.</p>
+        <p>
+          Drop a <code>.erg/workflow.yaml</code> in your repo to define states,
+          actions, events, and transitions. Or skip it and let the defaults
+          handle everything.
+        </p>
 
         <h3>Pipeline overview</h3>
         <div class="state-flow">
-            <div class="sf-node"><div class="sf-box sf-task">coding</div><span class="sf-type">ai.code</span></div>
-            <span class="sf-arrow">&rarr;</span>
-            <div class="sf-node"><div class="sf-box sf-task">open_pr</div><span class="sf-type">github.create_pr</span></div>
-            <span class="sf-arrow">&rarr;</span>
-            <div class="sf-node"><div class="sf-box sf-wait">await_review</div><span class="sf-type">pr.reviewed</span></div>
-            <span class="sf-arrow">&rarr;</span>
-            <div class="sf-node"><div class="sf-box sf-wait">await_ci</div><span class="sf-type">ci.complete</span></div>
-            <span class="sf-arrow">&rarr;</span>
-            <div class="sf-node"><div class="sf-box sf-task">merge</div><span class="sf-type">github.merge</span></div>
-            <span class="sf-arrow">&rarr;</span>
-            <div class="sf-node"><div class="sf-box sf-done">done</div><span class="sf-type">succeed</span></div>
+          <div class="sf-node">
+            <div class="sf-box sf-task">coding</div>
+            <span class="sf-type">ai.code</span>
+          </div>
+          <span class="sf-arrow">&rarr;</span>
+          <div class="sf-node">
+            <div class="sf-box sf-task">open_pr</div>
+            <span class="sf-type">github.create_pr</span>
+          </div>
+          <span class="sf-arrow">&rarr;</span>
+          <div class="sf-node">
+            <div class="sf-box sf-wait">await_review</div>
+            <span class="sf-type">pr.reviewed</span>
+          </div>
+          <span class="sf-arrow">&rarr;</span>
+          <div class="sf-node">
+            <div class="sf-box sf-wait">await_ci</div>
+            <span class="sf-type">ci.complete</span>
+          </div>
+          <span class="sf-arrow">&rarr;</span>
+          <div class="sf-node">
+            <div class="sf-box sf-task">merge</div>
+            <span class="sf-type">github.merge</span>
+          </div>
+          <span class="sf-arrow">&rarr;</span>
+          <div class="sf-node">
+            <div class="sf-box sf-done">done</div>
+            <span class="sf-type">succeed</span>
+          </div>
         </div>
-        <p class="state-note"><code>retry</code> with exponential backoff &middot; <code>catch</code> to recovery states &middot; <code>timeout</code> enforced on wait states</p>
+        <p class="state-note">
+          <code>retry</code> with exponential backoff &middot;
+          <code>catch</code> to recovery states &middot;
+          <code>timeout</code> enforced on wait states
+        </p>
 
         <h3>Example config</h3>
         <div class="code-block">
-            <div class="code-header">
-                <span class="code-filename">.erg/workflow.yaml</span>
-            </div>
-            <pre><span class="ck">source:</span>
+          <div class="code-header">
+            <span class="code-filename">.erg/workflow.yaml</span>
+          </div>
+          <pre><span class="ck">source:</span>
   <span class="ck">provider:</span> <span class="cv">github</span>            <span class="cc"># github | asana | linear</span>
   <span class="ck">filter:</span>
     <span class="ck">label:</span> <span class="cv">queued</span>              <span class="cc"># matches labels (GitHub), tags (Asana), or labels (Linear)</span>
@@ -962,63 +1101,137 @@
 
         <!-- State types -->
         <h3 id="states">State types</h3>
-        <p>Each state in the workflow has a type that determines its behavior.</p>
+        <p>
+          Each state in the workflow has a type that determines its behavior.
+        </p>
         <table class="cli-table">
-            <thead><tr><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-                <tr><td><code>task</code></td><td>Execute an action (e.g. <code>ai.code</code>, <code>github.merge</code>)</td></tr>
-                <tr><td><code>wait</code></td><td>Poll for an event with an enforced timeout (e.g. <code>pr.reviewed</code>, <code>ci.complete</code>)</td></tr>
-                <tr><td><code>choice</code></td><td>Evaluate rules against step data for conditional branching</td></tr>
-                <tr><td><code>pass</code></td><td>Inject data for downstream states to read</td></tr>
-                <tr><td><code>succeed</code></td><td>Terminal state &mdash; marks the work item as complete</td></tr>
-                <tr><td><code>fail</code></td><td>Terminal state &mdash; marks the work item as failed</td></tr>
-            </tbody>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>task</code></td>
+              <td>
+                Execute an action (e.g. <code>ai.code</code>,
+                <code>github.merge</code>)
+              </td>
+            </tr>
+            <tr>
+              <td><code>wait</code></td>
+              <td>
+                Poll for an event with an enforced timeout (e.g.
+                <code>pr.reviewed</code>, <code>ci.complete</code>)
+              </td>
+            </tr>
+            <tr>
+              <td><code>choice</code></td>
+              <td>
+                Evaluate rules against step data for conditional branching
+              </td>
+            </tr>
+            <tr>
+              <td><code>pass</code></td>
+              <td>Inject data for downstream states to read</td>
+            </tr>
+            <tr>
+              <td><code>succeed</code></td>
+              <td>Terminal state &mdash; marks the work item as complete</td>
+            </tr>
+            <tr>
+              <td><code>fail</code></td>
+              <td>Terminal state &mdash; marks the work item as failed</td>
+            </tr>
+          </tbody>
         </table>
 
         <!-- Error handling -->
         <h3 id="error-handling">Error handling</h3>
         <div class="info-grid">
-            <div class="info-card">
-                <h4>retry</h4>
-                <p>Task states support <code>retry</code> with configurable <code>max_attempts</code>, <code>interval</code>, and exponential <code>backoff_rate</code>.</p>
-            </div>
-            <div class="info-card">
-                <h4>catch</h4>
-                <p>Route specific errors to recovery states with <code>catch</code> blocks. Match by error type or message pattern.</p>
-            </div>
-            <div class="info-card">
-                <h4>timeout</h4>
-                <p>Wait states enforce <code>timeout</code> durations at runtime. <code>timeout_next</code> provides a dedicated transition edge.</p>
-            </div>
-            <div class="info-card">
-                <h4>error state</h4>
-                <p>Every task state can define an <code>error</code> transition for unrecoverable failures. Defaults to the <code>failed</code> terminal state.</p>
-            </div>
+          <div class="info-card">
+            <h4>retry</h4>
+            <p>
+              Task states support <code>retry</code> with configurable
+              <code>max_attempts</code>, <code>interval</code>, and exponential
+              <code>backoff_rate</code>.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>catch</h4>
+            <p>
+              Route specific errors to recovery states with
+              <code>catch</code> blocks. Match by error type or message pattern.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>timeout</h4>
+            <p>
+              Wait states enforce <code>timeout</code> durations at runtime.
+              <code>timeout_next</code> provides a dedicated transition edge.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>error state</h4>
+            <p>
+              Every task state can define an <code>error</code> transition for
+              unrecoverable failures. Defaults to the
+              <code>failed</code> terminal state.
+            </p>
+          </div>
         </div>
 
         <!-- Hooks -->
         <h3 id="hooks">Hooks</h3>
-        <p><code>before</code> hooks run before step execution &mdash; if they fail, the step is blocked. <code>after</code> hooks run after completion and are fire-and-forget.</p>
-        <p>Hooks receive environment variables including <code>$ERG_BRANCH</code>, <code>$ERG_PR_URL</code>, <code>$ERG_ISSUE_URL</code>, and more.</p>
+        <p>
+          <code>before</code> hooks run before step execution &mdash; if they
+          fail, the step is blocked. <code>after</code> hooks run after
+          completion and are fire-and-forget.
+        </p>
+        <p>
+          Hooks receive environment variables including
+          <code>$ERG_BRANCH</code>, <code>$ERG_PR_URL</code>,
+          <code>$ERG_ISSUE_URL</code>, and more.
+        </p>
 
         <!-- Example workflows -->
         <h2 id="examples">Example workflows</h2>
-        <p>Ready-made configs for common use cases. Copy any of these into <code>.erg/workflow.yaml</code> in your repo and customize as needed.</p>
+        <p>
+          Ready-made configs for common use cases. Copy any of these into
+          <code>.erg/workflow.yaml</code> in your repo and customize as needed.
+        </p>
 
         <h3 id="example-minimal">Minimal</h3>
-        <p>Simple pipeline: code, open PR, wait for review + CI to pass together, merge. Uses <code>pr.mergeable</code> to combine approval and CI into a single wait state. The best starting point for most projects.</p>
+        <p>
+          Simple pipeline: code, open PR, wait for review + CI to pass together,
+          merge. Uses <code>pr.mergeable</code> to combine approval and CI into
+          a single wait state. The best starting point for most projects.
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/minimal.yaml</span>
-                <a href="https://github.com/zhubert/erg/blob/main/examples/minimal.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
-            </div>
-            <pre># Minimal workflow — code, open PR, wait for approval + CI, merge.
+                <a
+                  href="https://github.com/zhubert/erg/blob/main/examples/minimal.yaml"
+                  style="
+                    font-family: &quot;IBM Plex Mono&quot;, monospace;
+                    font-size: 0.75rem;
+                  "
+                  >view on github</a
+                >
+              </div>
+              <pre>
+# Minimal workflow — code, open PR, wait for approval + CI, merge.
 #
 # Use this for small teams or bots where you want the simplest possible
 # pipeline. Uses pr.mergeable to fire a single event when both review
@@ -1095,12 +1308,14 @@ states:
     type: succeed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> coding
     coding --> open_pr : ai.code
     coding --> failed : error
@@ -1113,25 +1328,43 @@ states:
     timed_out --> failed : error
     merge --> done : github.merge
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <h3 id="example-supervised">Supervised</h3>
-        <p>For complex features spanning multiple files. Claude acts as a supervisor that can spawn child sessions for parallel work. Includes hooks, retry with exponential backoff, <code>catch</code>-based error routing, and a Slack notification after merge.</p>
+        <p>
+          For complex features spanning multiple files. Claude acts as a
+          supervisor that can spawn child sessions for parallel work. Includes
+          hooks, retry with exponential backoff, <code>catch</code>-based error
+          routing, and a Slack notification after merge.
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/supervised.yaml</span>
-                <a href="https://github.com/zhubert/erg/blob/main/examples/supervised.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
-            </div>
-            <pre># Supervised workflow — for complex features spanning multiple files.
+                <a
+                  href="https://github.com/zhubert/erg/blob/main/examples/supervised.yaml"
+                  style="
+                    font-family: &quot;IBM Plex Mono&quot;, monospace;
+                    font-size: 0.75rem;
+                  "
+                  >view on github</a
+                >
+              </div>
+              <pre>
+# Supervised workflow — for complex features spanning multiple files.
 #
 # Claude acts as a supervisor that can spawn child sessions for parallel
 # work across different subsystems. A custom system prompt enforces
@@ -1251,12 +1484,14 @@ states:
     type: succeed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> coding
     coding_before --> coding : before hooks
     coding --> coding_hooks : after hooks
@@ -1276,25 +1511,43 @@ states:
     notify_container_failure --> failed : github.comment_issue
     notify_container_failure --> failed : error
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <h3 id="example-ci-gate">CI gate</h3>
-        <p>CI must pass before a reviewer is assigned. A <code>choice</code> state routes on the CI result: green goes to review, red triggers a Claude fix loop that retries up to three times before giving up.</p>
+        <p>
+          CI must pass before a reviewer is assigned. A
+          <code>choice</code> state routes on the CI result: green goes to
+          review, red triggers a Claude fix loop that retries up to three times
+          before giving up.
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/ci-gate.yaml</span>
-                <a href="https://github.com/zhubert/erg/blob/main/examples/ci-gate.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
-            </div>
-            <pre># CI-gate workflow — CI must pass before any human reviews the code.
+                <a
+                  href="https://github.com/zhubert/erg/blob/main/examples/ci-gate.yaml"
+                  style="
+                    font-family: &quot;IBM Plex Mono&quot;, monospace;
+                    font-size: 0.75rem;
+                  "
+                  >view on github</a
+                >
+              </div>
+              <pre>
+# CI-gate workflow — CI must pass before any human reviews the code.
 #
 # Use this for open-source projects or teams where failing CI wastes
 # reviewers' time. Claude automatically attempts to fix CI failures
@@ -1430,12 +1683,14 @@ states:
     type: succeed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> coding
     coding --> open_pr : ai.code
     coding --> failed : error
@@ -1464,25 +1719,44 @@ states:
     review_overdue --> failed : error
     merge --> done : github.merge
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <h3 id="example-label-tracking">Label tracking</h3>
-        <p>Issues move through GitHub labels as they advance: <code>queued</code> → <code>in-progress</code> → <code>in-review</code>. A <code>pass</code> state injects config flags, and a <code>choice</code> state reads them to conditionally close the source issue after merge.</p>
+        <p>
+          Issues move through GitHub labels as they advance:
+          <code>queued</code> → <code>in-progress</code> →
+          <code>in-review</code>. A <code>pass</code> state injects config
+          flags, and a <code>choice</code> state reads them to conditionally
+          close the source issue after merge.
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/label-tracking.yaml</span>
-                <a href="https://github.com/zhubert/erg/blob/main/examples/label-tracking.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
-            </div>
-            <pre># Label-tracking workflow — use GitHub labels to show workflow progress.
+                <a
+                  href="https://github.com/zhubert/erg/blob/main/examples/label-tracking.yaml"
+                  style="
+                    font-family: &quot;IBM Plex Mono&quot;, monospace;
+                    font-size: 0.75rem;
+                  "
+                  >view on github</a
+                >
+              </div>
+              <pre>
+# Label-tracking workflow — use GitHub labels to show workflow progress.
 #
 # Issues move through labels as they advance: queued → in-progress →
 # in-review, and the source issue is closed automatically after merge.
@@ -1610,12 +1884,14 @@ states:
     error: failed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> configure
     configure --> start_coding : pass
     start_coding --> label_in_progress : github.remove_label
@@ -1641,24 +1917,34 @@ states:
     label_failed --> failed : github.add_label
     label_failed --> failed : error
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <h3 id="example-asana">Asana</h3>
-        <p>For teams that track work in Asana. Polls an Asana project for tasks with a specific tag, codes in a container, and opens a PR. The <code>label</code> filter matches Asana tag names (case-insensitive).</p>
+        <p>
+          For teams that track work in Asana. Polls an Asana project for tasks
+          with a specific tag, codes in a container, and opens a PR. The
+          <code>label</code> filter matches Asana tag names (case-insensitive).
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/asana.yaml</span>
-            </div>
-            <pre># Asana integration — polls Asana tasks and processes them automatically.
+              </div>
+              <pre>
+# Asana integration — polls Asana tasks and processes them automatically.
 #
 # Use this for teams that track work in Asana instead of GitHub Issues.
 # Set your Asana project GID in source.filter.project. The label filter
@@ -1746,12 +2032,14 @@ states:
     type: succeed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> coding
     coding --> open_pr : ai.code
     coding --> failed : error
@@ -1766,25 +2054,43 @@ states:
     review_overdue --> failed : error
     merge --> done : github.merge
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <h3 id="example-linear">Linear</h3>
-        <p>For teams that track work in Linear instead of GitHub Issues. Polls a Linear team for issues with a specific label, runs an inline system prompt, auto-formats code before opening the PR, and posts a Slack notification after merge.</p>
+        <p>
+          For teams that track work in Linear instead of GitHub Issues. Polls a
+          Linear team for issues with a specific label, runs an inline system
+          prompt, auto-formats code before opening the PR, and posts a Slack
+          notification after merge.
+        </p>
         <div class="example-tabs">
-            <div class="tab-bar">
-                <button class="tab-btn active" onclick="switchTab(this,'yaml')">yaml</button>
-                <button class="tab-btn" onclick="switchTab(this,'diagram')">diagram</button>
-            </div>
-            <div data-panel="yaml">
-        <div class="code-block">
-            <div class="code-header">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
                 <span class="code-filename">examples/linear.yaml</span>
-                <a href="https://github.com/zhubert/erg/blob/main/examples/linear.yaml" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;">view on github</a>
-            </div>
-            <pre># Linear integration — polls Linear issues and processes them automatically.
+                <a
+                  href="https://github.com/zhubert/erg/blob/main/examples/linear.yaml"
+                  style="
+                    font-family: &quot;IBM Plex Mono&quot;, monospace;
+                    font-size: 0.75rem;
+                  "
+                  >view on github</a
+                >
+              </div>
+              <pre>
+# Linear integration — polls Linear issues and processes them automatically.
 #
 # Use this for teams that track work in Linear instead of GitHub Issues.
 # Set your Linear team ID in source.filter.team. The label filter narrows
@@ -1899,12 +2205,14 @@ states:
     type: succeed
 
   failed:
-    type: fail</pre>
-        </div>
+    type: fail</pre
+              >
             </div>
-            <div data-panel="diagram" style="display:none">
-                <div class="diagram-panel">
-                    <pre class="mermaid">stateDiagram-v2
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
     [*] --> coding
     coding --> format : ai.code
     coding --> failed : error
@@ -1922,127 +2230,199 @@ states:
     merge --> done : github.merge
     merge --> merge_hooks : after hooks
     done --> [*]
-    failed --> [*]</pre>
-                </div>
+    failed --> [*]</pre
+              >
             </div>
+          </div>
         </div>
 
         <!-- CLI reference -->
         <h2 id="cli">CLI commands</h2>
         <table class="cli-table">
-            <thead><tr><th>Command</th><th>Description</th></tr></thead>
-            <tbody>
-                <tr><td><code>erg --repo owner/repo</code></td><td>Run the headless daemon for a repository</td></tr>
-                <tr><td><code>erg --repo owner/repo --once</code></td><td>Process one tick and exit</td></tr>
-                <tr><td><code>erg --debug</code></td><td>Enable debug logging (on by default)</td></tr>
-                <tr><td><code>erg -q</code></td><td>Quiet mode (info level only)</td></tr>
-                <tr><td><code>erg clean</code></td><td>Clear daemon state and lock files</td></tr>
-                <tr><td><code>erg clean -y</code></td><td>Clear without confirmation prompt</td></tr>
-                <tr><td><code>erg workflow init</code></td><td>Scaffold a new workflow config</td></tr>
-                <tr><td><code>erg workflow validate</code></td><td>Check workflow config for errors</td></tr>
-                <tr><td><code>erg workflow visualize</code></td><td>Emit a Mermaid diagram of the workflow</td></tr>
-                <tr><td><code>erg status</code></td><td>Show daemon status with workflow map</td></tr>
-            </tbody>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>erg --repo owner/repo</code></td>
+              <td>Run the headless daemon for a repository</td>
+            </tr>
+            <tr>
+              <td><code>erg --repo owner/repo --once</code></td>
+              <td>Process one tick and exit</td>
+            </tr>
+            <tr>
+              <td><code>erg --debug</code></td>
+              <td>Enable debug logging (on by default)</td>
+            </tr>
+            <tr>
+              <td><code>erg -q</code></td>
+              <td>Quiet mode (info level only)</td>
+            </tr>
+            <tr>
+              <td><code>erg clean</code></td>
+              <td>Clear daemon state and lock files</td>
+            </tr>
+            <tr>
+              <td><code>erg clean -y</code></td>
+              <td>Clear without confirmation prompt</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow init</code></td>
+              <td>Scaffold a new workflow config</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow validate</code></td>
+              <td>Check workflow config for errors</td>
+            </tr>
+            <tr>
+              <td><code>erg workflow visualize</code></td>
+              <td>Emit a Mermaid diagram of the workflow</td>
+            </tr>
+            <tr>
+              <td><code>erg status</code></td>
+              <td>Show daemon status with workflow map</td>
+            </tr>
+          </tbody>
         </table>
 
         <!-- Installation -->
         <h2 id="install">Installation</h2>
         <h3>Homebrew</h3>
         <div class="install-block">
-            <span class="prompt-char">$</span>
-            <code>brew install zhubert/tap/erg</code>
-            <button class="copy-btn" onclick="copyCmd(this,'brew install zhubert/tap/erg')">copy</button>
+          <span class="prompt-char">$</span>
+          <code>brew install zhubert/tap/erg</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
+          >
+            copy
+          </button>
         </div>
 
         <h3>Build from source</h3>
         <div class="install-block">
-            <span class="prompt-char">$</span>
-            <code>go build -o erg .</code>
-            <button class="copy-btn" onclick="copyCmd(this,'go build -o erg .')">copy</button>
+          <span class="prompt-char">$</span>
+          <code>go build -o erg .</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
+            copy
+          </button>
         </div>
 
         <h3>Quick start</h3>
         <p>After installation, start the daemon pointed at your repo:</p>
         <div class="install-block">
-            <span class="prompt-char">$</span>
-            <code>erg --repo owner/repo</code>
-            <button class="copy-btn" onclick="copyCmd(this,'erg --repo owner/repo')">copy</button>
+          <span class="prompt-char">$</span>
+          <code>erg --repo owner/repo</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'erg --repo owner/repo')"
+          >
+            copy
+          </button>
         </div>
-        <p>Label a GitHub issue with <code>queued</code> and the agent will pick it up on the next poll cycle.</p>
+        <p>
+          Label a GitHub issue with <code>queued</code> and the agent will pick
+          it up on the next poll cycle.
+        </p>
 
-        <div style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--text-dim);">
-            made by <a href="https://www.zhubert.com" style="color: var(--text-muted);">zack</a> &middot; mit license
+        <div
+          style="
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: var(--text-dim);
+          "
+        >
+          made by
+          <a href="https://www.zhubert.com" style="color: var(--accent)"
+            >zack</a
+          >
+          &middot; mit license
         </div>
-    </main>
-</div>
+      </main>
+    </div>
 
-<script>
-mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    <script>
+      mermaid.initialize({ startOnLoad: false, theme: "dark" });
 
-function switchTab(btn, tab) {
-    var tabs = btn.closest('.example-tabs');
-    tabs.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    tabs.querySelectorAll('[data-panel]').forEach(function(p) { p.style.display = 'none'; });
-    var panel = tabs.querySelector('[data-panel="' + tab + '"]');
-    if (panel) panel.style.display = '';
-    if (tab === 'diagram' && !tabs.dataset.rendered) {
-        tabs.dataset.rendered = '1';
-        var el = tabs.querySelector('.mermaid');
-        if (el) mermaid.run({ nodes: [el] });
-    }
-}
+      function switchTab(btn, tab) {
+        var tabs = btn.closest(".example-tabs");
+        tabs.querySelectorAll(".tab-btn").forEach(function (b) {
+          b.classList.remove("active");
+        });
+        btn.classList.add("active");
+        tabs.querySelectorAll("[data-panel]").forEach(function (p) {
+          p.style.display = "none";
+        });
+        var panel = tabs.querySelector('[data-panel="' + tab + '"]');
+        if (panel) panel.style.display = "";
+        if (tab === "diagram" && !tabs.dataset.rendered) {
+          tabs.dataset.rendered = "1";
+          var el = tabs.querySelector(".mermaid");
+          if (el) mermaid.run({ nodes: [el] });
+        }
+      }
 
-function copyCmd(btn, cmd) {
-    navigator.clipboard.writeText(cmd).then(function() {
-        btn.textContent = 'copied';
-        btn.classList.add('copied');
-        setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
-    });
-}
+      function copyCmd(btn, cmd) {
+        navigator.clipboard.writeText(cmd).then(function () {
+          btn.textContent = "copied";
+          btn.classList.add("copied");
+          setTimeout(function () {
+            btn.textContent = "copy";
+            btn.classList.remove("copied");
+          }, 2000);
+        });
+      }
 
-function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebarOverlay').classList.toggle('open');
-}
+      function toggleSidebar() {
+        document.getElementById("sidebar").classList.toggle("open");
+        document.getElementById("sidebarOverlay").classList.toggle("open");
+      }
 
-// Scroll spy for sidebar
-(function() {
-    var links = document.querySelectorAll('.sidebar-link');
-    var sections = [];
-    links.forEach(function(link) {
-        var id = link.getAttribute('href');
-        if (id && id.startsWith('#')) {
+      // Scroll spy for sidebar
+      (function () {
+        var links = document.querySelectorAll(".sidebar-link");
+        var sections = [];
+        links.forEach(function (link) {
+          var id = link.getAttribute("href");
+          if (id && id.startsWith("#")) {
             var el = document.querySelector(id);
             if (el) sections.push({ el: el, link: link });
-        }
-    });
+          }
+        });
 
-    function update() {
-        var scrollY = window.scrollY + 80;
-        var current = sections[0];
-        for (var i = 0; i < sections.length; i++) {
+        function update() {
+          var scrollY = window.scrollY + 80;
+          var current = sections[0];
+          for (var i = 0; i < sections.length; i++) {
             if (sections[i].el.offsetTop <= scrollY) {
-                current = sections[i];
+              current = sections[i];
             }
+          }
+          links.forEach(function (l) {
+            l.classList.remove("active");
+          });
+          if (current) current.link.classList.add("active");
         }
-        links.forEach(function(l) { l.classList.remove('active'); });
-        if (current) current.link.classList.add('active');
-    }
 
-    window.addEventListener('scroll', update, { passive: true });
-    update();
-})();
+        window.addEventListener("scroll", update, { passive: true });
+        update();
+      })();
 
-// Close sidebar on link click (mobile)
-document.querySelectorAll('.sidebar-link').forEach(function(link) {
-    link.addEventListener('click', function() {
-        if (window.innerWidth <= 860) {
-            document.getElementById('sidebar').classList.remove('open');
-            document.getElementById('sidebarOverlay').classList.remove('open');
-        }
-    });
-});
-</script>
-</body>
+      // Close sidebar on link click (mobile)
+      document.querySelectorAll(".sidebar-link").forEach(function (link) {
+        link.addEventListener("click", function () {
+          if (window.innerWidth <= 860) {
+            document.getElementById("sidebar").classList.remove("open");
+            document.getElementById("sidebarOverlay").classList.remove("open");
+          }
+        });
+      });
+    </script>
+  </body>
 </html>
