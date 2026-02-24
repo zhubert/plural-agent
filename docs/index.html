@@ -1516,6 +1516,26 @@
                     from the repo. Overrides the default coding prompt.
                   </td>
                 </tr>
+                <tr>
+                  <td>format_command</td>
+                  <td>string</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Shell command to run as a formatter after coding completes
+                    (e.g. <code>go fmt ./...</code>). Claude is also instructed
+                    to run it before each commit. Omit to skip auto-formatting.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the daemon commits the
+                    post-coding format pass. Only used when
+                    <code>format_command</code> is set.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
