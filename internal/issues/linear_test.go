@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/zhubert/erg/internal/config"
@@ -337,6 +338,105 @@ func TestLinearProvider_FetchTeams_APIError(t *testing.T) {
 	_, err := p.FetchTeams(ctx)
 	if err == nil {
 		t.Error("expected error from API error response")
+	}
+}
+
+func TestLinearProvider_FetchIssues_LabelFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+
+		// Verify the GraphQL query contains a labels filter
+		if !strings.Contains(bodyStr, "labels") {
+			t.Error("expected GraphQL query to contain 'labels' filter when Label is set")
+		}
+
+		// Verify the variables include the label
+		var gqlReq linearGraphQLRequest
+		json.Unmarshal(body, &gqlReq)
+		if gqlReq.Variables["label"] != "queued" {
+			t.Errorf("expected variable 'label' to be 'queued', got '%v'", gqlReq.Variables["label"])
+		}
+		if gqlReq.Variables["teamId"] != "team-123" {
+			t.Errorf("expected variable 'teamId' to be 'team-123', got '%v'", gqlReq.Variables["teamId"])
+		}
+
+		response := linearTeamIssuesResponse{}
+		response.Data.Team.Issues.Nodes = []linearIssue{
+			{ID: "uuid-1", Identifier: "ENG-100", Title: "Queued task", Description: "A queued task", URL: "https://linear.app/team/issue/ENG-100"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test123")
+
+	cfg := &config.Config{}
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	ctx := context.Background()
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123", Label: "queued"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if issues[0].ID != "ENG-100" {
+		t.Errorf("expected ID 'ENG-100', got %q", issues[0].ID)
+	}
+}
+
+func TestLinearProvider_FetchIssues_NoLabelOmitsFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+
+		// Verify the GraphQL query does NOT contain a labels filter
+		if strings.Contains(bodyStr, "labels") {
+			t.Error("expected GraphQL query to NOT contain 'labels' filter when Label is empty")
+		}
+
+		// Verify no label variable is sent
+		var gqlReq linearGraphQLRequest
+		json.Unmarshal(body, &gqlReq)
+		if _, ok := gqlReq.Variables["label"]; ok {
+			t.Error("expected no 'label' variable when Label is empty")
+		}
+
+		response := linearTeamIssuesResponse{}
+		response.Data.Team.Issues.Nodes = []linearIssue{
+			{ID: "uuid-1", Identifier: "ENG-200", Title: "Task one", Description: "First task", URL: "https://linear.app/team/issue/ENG-200"},
+			{ID: "uuid-2", Identifier: "ENG-201", Title: "Task two", Description: "Second task", URL: "https://linear.app/team/issue/ENG-201"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test123")
+
+	cfg := &config.Config{}
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	ctx := context.Background()
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues, got %d", len(issues))
+	}
+	if issues[0].ID != "ENG-200" {
+		t.Errorf("expected ID 'ENG-200', got %q", issues[0].ID)
+	}
+	if issues[1].ID != "ENG-201" {
+		t.Errorf("expected ID 'ENG-201', got %q", issues[1].ID)
 	}
 }
 

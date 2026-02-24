@@ -117,7 +117,31 @@ func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filte
 		return nil, fmt.Errorf("Linear team ID not configured for this repository")
 	}
 
-	query := `query($teamId: String!) {
+	var query string
+	variables := map[string]any{
+		"teamId": projectID,
+	}
+
+	if filter.Label != "" {
+		query = `query($teamId: String!, $label: String!) {
+  team(id: $teamId) {
+    issues(filter: {
+      state: { type: { nin: ["completed", "canceled"] } }
+      labels: { name: { eqIgnoreCase: $label } }
+    }) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        url
+      }
+    }
+  }
+}`
+		variables["label"] = filter.Label
+	} else {
+		query = `query($teamId: String!) {
   team(id: $teamId) {
     issues(filter: { state: { type: { nin: ["completed", "canceled"] } } }) {
       nodes {
@@ -130,12 +154,11 @@ func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filte
     }
   }
 }`
+	}
 
 	gqlReq := linearGraphQLRequest{
-		Query: query,
-		Variables: map[string]any{
-			"teamId": projectID,
-		},
+		Query:     query,
+		Variables: variables,
 	}
 
 	body, err := json.Marshal(gqlReq)
