@@ -29,8 +29,8 @@ func (p *GitHubProvider) Source() Source {
 }
 
 // FetchIssues retrieves open GitHub issues for the given repository.
-// The projectID parameter is ignored for GitHub (uses gh CLI with repoPath).
-func (p *GitHubProvider) FetchIssues(ctx context.Context, repoPath, projectID string) ([]Issue, error) {
+// The filter parameter is unused by GitHub (GitHub filtering happens in the daemon via gh CLI).
+func (p *GitHubProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
 	ghIssues, err := p.gitService.FetchGitHubIssues(ctx, repoPath)
 	if err != nil {
 		return nil, err

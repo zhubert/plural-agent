@@ -111,7 +111,7 @@ func TestLinearProvider_FetchIssues_NoAPIKey(t *testing.T) {
 	p := NewLinearProvider(cfg)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "team-123")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123"})
 	if err == nil {
 		t.Error("expected error without API key")
 	}
@@ -127,7 +127,7 @@ func TestLinearProvider_FetchIssues_NoTeamID(t *testing.T) {
 	p := NewLinearProvider(cfg)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{})
 	if err == nil {
 		t.Error("expected error without team ID")
 	}
@@ -182,7 +182,7 @@ func TestLinearProvider_FetchIssues_MockServer(t *testing.T) {
 	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
 
 	ctx := context.Background()
-	issues, err := p.FetchIssues(ctx, "/test/repo", "team-123")
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestLinearProvider_FetchIssues_APIError(t *testing.T) {
 	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "team-123")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123"})
 	if err == nil {
 		t.Error("expected error from API error response")
 	}
@@ -244,7 +244,7 @@ func TestLinearProvider_FetchIssues_Forbidden(t *testing.T) {
 	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
 
 	ctx := context.Background()
-	_, err := p.FetchIssues(ctx, "/test/repo", "team-123")
+	_, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Team: "team-123"})
 	if err == nil {
 		t.Error("expected error from 403 response")
 	}

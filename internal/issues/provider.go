@@ -24,6 +24,13 @@ type Issue struct {
 	Source Source
 }
 
+// FilterConfig holds provider-specific filter parameters for fetching issues.
+type FilterConfig struct {
+	Label   string // Tag/label name to filter by (empty = no filtering)
+	Project string // Asana: project GID
+	Team    string // Linear: team ID
+}
+
 // Provider defines the interface for fetching issues from different sources.
 type Provider interface {
 	// Name returns the human-readable name of this provider (e.g., "GitHub Issues", "Asana Tasks")
@@ -33,11 +40,11 @@ type Provider interface {
 	Source() Source
 
 	// FetchIssues retrieves open issues/tasks for the given repository.
-	// The projectID parameter is provider-specific:
-	//   - GitHub: ignored (uses gh CLI with repoPath as working directory)
-	//   - Asana: the Asana project GID
-	//   - Linear: the Linear team ID
-	FetchIssues(ctx context.Context, repoPath, projectID string) ([]Issue, error)
+	// The filter parameter holds provider-specific filtering options:
+	//   - GitHub: filter is unused (GitHub filtering happens in the daemon via gh CLI)
+	//   - Asana: filter.Project is the Asana project GID
+	//   - Linear: filter.Team is the Linear team ID
+	FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error)
 
 	// IsConfigured returns true if this provider is configured and usable for the given repo.
 	// For GitHub: always true (gh CLI is a prerequisite)
