@@ -25,7 +25,14 @@ Or [build from source](#build-from-source).
 erg --repo owner/repo
 ```
 
-Label a GitHub issue `queued` and erg picks it up automatically. For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
+This forks into the background, prints the PID and log path, and exits. Label a GitHub issue `queued` and erg picks it up automatically.
+
+```bash
+erg -f --repo owner/repo   # Stay in foreground with live status display
+erg status                  # One-shot daemon status summary
+```
+
+For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
 
 ## How It Works
 

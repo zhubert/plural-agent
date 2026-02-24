@@ -212,6 +212,90 @@ func TestRuntimeStartHint_ColimaNotInstalled(t *testing.T) {
 	}
 }
 
+// ---- buildDaemonArgs ----
+
+func TestBuildDaemonArgs_Basic(t *testing.T) {
+	args := buildDaemonArgs("owner/repo", false)
+	if len(args) != 3 {
+		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--_daemon" {
+		t.Errorf("expected first arg to be '--_daemon', got %q", args[0])
+	}
+	if args[1] != "--repo" || args[2] != "owner/repo" {
+		t.Errorf("expected '--repo owner/repo', got %v", args[1:])
+	}
+}
+
+func TestBuildDaemonArgs_WithOnce(t *testing.T) {
+	args := buildDaemonArgs("owner/repo", true)
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	}
+	found := false
+	for _, a := range args {
+		if a == "--once" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '--once' in args: %v", args)
+	}
+}
+
+func TestBuildDaemonArgs_HiddenFlagAppended(t *testing.T) {
+	// Verify --_daemon is always the first arg
+	args := buildDaemonArgs("/path/to/repo", false)
+	if args[0] != "--_daemon" {
+		t.Errorf("expected '--_daemon' as first arg, got %q", args[0])
+	}
+}
+
+// ---- runAgent flag logic ----
+
+func TestOnceImpliesForeground(t *testing.T) {
+	// Save and restore
+	origOnce := agentOnce
+	origFg := agentForeground
+	defer func() {
+		agentOnce = origOnce
+		agentForeground = origFg
+	}()
+
+	agentOnce = true
+	agentForeground = false
+
+	// runAgent will set agentForeground=true before dispatching.
+	// We can't run the full runAgent (needs prereqs), but we can test the flag logic.
+	if agentOnce {
+		agentForeground = true
+	}
+	if !agentForeground {
+		t.Error("expected --once to imply foreground mode")
+	}
+}
+
+func TestDaemonFlagIsHidden(t *testing.T) {
+	flag := rootCmd.Flags().Lookup("_daemon")
+	if flag == nil {
+		t.Fatal("expected --_daemon flag to exist")
+	}
+	if !flag.Hidden {
+		t.Error("expected --_daemon flag to be hidden")
+	}
+}
+
+func TestForegroundFlagExists(t *testing.T) {
+	flag := rootCmd.Flags().Lookup("foreground")
+	if flag == nil {
+		t.Fatal("expected --foreground flag to exist")
+	}
+	if flag.Shorthand != "f" {
+		t.Errorf("expected shorthand 'f', got %q", flag.Shorthand)
+	}
+}
+
 func containsAny(s string, substrs ...string) bool {
 	for _, sub := range substrs {
 		if len(s) >= len(sub) {

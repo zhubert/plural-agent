@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -485,12 +488,8 @@ func TestRunStatus_NoStateFile(t *testing.T) {
 
 	// Use a repo path that has no state file
 	statusRepo = "/nonexistent/test/repo"
-	statusMap = false
-	statusOnce = true // disable auto-refresh for test
 	defer func() {
 		statusRepo = ""
-		statusMap = false
-		statusOnce = false
 	}()
 
 	cmd := statusCmd
@@ -739,7 +738,7 @@ func TestPrintMatrixView_EmptyCurrentStepUsesStart(t *testing.T) {
 		t.Fatalf("could not find coding row in output: %q", out)
 	}
 	// Cell should be non-empty (either "idle" or some phase info)
-	// The coding row should have content for this item
+	// The coding row should have content beyond state name
 	stateWidth := len("check_ci_result") // longest state in default workflow
 	if len(codingLine) <= stateWidth {
 		t.Errorf("expected coding row to have content beyond state name: %q", codingLine)
@@ -789,5 +788,102 @@ func TestPrintMatrixRow_ItemNotAtState(t *testing.T) {
 	}
 	if strings.Contains(out, "async_pending") {
 		t.Errorf("expected empty cell when item is NOT at this state: %q", out)
+	}
+}
+
+// ---- displaySummary ----
+
+func TestDisplaySummary_NotRunning(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := displaySummary("/nonexistent/repo/for/test")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	out := buf.String()
+
+	if !strings.Contains(out, "Daemon: not running") {
+		t.Errorf("expected 'Daemon: not running' in output, got: %q", out)
+	}
+}
+
+func TestDisplaySummary_Running(t *testing.T) {
+	_, stateDir := setupAgentCleanTest(t)
+
+	// Create a fake lock file with our PID (which is definitely running)
+	repo := "test/repo"
+	lockPath := daemonstate.LockFilePath(repo)
+	os.MkdirAll(filepath.Dir(lockPath), 0o755)
+	os.WriteFile(lockPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+	defer os.Remove(lockPath)
+
+	// Create a state file
+	stateFilePath := daemonstate.StateFilePath(repo)
+	os.MkdirAll(filepath.Dir(stateFilePath), 0o755)
+	os.WriteFile(stateFilePath, []byte(`{"version":1,"repo":"test/repo","work_items":{}}`), 0o644)
+	defer os.Remove(stateFilePath)
+	_ = stateDir
+
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := displaySummary(repo)
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	out := buf.String()
+
+	if !strings.Contains(out, "Daemon: running") {
+		t.Errorf("expected 'Daemon: running' in output, got: %q", out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("PID %d", os.Getpid())) {
+		t.Errorf("expected PID in output, got: %q", out)
+	}
+	if !strings.Contains(out, "Repo:") {
+		t.Errorf("expected 'Repo:' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "Logs:") {
+		t.Errorf("expected 'Logs:' in output, got: %q", out)
+	}
+}
+
+// ---- formatUptime ----
+
+func TestFormatUptime(t *testing.T) {
+	tests := []struct {
+		dur  time.Duration
+		want string
+	}{
+		{30 * time.Second, "30s"},
+		{5 * time.Minute, "5m"},
+		{90 * time.Minute, "1h 30m"},
+		{2*time.Hour + 15*time.Minute, "2h 15m"},
+	}
+	for _, tt := range tests {
+		got := formatUptime(tt.dur)
+		if got != tt.want {
+			t.Errorf("formatUptime(%v) = %q, want %q", tt.dur, got, tt.want)
+		}
 	}
 }

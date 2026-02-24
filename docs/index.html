@@ -1164,6 +1164,12 @@
           </button>
         </div>
         <p>
+          This forks into the background, prints the daemon PID and log path,
+          and returns your terminal. Use <code>-f</code> to stay in the
+          foreground with a live status display, or <code>erg status</code> for
+          a one-shot summary.
+        </p>
+        <p>
           Label a GitHub issue with <code>queued</code> and the agent will pick
           it up on the next poll cycle.
         </p>
@@ -2408,11 +2414,19 @@ stateDiagram-v2
           <tbody>
             <tr>
               <td><code>erg --repo owner/repo</code></td>
-              <td>Run the headless daemon for a repository</td>
+              <td>Fork/detach daemon for a repository (prints PID and exits)</td>
+            </tr>
+            <tr>
+              <td><code>erg -f --repo owner/repo</code></td>
+              <td>Run in foreground with live status display</td>
             </tr>
             <tr>
               <td><code>erg --repo owner/repo --once</code></td>
-              <td>Process one tick and exit</td>
+              <td>Process one tick and exit (implies <code>-f</code>)</td>
+            </tr>
+            <tr>
+              <td><code>erg status</code></td>
+              <td>One-shot daemon status summary (PID, uptime, counts)</td>
             </tr>
             <tr>
               <td><code>erg --debug</code></td>
@@ -2441,10 +2455,6 @@ stateDiagram-v2
             <tr>
               <td><code>erg workflow visualize</code></td>
               <td>Emit a Mermaid diagram of the workflow</td>
-            </tr>
-            <tr>
-              <td><code>erg status</code></td>
-              <td>Show daemon status with workflow map</td>
             </tr>
           </tbody>
         </table>

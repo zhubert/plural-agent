@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -19,35 +17,23 @@ import (
 )
 
 var (
-	statusRepo     string
-	statusMap      bool
-	statusInterval int
-	statusOnce     bool
+	statusRepo string
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show daemon status and active work items",
-	Long: `Reads the persisted daemon state file and displays where work items are
-in the active workflow. Auto-refreshes every 5 seconds by default.
-
-Use --map to see items positioned on the workflow graph.
-Use --once to display once and exit.
+	Short: "Show daemon status summary",
+	Long: `Shows a one-shot summary of the daemon status including PID, uptime,
+and work item counts.
 
 Examples:
-  erg status                          # Auto-refresh every 5s (default)
-  erg status --once                   # Show once and exit
-  erg status --interval 10            # Refresh every 10 seconds
-  erg status --repo owner/repo        # Check specific repo
-  erg status --repo owner/repo --map  # Workflow map view`,
+  erg status                     # Show status for current repo
+  erg status --repo owner/repo   # Check specific repo`,
 	RunE: runStatus,
 }
 
 func init() {
 	statusCmd.Flags().StringVar(&statusRepo, "repo", "", "Repo to check status for (owner/repo or filesystem path)")
-	statusCmd.Flags().BoolVar(&statusMap, "map", false, "Show items positioned on the workflow graph")
-	statusCmd.Flags().IntVar(&statusInterval, "interval", 5, "Refresh interval in seconds")
-	statusCmd.Flags().BoolVar(&statusOnce, "once", false, "Show status once and exit (disables auto-refresh)")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -62,30 +48,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if statusOnce || statusInterval <= 0 {
-		return displayStatus(repo)
-	}
-
-	// Watch mode: auto-refresh on interval
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	ticker := time.NewTicker(time.Duration(statusInterval) * time.Second)
-	defer ticker.Stop()
-
-	// Initial display
-	clearScreen()
-	_ = displayStatus(repo) // ignore errors in watch mode
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			clearScreen()
-			_ = displayStatus(repo)
-		}
-	}
+	return displaySummary(repo)
 }
 
 // clearScreen clears the terminal using ANSI escape codes.
@@ -93,8 +56,9 @@ func clearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
-// displayStatus loads and renders the daemon status once.
-func displayStatus(repo string) error {
+// displayDashboard loads and renders the full dashboard view once.
+// Used by foreground mode for auto-refreshing display.
+func displayDashboard(repo string) error {
 	// Check if state file exists before loading
 	stateFilePath := daemonstate.StateFilePath(repo)
 	if _, err := os.Stat(stateFilePath); os.IsNotExist(err) {
@@ -111,7 +75,7 @@ func displayStatus(repo string) error {
 	// Get daemon PID and running status from lock file
 	pid, running := daemonstate.ReadLockStatus(repo)
 
-	// Load workflow config for max_concurrent and map view (ignore error, use defaults)
+	// Load workflow config for max_concurrent (ignore error, use defaults)
 	wfCfg, _ := workflow.LoadAndMerge(repo)
 	maxConcurrent := 0
 	if wfCfg != nil && wfCfg.Settings != nil {
@@ -140,15 +104,6 @@ func displayStatus(repo string) error {
 	w := os.Stdout
 	if len(items) == 0 {
 		fmt.Fprintln(w, "No active work items.")
-	} else if statusMap {
-		// For map view, only show non-terminal items on the graph
-		var activeItems []*daemonstate.WorkItem
-		for _, item := range items {
-			if !item.IsTerminal() {
-				activeItems = append(activeItems, item)
-			}
-		}
-		printMapView(w, activeItems, wfCfg)
 	} else {
 		// Default: matrix view (state rows × job columns)
 		printMatrixView(w, items, wfCfg)
@@ -156,9 +111,7 @@ func displayStatus(repo string) error {
 
 	fmt.Fprintln(w)
 	printFooter(w, state.ActiveSlotCount(), maxConcurrent, queuedCount, pid, running)
-	if !statusOnce && statusInterval > 0 {
-		fmt.Fprintf(w, "  Updated: %s  (every %ds)\n", time.Now().Format("15:04:05"), statusInterval)
-	}
+	fmt.Fprintf(w, "  Updated: %s  (every 5s)\n", time.Now().Format("15:04:05"))
 	return nil
 }
 

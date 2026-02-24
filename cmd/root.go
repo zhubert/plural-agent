@@ -24,6 +24,9 @@ var rootCmd = &cobra.Command{
 	Long: `Persistent orchestrator daemon that manages the full lifecycle of work items:
 picking up issues, coding, PR creation, review feedback cycles, and final merge.
 
+By default, erg forks into the background and detaches from the terminal.
+Use -f/--foreground to stay attached with a live status display.
+
 The daemon is stoppable and restartable without losing track of in-flight work.
 State is persisted to ~/.erg/daemon-state.json.
 
@@ -36,10 +39,12 @@ as max_turns, max_duration, merge_method, and auto_merge can all be specified th
 All sessions are containerized (container = sandbox).
 
 Examples:
-  erg                          # Use current git repo as default
-  erg --repo owner/repo        # Run daemon (long-running)
-  erg --repo owner/repo --once # Process one tick and exit
-  erg --repo /path/to/repo     # Use filesystem path instead`,
+  erg                              # Fork/detach daemon for current repo
+  erg --repo owner/repo            # Fork/detach daemon for specific repo
+  erg -f --repo owner/repo         # Foreground with live status display
+  erg --repo owner/repo --once     # Run one tick (foreground), then exit
+  erg status                       # Show daemon status summary
+  erg --repo /path/to/repo         # Use filesystem path instead`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

@@ -24,8 +24,10 @@ go test -p=1 -count=1 ./...     # Test (use -p=1 in containers to avoid Go toolc
 ./erg --debug           # Enable debug logging (on by default)
 ./erg -q                # Quiet mode (info level only)
 
-./erg --repo owner/repo         # Run headless daemon
-./erg --repo owner/repo --once  # Process one tick and exit
+./erg --repo owner/repo         # Fork/detach daemon (prints PID, exits)
+./erg -f --repo owner/repo     # Foreground with live status display
+./erg --repo owner/repo --once  # Process one tick and exit (implies -f)
+./erg status                    # One-shot daemon status summary
 ./erg clean                     # Clear daemon state and lock files
 ./erg clean -y                  # Clear without confirmation prompt
 ```
