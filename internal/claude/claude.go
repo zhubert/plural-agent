@@ -207,6 +207,9 @@ type Runner struct {
 
 	// Container ready callback: invoked when containerized session receives init message
 	onContainerReady func()
+
+	// Redactor scrubs known secret values from transcripts and stream logs
+	redactor *Redactor
 }
 
 // New creates a new Claude runner for a session
@@ -245,6 +248,7 @@ func New(sessionID, workingDir, repoPath string, sessionStarted bool, initialMes
 		streaming:      NewStreamingState(),
 		tokens:         &TokenTracking{},
 		responseChan:   NewResponseChannelState(),
+		redactor:       NewRedactor(),
 	}
 
 	// ProcessManager will be created lazily when first needed (after MCP config is ready)
@@ -835,17 +839,19 @@ func (r *Runner) handleProcessLine(line string) {
 	logFile := r.streamLogFile
 	r.mu.RUnlock()
 
-	// Write raw message to dedicated stream log file (pretty-printed JSON)
+	// Write raw message to dedicated stream log file (pretty-printed JSON).
+	// Redact known secrets before writing so they never appear in log files.
 	if logFile != nil {
+		safeLine := r.redactor.Redact(line)
 		var prettyJSON map[string]any
-		if err := json.Unmarshal([]byte(line), &prettyJSON); err == nil {
+		if err := json.Unmarshal([]byte(safeLine), &prettyJSON); err == nil {
 			if formatted, err := json.MarshalIndent(prettyJSON, "", "  "); err == nil {
 				fmt.Fprintf(logFile, "%s\n", formatted)
 			} else {
-				fmt.Fprintf(logFile, "%s\n", line)
+				fmt.Fprintf(logFile, "%s\n", safeLine)
 			}
 		} else {
-			fmt.Fprintf(logFile, "%s\n", line)
+			fmt.Fprintf(logFile, "%s\n", safeLine)
 		}
 	}
 
@@ -1094,7 +1100,7 @@ func (r *Runner) handleProcessLine(line string) {
 				}
 			}
 
-			r.messages = append(r.messages, Message{Role: "assistant", Content: r.streaming.Response.String()})
+			r.messages = append(r.messages, Message{Role: "assistant", Content: r.redactor.Redact(r.streaming.Response.String())})
 
 			// Emit stream stats chunk before Done if we have usage data
 			// Prefer modelUsage (which includes sub-agent tokens) over the streaming accumulator
@@ -1537,7 +1543,7 @@ func (r *Runner) SendContent(cmdCtx context.Context, content []ContentBlock) <-c
 
 		// Add user message to history
 		r.mu.Lock()
-		r.messages = append(r.messages, Message{Role: "user", Content: displayContent})
+		r.messages = append(r.messages, Message{Role: "user", Content: r.redactor.Redact(displayContent)})
 		r.mu.Unlock()
 
 		// Ensure MCP server is running (persistent across Send calls).
@@ -1676,7 +1682,7 @@ func (r *Runner) GetMessagesWithStreaming() []Message {
 func (r *Runner) AddAssistantMessage(content string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.messages = append(r.messages, Message{Role: "assistant", Content: content})
+	r.messages = append(r.messages, Message{Role: "assistant", Content: r.redactor.Redact(content)})
 }
 
 // Stop cleanly stops the runner and releases resources.
