@@ -18,6 +18,7 @@ import (
 
 var (
 	statusRepo string
+	statusTail bool
 )
 
 var statusCmd = &cobra.Command{
@@ -28,12 +29,14 @@ and work item counts.
 
 Examples:
   erg status                     # Show status for current repo
-  erg status --repo owner/repo   # Check specific repo`,
+  erg status --repo owner/repo   # Check specific repo
+  erg status --tail              # Live split-screen log view per active session`,
 	RunE: runStatus,
 }
 
 func init() {
 	statusCmd.Flags().StringVar(&statusRepo, "repo", "", "Repo to check status for (owner/repo or filesystem path)")
+	statusCmd.Flags().BoolVar(&statusTail, "tail", false, "Show live split-screen log view for active sessions")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -48,6 +51,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if statusTail {
+		return runTailView(repo)
+	}
 	return displaySummary(repo)
 }
 
