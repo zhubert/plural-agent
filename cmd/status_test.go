@@ -486,14 +486,308 @@ func TestRunStatus_NoStateFile(t *testing.T) {
 	// Use a repo path that has no state file
 	statusRepo = "/nonexistent/test/repo"
 	statusMap = false
+	statusOnce = true // disable auto-refresh for test
 	defer func() {
 		statusRepo = ""
 		statusMap = false
+		statusOnce = false
 	}()
 
 	cmd := statusCmd
 	err := runStatus(cmd, nil)
 	if err != nil {
 		t.Fatalf("expected no error for missing state file, got: %v", err)
+	}
+}
+
+// ---- formatCellInfo ----
+
+func TestFormatCellInfo_ActiveWithPhase(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State:         daemonstate.WorkItemActive,
+		Phase:         "async_pending",
+		StepEnteredAt: time.Now().Add(-5 * time.Minute),
+	}
+	got := formatCellInfo(item)
+	if !strings.Contains(got, "async_pending") {
+		t.Errorf("expected phase in cell info, got %q", got)
+	}
+	if !strings.Contains(got, "5m") {
+		t.Errorf("expected age in cell info, got %q", got)
+	}
+}
+
+func TestFormatCellInfo_EmptyPhaseDefaultsToIdle(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State:         daemonstate.WorkItemActive,
+		Phase:         "",
+		StepEnteredAt: time.Now().Add(-10 * time.Minute),
+	}
+	got := formatCellInfo(item)
+	if !strings.Contains(got, "idle") {
+		t.Errorf("expected 'idle' for empty phase, got %q", got)
+	}
+}
+
+func TestFormatCellInfo_FailedItem(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State: daemonstate.WorkItemFailed,
+		Phase: "idle",
+	}
+	got := formatCellInfo(item)
+	if got != "(failed)" {
+		t.Errorf("expected '(failed)' for failed item, got %q", got)
+	}
+}
+
+func TestFormatCellInfo_ZeroStepTime(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		State: daemonstate.WorkItemActive,
+		Phase: "idle",
+		// StepEnteredAt is zero
+	}
+	got := formatCellInfo(item)
+	if !strings.Contains(got, "—") {
+		t.Errorf("expected '—' for zero step time, got %q", got)
+	}
+}
+
+// ---- printMatrixView ----
+
+func TestPrintMatrixView_NilConfig(t *testing.T) {
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "1", Title: "Test"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-2 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, nil)
+	out := buf.String()
+	// Falls back to table view with "no workflow config available" message
+	if !strings.Contains(out, "no workflow config available") {
+		t.Errorf("expected fallback message for nil config: %q", out)
+	}
+}
+
+func TestPrintMatrixView_HeaderAndSeparator(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "42", Title: "Fix login"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-3 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, cfg)
+	out := buf.String()
+
+	// Header row should contain STATE and the issue label
+	if !strings.Contains(out, "STATE") {
+		t.Errorf("expected 'STATE' in matrix header: %q", out)
+	}
+	if !strings.Contains(out, "#42 Fix login") {
+		t.Errorf("expected issue label in matrix header: %q", out)
+	}
+	// Separator line should contain dashes
+	if !strings.Contains(out, "─") {
+		t.Errorf("expected separator line in matrix: %q", out)
+	}
+}
+
+func TestPrintMatrixView_CellPopulatedAtCorrectState(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "10", Title: "Issue A"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "await_review",
+			Phase:         "idle",
+			StepEnteredAt: time.Now().Add(-20 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, cfg)
+	out := buf.String()
+
+	// The cell should show up on the await_review row
+	lines := strings.Split(out, "\n")
+	var reviewLine string
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "await_review") {
+			reviewLine = line
+			break
+		}
+	}
+	if reviewLine == "" {
+		t.Fatalf("could not find await_review row in output: %q", out)
+	}
+	if !strings.Contains(reviewLine, "idle") {
+		t.Errorf("expected cell info 'idle' on await_review row: %q", reviewLine)
+	}
+	if !strings.Contains(reviewLine, "20m") {
+		t.Errorf("expected age '20m' on await_review row: %q", reviewLine)
+	}
+}
+
+func TestPrintMatrixView_MultipleItems(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "1", Title: "First"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-5 * time.Minute),
+			CreatedAt:     now.Add(-10 * time.Minute),
+		},
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "2", Title: "Second"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "await_ci",
+			Phase:         "idle",
+			StepEnteredAt: now.Add(-30 * time.Minute),
+			CreatedAt:     now.Add(-40 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, cfg)
+	out := buf.String()
+
+	// Both items should appear in the header
+	if !strings.Contains(out, "#1 First") {
+		t.Errorf("expected '#1 First' in header: %q", out)
+	}
+	if !strings.Contains(out, "#2 Second") {
+		t.Errorf("expected '#2 Second' in header: %q", out)
+	}
+
+	// The coding row should have cell for item 1
+	lines := strings.Split(out, "\n")
+	var codingLine string
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "coding") {
+			codingLine = line
+			break
+		}
+	}
+	if !strings.Contains(codingLine, "async_pending") {
+		t.Errorf("expected async_pending in coding row: %q", codingLine)
+	}
+}
+
+func TestPrintMatrixView_OffPathStep(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "99", Title: "CI fail"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "fix_ci", // off the primary happy path
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-8 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, cfg)
+	out := buf.String()
+
+	// Off-path step should appear in output with dotted separator
+	if !strings.Contains(out, "fix_ci") {
+		t.Errorf("expected off-path step 'fix_ci' in matrix output: %q", out)
+	}
+	if !strings.Contains(out, "·") {
+		t.Errorf("expected dotted separator before off-path steps: %q", out)
+	}
+}
+
+func TestPrintMatrixView_EmptyCurrentStepUsesStart(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "5", Title: "Queued"},
+			State:         daemonstate.WorkItemQueued,
+			CurrentStep:   "", // empty → should use cfg.Start ("coding")
+			Phase:         "",
+			StepEnteredAt: now.Add(-1 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixView(&buf, items, cfg)
+	out := buf.String()
+
+	// Item should appear in the "coding" row (the start state)
+	lines := strings.Split(out, "\n")
+	var codingLine string
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "coding") {
+			codingLine = line
+			break
+		}
+	}
+	if codingLine == "" {
+		t.Fatalf("could not find coding row in output: %q", out)
+	}
+	// Cell should be non-empty (either "idle" or some phase info)
+	// The coding row should have content for this item
+	stateWidth := len("check_ci_result") // longest state in default workflow
+	if len(codingLine) <= stateWidth {
+		t.Errorf("expected coding row to have content beyond state name: %q", codingLine)
+	}
+}
+
+// ---- printMatrixRow ----
+
+func TestPrintMatrixRow_ItemAtState(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "7", Title: "Test"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-4 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixRow(&buf, "coding", items, cfg, 20, 16)
+	out := buf.String()
+	if !strings.Contains(out, "async_pending") {
+		t.Errorf("expected cell info when item is at state: %q", out)
+	}
+}
+
+func TestPrintMatrixRow_ItemNotAtState(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*daemonstate.WorkItem{
+		{
+			IssueRef:      config.IssueRef{Source: "github", ID: "7", Title: "Test"},
+			State:         daemonstate.WorkItemActive,
+			CurrentStep:   "coding",
+			Phase:         "async_pending",
+			StepEnteredAt: now.Add(-4 * time.Minute),
+		},
+	}
+	var buf bytes.Buffer
+	printMatrixRow(&buf, "await_review", items, cfg, 20, 16)
+	out := buf.String()
+	// Row should start with state name but cell should be blank (just spaces)
+	if !strings.HasPrefix(strings.TrimRight(out, "\n"), "await_review") {
+		t.Errorf("expected row to start with state name: %q", out)
+	}
+	if strings.Contains(out, "async_pending") {
+		t.Errorf("expected empty cell when item is NOT at this state: %q", out)
 	}
 }

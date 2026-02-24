@@ -5,33 +5,40 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/daemonstate"
-	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/erg/internal/session"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 var (
-	statusRepo string
-	statusMap  bool
+	statusRepo     string
+	statusMap      bool
+	statusInterval int
+	statusOnce     bool
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status and active work items",
 	Long: `Reads the persisted daemon state file and displays where work items are
-in the active workflow.
+in the active workflow. Auto-refreshes every 5 seconds by default.
 
 Use --map to see items positioned on the workflow graph.
+Use --once to display once and exit.
 
 Examples:
-  erg status                        # Use current git repo as default
-  erg status --repo owner/repo      # Check specific repo
+  erg status                          # Auto-refresh every 5s (default)
+  erg status --once                   # Show once and exit
+  erg status --interval 10            # Refresh every 10 seconds
+  erg status --repo owner/repo        # Check specific repo
   erg status --repo owner/repo --map  # Workflow map view`,
 	RunE: runStatus,
 }
@@ -39,6 +46,8 @@ Examples:
 func init() {
 	statusCmd.Flags().StringVar(&statusRepo, "repo", "", "Repo to check status for (owner/repo or filesystem path)")
 	statusCmd.Flags().BoolVar(&statusMap, "map", false, "Show items positioned on the workflow graph")
+	statusCmd.Flags().IntVar(&statusInterval, "interval", 5, "Refresh interval in seconds")
+	statusCmd.Flags().BoolVar(&statusOnce, "once", false, "Show status once and exit (disables auto-refresh)")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -53,6 +62,39 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if statusOnce || statusInterval <= 0 {
+		return displayStatus(repo)
+	}
+
+	// Watch mode: auto-refresh on interval
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	ticker := time.NewTicker(time.Duration(statusInterval) * time.Second)
+	defer ticker.Stop()
+
+	// Initial display
+	clearScreen()
+	_ = displayStatus(repo) // ignore errors in watch mode
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			clearScreen()
+			_ = displayStatus(repo)
+		}
+	}
+}
+
+// clearScreen clears the terminal using ANSI escape codes.
+func clearScreen() {
+	fmt.Print("\033[H\033[2J")
+}
+
+// displayStatus loads and renders the daemon status once.
+func displayStatus(repo string) error {
 	// Check if state file exists before loading
 	stateFilePath := daemonstate.StateFilePath(repo)
 	if _, err := os.Stat(stateFilePath); os.IsNotExist(err) {
@@ -76,7 +118,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		maxConcurrent = wfCfg.Settings.MaxConcurrent
 	}
 
-	// Collect display items: all non-completed items (active + queued + failed + abandoned)
+	// Collect display items: all non-completed items (active + queued + failed)
 	var items []*daemonstate.WorkItem
 	for _, item := range state.WorkItems {
 		if item.State != daemonstate.WorkItemCompleted {
@@ -108,12 +150,145 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 		printMapView(w, activeItems, wfCfg)
 	} else {
-		printTableView(w, items)
+		// Default: matrix view (state rows × job columns)
+		printMatrixView(w, items, wfCfg)
 	}
 
 	fmt.Fprintln(w)
 	printFooter(w, state.ActiveSlotCount(), maxConcurrent, queuedCount, pid, running)
+	if !statusOnce && statusInterval > 0 {
+		fmt.Fprintf(w, "  Updated: %s  (every %ds)\n", time.Now().Format("15:04:05"), statusInterval)
+	}
 	return nil
+}
+
+// printMatrixView renders a state×job matrix: rows=workflow states, columns=work items.
+func printMatrixView(w io.Writer, items []*daemonstate.WorkItem, cfg *workflow.Config) {
+	if cfg == nil {
+		fmt.Fprintln(w, "(no workflow config available)")
+		printTableView(w, items)
+		return
+	}
+
+	// Get primary path states as row labels
+	path := primaryWorkflowPath(cfg)
+	if len(path) == 0 {
+		printTableView(w, items)
+		return
+	}
+
+	// Build index: step name → items at that step
+	stepItems := make(map[string][]*daemonstate.WorkItem)
+	for _, item := range items {
+		step := item.CurrentStep
+		if step == "" {
+			step = cfg.Start
+		}
+		stepItems[step] = append(stepItems[step], item)
+	}
+
+	// Determine state column width (auto-sized to longest state name)
+	stateColWidth := 8
+	for _, s := range path {
+		if len(s) > stateColWidth {
+			stateColWidth = len(s)
+		}
+	}
+	for step := range stepItems {
+		if len(step) > stateColWidth {
+			stateColWidth = len(step)
+		}
+	}
+
+	// Determine item column width (auto-sized to longest issue label, min 16)
+	itemColWidth := 16
+	headers := make([]string, len(items))
+	for i, item := range items {
+		h := formatIssue(item)
+		headers[i] = h
+		if len(h) > itemColWidth {
+			itemColWidth = len(h)
+		}
+	}
+
+	// Print header row
+	fmt.Fprintf(w, "%-*s", stateColWidth, "STATE")
+	for _, h := range headers {
+		fmt.Fprintf(w, "  %-*s", itemColWidth, h)
+	}
+	fmt.Fprintln(w)
+
+	// Print separator line
+	fmt.Fprint(w, strings.Repeat("─", stateColWidth))
+	for range headers {
+		fmt.Fprint(w, "  "+strings.Repeat("─", itemColWidth))
+	}
+	fmt.Fprintln(w)
+
+	// Track which states are on the primary path
+	pathSet := make(map[string]bool, len(path))
+	for _, s := range path {
+		pathSet[s] = true
+	}
+
+	// Print rows for the primary path
+	for _, stateName := range path {
+		printMatrixRow(w, stateName, items, cfg, stateColWidth, itemColWidth)
+	}
+
+	// Print off-path states that have active items
+	var offPathSteps []string
+	for step := range stepItems {
+		if !pathSet[step] && len(stepItems[step]) > 0 {
+			offPathSteps = append(offPathSteps, step)
+		}
+	}
+	if len(offPathSteps) > 0 {
+		sort.Strings(offPathSteps)
+		// Dotted separator before off-path rows
+		fmt.Fprint(w, strings.Repeat("·", stateColWidth))
+		for range headers {
+			fmt.Fprint(w, "  "+strings.Repeat("·", itemColWidth))
+		}
+		fmt.Fprintln(w)
+		for _, step := range offPathSteps {
+			printMatrixRow(w, step, items, cfg, stateColWidth, itemColWidth)
+		}
+	}
+}
+
+// printMatrixRow renders one row of the matrix for the given state name.
+func printMatrixRow(w io.Writer, stateName string, items []*daemonstate.WorkItem, cfg *workflow.Config, stateColWidth, itemColWidth int) {
+	fmt.Fprintf(w, "%-*s", stateColWidth, stateName)
+	for _, item := range items {
+		step := item.CurrentStep
+		if step == "" {
+			step = cfg.Start
+		}
+		if step == stateName {
+			cell := formatCellInfo(item)
+			if len(cell) > itemColWidth {
+				cell = cell[:itemColWidth]
+			}
+			fmt.Fprintf(w, "  %-*s", itemColWidth, cell)
+		} else {
+			fmt.Fprintf(w, "  %-*s", itemColWidth, "")
+		}
+	}
+	fmt.Fprintln(w)
+}
+
+// formatCellInfo returns a brief description for a work item in its current state cell.
+func formatCellInfo(item *daemonstate.WorkItem) string {
+	if item.State == daemonstate.WorkItemFailed {
+		return "(failed)"
+	}
+	phase := item.Phase
+	if phase == "" {
+		phase = "idle"
+	}
+	age := formatAge(item.StepEnteredAt)
+	return fmt.Sprintf("%s %s", phase, age)
 }
 
 // printTableView renders work items as an aligned table.
