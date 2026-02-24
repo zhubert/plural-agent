@@ -487,18 +487,39 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 	// Format comments as a prompt
 	prompt := worker.FormatPRCommentsPrompt(reviewComments)
 
-	// Resolve review system prompt from workflow config
+	// Resolve review system prompt and format_command from workflow config.
 	wfCfg := d.getWorkflowConfig(sess.RepoPath)
 	reviewState := wfCfg.States["await_review"]
 	systemPrompt := ""
+	formatCommand := ""
 	if reviewState != nil {
 		p := workflow.NewParamHelper(reviewState.Params)
 		systemPrompt = p.String("system_prompt", "")
+		formatCommand = p.String("format_command", "")
+		if formatCommand != "" {
+			// await_review has its own format_command — update step data so
+			// handleAsyncComplete uses it as the formatter safety net after
+			// this feedback round completes.
+			formatMessage := p.String("format_message", "Apply auto-formatting")
+			item.StepData["_format_command"] = formatCommand
+			item.StepData["_format_message"] = formatMessage
+			d.saveState()
+		}
 	}
 
 	reviewPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, sess.RepoPath)
 	if err != nil {
 		log.Warn("failed to resolve review system prompt", "error", err)
+	}
+
+	// Inject formatting instructions if a format command is configured.
+	// If await_review has no format_command param, fall back to whatever the
+	// coding step stored in step data.
+	if formatCommand == "" {
+		formatCommand, _ = item.StepData["_format_command"].(string)
+	}
+	if formatCommand != "" {
+		reviewPrompt = reviewPrompt + "\n\nFORMATTING: Before committing any changes, run the following formatter command:\n  " + formatCommand + "\nStage and include all formatting changes in your commit."
 	}
 
 	// Resume the existing session with the review system prompt
@@ -1221,13 +1242,24 @@ func (d *Daemon) startFixCI(ctx context.Context, item *daemonstate.WorkItem, ses
 
 	prompt := formatCIFixPrompt(round, ciLogs)
 
-	// Resolve system prompt from workflow config's fix_ci state
+	// Resolve system prompt and format_command from workflow config's fix_ci state.
 	wfCfg := d.getWorkflowConfig(sess.RepoPath)
 	fixState := wfCfg.States["fix_ci"]
 	systemPrompt := ""
+	formatCommand := ""
 	if fixState != nil {
 		p := workflow.NewParamHelper(fixState.Params)
 		systemPrompt = p.String("system_prompt", "")
+		formatCommand = p.String("format_command", "")
+		if formatCommand != "" {
+			// fix_ci has its own format_command — update step data so
+			// handleAsyncComplete uses it as the formatter safety net after
+			// this round completes.
+			formatMessage := p.String("format_message", "Apply auto-formatting")
+			item.StepData["_format_command"] = formatCommand
+			item.StepData["_format_message"] = formatMessage
+			d.saveState()
+		}
 	}
 
 	resolvedPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, sess.RepoPath)
@@ -1237,6 +1269,16 @@ func (d *Daemon) startFixCI(ctx context.Context, item *daemonstate.WorkItem, ses
 
 	if resolvedPrompt == "" {
 		resolvedPrompt = DefaultCodingSystemPrompt
+	}
+
+	// Inject formatting instructions if a format command is configured.
+	// If fix_ci has no format_command param, fall back to whatever the coding
+	// step stored in step data (so Claude keeps formatting during CI fix rounds).
+	if formatCommand == "" {
+		formatCommand, _ = item.StepData["_format_command"].(string)
+	}
+	if formatCommand != "" {
+		resolvedPrompt = resolvedPrompt + "\n\nFORMATTING: Before committing any changes, run the following formatter command:\n  " + formatCommand + "\nStage and include all formatting changes in your commit."
 	}
 
 	d.startWorkerWithPrompt(ctx, item, sess, prompt, resolvedPrompt)
