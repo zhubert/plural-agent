@@ -94,12 +94,12 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Temporary stdout logger for image build output the user should see
-	buildLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	// Initialize file logger for the build phase — all output goes to log file, not stdout
+	logger.SetDebug(true)
+	defer logger.Close()
+	buildLogger := logger.Get()
 
-	// Load workflow config + build image (visible to user)
+	// Load workflow config + build image
 	wfCfg, err := workflow.LoadAndMerge(agentRepo)
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
