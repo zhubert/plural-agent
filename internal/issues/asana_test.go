@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/zhubert/erg/internal/config"
@@ -442,5 +443,134 @@ func TestAsanaProvider_FetchProjects_ProjectsAPIError(t *testing.T) {
 	_, err := p.FetchProjects(ctx)
 	if err == nil {
 		t.Error("expected error from projects API error")
+	}
+}
+
+func TestAsanaProvider_FetchIssues_TagFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify tags.name is included in opt_fields
+		optFields := r.URL.Query().Get("opt_fields")
+		if !strings.Contains(optFields, "tags.name") {
+			t.Errorf("expected opt_fields to contain 'tags.name', got %q", optFields)
+		}
+
+		response := asanaTasksResponse{
+			Data: []asanaTask{
+				{
+					GID: "1", Name: "Task with queued tag", Notes: "desc1",
+					Permalink: "https://app.asana.com/0/123/1",
+					Tags:      []asanaTag{{Name: "queued"}},
+				},
+				{
+					GID: "2", Name: "Task with other tag", Notes: "desc2",
+					Permalink: "https://app.asana.com/0/123/2",
+					Tags:      []asanaTag{{Name: "other"}},
+				},
+				{
+					GID: "3", Name: "Task with no tags", Notes: "desc3",
+					Permalink: "https://app.asana.com/0/123/3",
+					Tags:      nil,
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	ctx := context.Background()
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345", Label: "queued"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if issues[0].ID != "1" {
+		t.Errorf("expected issue ID '1', got %q", issues[0].ID)
+	}
+	if issues[0].Title != "Task with queued tag" {
+		t.Errorf("expected title 'Task with queued tag', got %q", issues[0].Title)
+	}
+}
+
+func TestAsanaProvider_FetchIssues_TagFilterCaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := asanaTasksResponse{
+			Data: []asanaTask{
+				{
+					GID: "1", Name: "Task with Queued tag", Notes: "desc1",
+					Permalink: "https://app.asana.com/0/123/1",
+					Tags:      []asanaTag{{Name: "Queued"}},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	ctx := context.Background()
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345", Label: "queued"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue (case-insensitive match), got %d", len(issues))
+	}
+	if issues[0].ID != "1" {
+		t.Errorf("expected issue ID '1', got %q", issues[0].ID)
+	}
+}
+
+func TestAsanaProvider_FetchIssues_NoLabelReturnsAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := asanaTasksResponse{
+			Data: []asanaTask{
+				{
+					GID: "1", Name: "Task with tag", Notes: "desc1",
+					Permalink: "https://app.asana.com/0/123/1",
+					Tags:      []asanaTag{{Name: "queued"}},
+				},
+				{
+					GID: "2", Name: "Task without tag", Notes: "desc2",
+					Permalink: "https://app.asana.com/0/123/2",
+					Tags:      nil,
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	ctx := context.Background()
+	issues, err := p.FetchIssues(ctx, "/test/repo", FilterConfig{Project: "12345"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues (no label filter), got %d", len(issues))
 	}
 }

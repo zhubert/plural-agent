@@ -63,12 +63,18 @@ func (p *AsanaProvider) Source() Source {
 	return SourceAsana
 }
 
+// asanaTag represents a tag on an Asana task.
+type asanaTag struct {
+	Name string `json:"name"`
+}
+
 // asanaTask represents a task from the Asana API response.
 type asanaTask struct {
-	GID       string `json:"gid"`
-	Name      string `json:"name"`
-	Notes     string `json:"notes"`
-	Permalink string `json:"permalink_url"`
+	GID       string     `json:"gid"`
+	Name      string     `json:"name"`
+	Notes     string     `json:"notes"`
+	Permalink string     `json:"permalink_url"`
+	Tags      []asanaTag `json:"tags"`
 }
 
 // asanaTasksResponse represents the Asana API response for listing tasks.
@@ -90,7 +96,7 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 	}
 
 	// Fetch incomplete tasks from the project
-	url := fmt.Sprintf("%s/projects/%s/tasks?opt_fields=gid,name,notes,permalink_url&completed_since=now", p.apiBase, projectID)
+	url := fmt.Sprintf("%s/projects/%s/tasks?opt_fields=gid,name,notes,permalink_url,tags.name&completed_since=now", p.apiBase, projectID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -118,8 +124,24 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 		return nil, fmt.Errorf("failed to parse Asana response: %w", err)
 	}
 
-	issues := make([]Issue, len(tasksResp.Data))
-	for i, task := range tasksResp.Data {
+	tasks := tasksResp.Data
+
+	// Filter by tag if label is configured
+	if filter.Label != "" {
+		var filtered []asanaTask
+		for _, task := range tasks {
+			for _, tag := range task.Tags {
+				if strings.EqualFold(tag.Name, filter.Label) {
+					filtered = append(filtered, task)
+					break
+				}
+			}
+		}
+		tasks = filtered
+	}
+
+	issues := make([]Issue, len(tasks))
+	for i, task := range tasks {
 		issues[i] = Issue{
 			ID:     task.GID,
 			Title:  task.Name,
