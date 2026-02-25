@@ -813,7 +813,6 @@
           flex-wrap: wrap;
         }
 
-        .param-table,
         .cli-table {
           display: block;
           overflow-x: auto;
@@ -969,6 +968,45 @@
         .cli-table th,
         .cli-table td {
           padding: 0.5rem 0.6rem;
+        }
+      }
+
+      /* ---- Stacked param-table on narrow phones ---- */
+      @media (max-width: 560px) {
+        .param-table thead {
+          display: none;
+        }
+
+        .param-table tr {
+          display: block;
+          border-bottom: 1px solid var(--border);
+          padding: 0.5rem 0;
+        }
+
+        .param-table tr:last-child {
+          border-bottom: none;
+        }
+
+        .param-table td {
+          display: flex;
+          flex-direction: column;
+          border-bottom: none;
+          padding: 0.2rem 0.75rem;
+          white-space: normal;
+        }
+
+        .param-table td::before {
+          content: attr(data-label);
+          font-size: 0.62rem;
+          font-weight: 600;
+          color: var(--text-dim);
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+          margin-bottom: 0.15rem;
+        }
+
+        .param-table tr:last-child td {
+          border-bottom: none;
         }
       }
     </style>
@@ -3431,6 +3469,20 @@ stateDiagram-v2
             document.getElementById("sidebar").classList.remove("open");
             document.getElementById("sidebarOverlay").classList.remove("open");
           }
+        });
+      });
+
+      // Label param-table cells for responsive stacking
+      document.querySelectorAll(".param-table").forEach(function (table) {
+        var headers = Array.from(table.querySelectorAll("thead th")).map(
+          function (th) {
+            return th.textContent.trim();
+          }
+        );
+        table.querySelectorAll("tbody tr").forEach(function (row) {
+          row.querySelectorAll("td").forEach(function (td, i) {
+            if (headers[i]) td.setAttribute("data-label", headers[i]);
+          });
         });
       });
     </script>
