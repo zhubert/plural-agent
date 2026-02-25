@@ -290,23 +290,26 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		return <-daemonErr
 	}
 
-	// Auto-refreshing status display
-	ticker := time.NewTicker(5 * time.Second)
+	// Live tail view (same as `erg status --tail`)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	// Initial display
-	clearScreen()
-	_ = displayDashboard(agentRepo)
+	// Hide cursor for cleaner output
+	fmt.Print("\033[?25l")
+	defer fmt.Print("\033[?25h\n")
+
+	// Draw immediately on first run
+	_ = drawTailFrame(agentRepo)
 
 	for {
 		select {
 		case err := <-daemonErr:
 			return err
 		case <-ctx.Done():
+			clearScreen()
 			return nil
 		case <-ticker.C:
-			clearScreen()
-			_ = displayDashboard(agentRepo)
+			_ = drawTailFrame(agentRepo)
 		}
 	}
 }

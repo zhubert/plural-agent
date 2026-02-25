@@ -545,3 +545,84 @@ func TestWriteFrameFlickerFree_ContentPreserved(t *testing.T) {
 		t.Errorf("expected 'beta' in output, got: %q", out)
 	}
 }
+
+// ---- drawTailFrame ----
+
+func TestDrawTailFrame_NoStateFile(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	out := captureStdout(t, func() {
+		_ = drawTailFrame("/nonexistent/test/repo")
+	})
+
+	// When state file doesn't exist, LoadDaemonState returns a new empty state —
+	// drawTailFrame should show "No active work items."
+	if !strings.Contains(out, "No active work items") {
+		t.Errorf("expected 'No active work items' for missing state file, got: %q", out)
+	}
+}
+
+func TestDrawTailFrame_NoActiveItems(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	repo := "test/draw-tail-repo"
+	stateFilePath := daemonstate.StateFilePath(repo)
+	if err := os.MkdirAll(filepath.Dir(stateFilePath), 0o755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+	stateJSON := `{"version":2,"repo_path":"test/draw-tail-repo","work_items":{}}`
+	if err := os.WriteFile(stateFilePath, []byte(stateJSON), 0o644); err != nil {
+		t.Fatalf("failed to write state file: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		_ = drawTailFrame(repo)
+	})
+
+	if !strings.Contains(out, "No active work items") {
+		t.Errorf("expected 'No active work items' for empty state, got: %q", out)
+	}
+	if !strings.Contains(out, "Updated") {
+		t.Errorf("expected 'Updated' timestamp in output, got: %q", out)
+	}
+}
+
+func TestDrawTailFrame_WithActiveItem(t *testing.T) {
+	setupAgentCleanTest(t)
+
+	repo := "test/draw-tail-active"
+	stateJSON := `{
+		"version": 2,
+		"repo_path": "test/draw-tail-active",
+		"work_items": {
+			"item-001": {
+				"id": "item-001",
+				"issue_ref": {"source": "github", "id": "55", "title": "Active issue"},
+				"state": "active",
+				"current_step": "coding",
+				"phase": "async_pending",
+				"created_at": "2024-01-01T12:00:00Z",
+				"step_entered_at": "2024-01-01T12:00:00Z"
+			}
+		}
+	}`
+
+	stateFilePath := daemonstate.StateFilePath(repo)
+	if err := os.MkdirAll(filepath.Dir(stateFilePath), 0o755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+	if err := os.WriteFile(stateFilePath, []byte(stateJSON), 0o644); err != nil {
+		t.Fatalf("failed to write state file: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		_ = drawTailFrame(repo)
+	})
+
+	if !strings.Contains(out, "#55") {
+		t.Errorf("expected issue '#55' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "coding") {
+		t.Errorf("expected step 'coding' in output, got: %q", out)
+	}
+}

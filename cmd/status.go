@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -60,67 +59,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 // clearScreen clears the terminal using ANSI escape codes.
 func clearScreen() {
 	fmt.Print("\033[H\033[2J")
-}
-
-// displayDashboard loads and renders the full dashboard view once.
-// Used by foreground mode for auto-refreshing display.
-func displayDashboard(repo string) error {
-	// Check if state file exists before loading
-	stateFilePath := daemonstate.StateFilePath(repo)
-	if _, err := os.Stat(stateFilePath); os.IsNotExist(err) {
-		fmt.Println("No daemon state found for this repo.")
-		return nil
-	}
-
-	// Load daemon state
-	state, err := daemonstate.LoadDaemonState(repo)
-	if err != nil {
-		return fmt.Errorf("failed to load daemon state: %w", err)
-	}
-
-	// Get daemon PID and running status from lock file
-	pid, running := daemonstate.ReadLockStatus(repo)
-
-	// Load workflow config for max_concurrent (ignore error, use defaults)
-	wfCfg, _ := workflow.LoadAndMerge(repo)
-	maxConcurrent := 0
-	if wfCfg != nil && wfCfg.Settings != nil {
-		maxConcurrent = wfCfg.Settings.MaxConcurrent
-	}
-
-	// Collect display items: all non-completed items (active + queued + failed)
-	var items []*daemonstate.WorkItem
-	for _, item := range state.WorkItems {
-		if item.State != daemonstate.WorkItemCompleted {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt.Before(items[j].CreatedAt)
-	})
-
-	// Count queued items
-	queuedCount := 0
-	for _, item := range state.WorkItems {
-		if item.State == daemonstate.WorkItemQueued {
-			queuedCount++
-		}
-	}
-
-	w := os.Stdout
-	if len(items) == 0 {
-		fmt.Fprintln(w, "No active work items.")
-	} else {
-		// Default: matrix view (state rows × job columns)
-		printMatrixView(w, items, wfCfg)
-	}
-
-	costUSD, outputTokens, inputTokens := state.GetSpend()
-
-	fmt.Fprintln(w)
-	printFooter(w, state.ActiveSlotCount(), maxConcurrent, queuedCount, pid, running, costUSD, outputTokens+inputTokens)
-	fmt.Fprintf(w, "  Updated: %s  (every 5s)\n", time.Now().Format("15:04:05"))
-	return nil
 }
 
 // printMatrixView renders a state×job matrix: rows=workflow states, columns=work items.
