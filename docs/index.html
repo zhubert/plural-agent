@@ -949,10 +949,6 @@
       }
 
       @media (max-width: 480px) {
-        html {
-          font-size: 112.5%;
-        }
-
         .main h1 {
           font-size: 1.6rem;
         }
@@ -975,44 +971,71 @@
         .cli-table td {
           padding: 0.5rem 0.6rem;
         }
+
+        .code-block pre {
+          font-size: 0.72rem;
+          padding: 0.75rem 1rem;
+        }
+
+        .action-ref {
+          padding: 1rem;
+        }
+
+        .action-title {
+          font-size: 0.85rem;
+        }
+
+        .action-desc {
+          font-size: 0.82rem;
+        }
       }
 
-      /* ---- Stacked param-table on narrow phones ---- */
+      /* ---- Scrollable param-table on narrow phones ---- */
       @media (max-width: 560px) {
-        .param-table thead {
-          display: none;
+        .param-section {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          margin-left: -0.25rem;
+          margin-right: -0.25rem;
         }
 
-        .param-table tr {
-          display: block;
-          border-bottom: 1px solid var(--border);
-          padding: 0.5rem 0;
+        .param-table {
+          font-size: 0.75rem;
+          width: max-content;
+          min-width: 100%;
         }
 
-        .param-table tr:last-child {
-          border-bottom: none;
+        .param-table th {
+          white-space: nowrap;
         }
 
+        .param-table th,
         .param-table td {
-          display: flex;
-          flex-direction: column;
-          border-bottom: none;
-          padding: 0.2rem 0.75rem;
-          white-space: normal;
+          padding: 0.35rem 0.5rem;
         }
 
-        .param-table td::before {
-          content: attr(data-label);
-          font-size: 0.62rem;
-          font-weight: 600;
-          color: var(--text-dim);
-          text-transform: uppercase;
-          letter-spacing: 0.07em;
-          margin-bottom: 0.15rem;
+        .param-table td:first-child {
+          font-size: 0.73rem;
         }
 
-        .param-table tr:last-child td {
-          border-bottom: none;
+        .param-table td:nth-child(2) {
+          font-size: 0.7rem;
+        }
+
+        .install-block {
+          gap: 0.35rem;
+        }
+
+        .install-block code {
+          font-size: 0.78rem;
+        }
+
+        .copy-btn {
+          position: static;
+          transform: none;
+          flex-shrink: 0;
+          padding: 0.25rem 0.5rem;
+          font-size: 0.65rem;
         }
       }
     </style>
