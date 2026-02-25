@@ -3244,6 +3244,36 @@ func TestRebaseAction_Execute_WorkItemNotFound(t *testing.T) {
 	}
 }
 
+// mockCommentProvider is a test double for Provider + ProviderActions.
+// It records Comment calls and optionally returns a configured error.
+type mockCommentProvider struct {
+	src        issues.Source
+	commentErr error
+	comments   []mockCommentCall
+}
+
+type mockCommentCall struct {
+	repoPath string
+	issueID  string
+	body     string
+}
+
+func (m *mockCommentProvider) Name() string                    { return string(m.src) }
+func (m *mockCommentProvider) Source() issues.Source           { return m.src }
+func (m *mockCommentProvider) IsConfigured(_ string) bool      { return true }
+func (m *mockCommentProvider) GenerateBranchName(_ issues.Issue) string { return "" }
+func (m *mockCommentProvider) GetPRLinkText(_ issues.Issue) string      { return "" }
+func (m *mockCommentProvider) FetchIssues(_ context.Context, _ string, _ issues.FilterConfig) ([]issues.Issue, error) {
+	return nil, nil
+}
+func (m *mockCommentProvider) RemoveLabel(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+func (m *mockCommentProvider) Comment(_ context.Context, repoPath, issueID, body string) error {
+	m.comments = append(m.comments, mockCommentCall{repoPath: repoPath, issueID: issueID, body: body})
+	return m.commentErr
+}
+
 func TestRebaseAction_Execute_NoSession(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
@@ -3455,5 +3485,357 @@ func TestGetRebaseRounds(t *testing.T) {
 				t.Errorf("expected %d, got %d", tt.expected, got)
 			}
 		})
+	}
+}
+
+// --- asanaCommentAction tests ---
+
+func TestAsanaCommentAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Work started."})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestAsanaCommentAction_SourceMismatch(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+
+	// Work item has linear source, not asana — should be a no-op.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "linear", ID: "LIN-1"},
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Hello!"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected no-op success for source mismatch, got error: %v", result.Error)
+	}
+	if len(provider.comments) != 0 {
+		t.Error("expected Comment not to be called for source mismatch")
+	}
+}
+
+func TestAsanaCommentAction_Success(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Work has started."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment call, got %d", len(provider.comments))
+	}
+	if provider.comments[0].issueID != "task-abc" {
+		t.Errorf("expected issueID %q, got %q", "task-abc", provider.comments[0].issueID)
+	}
+	if provider.comments[0].body != "Work has started." {
+		t.Errorf("expected body %q, got %q", "Work has started.", provider.comments[0].body)
+	}
+}
+
+func TestAsanaCommentAction_EmptyBody(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": ""})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for empty comment body")
+	}
+}
+
+func TestAsanaCommentAction_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{
+		src:        issues.SourceAsana,
+		commentErr: fmt.Errorf("asana API error"),
+	}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Starting work."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when provider returns error")
+	}
+}
+
+func TestAsanaCommentAction_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	// Registry with no Asana provider registered.
+	registry := issues.NewProviderRegistry()
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Starting work."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when asana provider is not registered")
+	}
+}
+
+// --- linearCommentAction tests ---
+
+func TestLinearCommentAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Work started."})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestLinearCommentAction_SourceMismatch(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+
+	// Work item has asana source, not linear — should be a no-op.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "asana", ID: "task-1"},
+	})
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Hello!"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected no-op success for source mismatch, got error: %v", result.Error)
+	}
+	if len(provider.comments) != 0 {
+		t.Error("expected Comment not to be called for source mismatch")
+	}
+}
+
+func TestLinearCommentAction_Success(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-42"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "PR is ready for review."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment call, got %d", len(provider.comments))
+	}
+	if provider.comments[0].issueID != "ENG-42" {
+		t.Errorf("expected issueID %q, got %q", "ENG-42", provider.comments[0].issueID)
+	}
+	if provider.comments[0].body != "PR is ready for review." {
+		t.Errorf("expected body %q, got %q", "PR is ready for review.", provider.comments[0].body)
+	}
+}
+
+func TestLinearCommentAction_EmptyBody(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-42"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": ""})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for empty comment body")
+	}
+}
+
+func TestLinearCommentAction_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockCommentProvider{
+		src:        issues.SourceLinear,
+		commentErr: fmt.Errorf("linear API error"),
+	}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-42"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Starting work."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when provider returns error")
+	}
+}
+
+func TestLinearCommentAction_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	// Registry with no Linear provider registered.
+	registry := issues.NewProviderRegistry()
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-42"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Starting work."})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when linear provider is not registered")
 	}
 }

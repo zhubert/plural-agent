@@ -782,6 +782,8 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("ai.fix_ci", &fixCIAction{daemon: d})
 	registry.Register("git.format", &formatAction{daemon: d})
 	registry.Register("git.rebase", &rebaseAction{daemon: d})
+	registry.Register("asana.comment", &asanaCommentAction{daemon: d})
+	registry.Register("linear.comment", &linearCommentAction{daemon: d})
 	return registry
 }
 

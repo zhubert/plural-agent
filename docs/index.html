@@ -2106,6 +2106,92 @@
           </div>
         </div>
 
+        <h3>Asana actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.comment</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the Asana task associated with the work item.
+            Requires the <code>ASANA_PAT</code> environment variable to be set
+            and an Asana provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load
+                    content from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3>Linear actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.comment</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the Linear issue associated with the work item.
+            Requires the <code>LINEAR_API_KEY</code> environment variable to be
+            set and a Linear provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load
+                    content from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
         <h3 id="actions-git">Git actions</h3>
 
         <div class="action-ref">
