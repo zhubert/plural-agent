@@ -479,3 +479,69 @@ func TestRenderTailView_WithStreamLog(t *testing.T) {
 		t.Errorf("expected 'go test' in output, got %q", out)
 	}
 }
+
+// ---- writeFrameFlickerFree ----
+
+// captureStdout redirects os.Stdout to a pipe, calls f, and returns captured output.
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	f()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return buf.String()
+}
+
+func TestWriteFrameFlickerFree_StartsWithCursorHome(t *testing.T) {
+	out := captureStdout(t, func() {
+		writeFrameFlickerFree("hello\nworld\n")
+	})
+	// Must begin with the cursor-home escape, not a clear-screen escape.
+	if !strings.HasPrefix(out, "\033[H") {
+		t.Errorf("expected output to start with cursor-home \\033[H, got: %q", out)
+	}
+	// Must NOT contain a full clear-screen sequence.
+	if strings.Contains(out, "\033[2J") {
+		t.Errorf("expected no full clear-screen \\033[2J in flicker-free output: %q", out)
+	}
+}
+
+func TestWriteFrameFlickerFree_ErasesToEndOfLine(t *testing.T) {
+	out := captureStdout(t, func() {
+		writeFrameFlickerFree("line one\nline two\n")
+	})
+	// Each newline should be preceded by an erase-to-EOL escape.
+	if !strings.Contains(out, "\033[K\n") {
+		t.Errorf("expected erase-to-EOL \\033[K before each newline, got: %q", out)
+	}
+}
+
+func TestWriteFrameFlickerFree_ErasesTrailingScreen(t *testing.T) {
+	out := captureStdout(t, func() {
+		writeFrameFlickerFree("content\n")
+	})
+	// Must end with erase-to-end-of-screen so leftover lines from taller
+	// previous frames are cleared.
+	if !strings.HasSuffix(out, "\033[J") {
+		t.Errorf("expected output to end with erase-to-end-of-screen \\033[J, got: %q", out)
+	}
+}
+
+func TestWriteFrameFlickerFree_ContentPreserved(t *testing.T) {
+	out := captureStdout(t, func() {
+		writeFrameFlickerFree("alpha\nbeta\n")
+	})
+	if !strings.Contains(out, "alpha") {
+		t.Errorf("expected 'alpha' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "beta") {
+		t.Errorf("expected 'beta' in output, got: %q", out)
+	}
+}

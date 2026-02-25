@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -39,6 +40,23 @@ func terminalSize() (int, int) {
 		return 24, 80
 	}
 	return int(ws.Row), int(ws.Col)
+}
+
+// writeFrameFlickerFree writes content to the terminal without a visible blank flash.
+// It moves the cursor to the top-left, overwrites each line in-place (appending
+// \033[K to erase any leftover characters to the right), and then erases everything
+// below the new content with \033[J. This avoids the blank-screen flicker that
+// occurs when using a full clear (\033[2J) before redrawing.
+func writeFrameFlickerFree(content string) {
+	// Move cursor to home position without clearing the screen.
+	fmt.Print("\033[H")
+	// Append erase-to-end-of-line before each newline so stale characters
+	// from a previously wider line do not bleed through.
+	out := strings.ReplaceAll(content, "\n", "\033[K\n")
+	fmt.Print(out)
+	// Erase from the current cursor position to the end of the screen,
+	// removing any lines left over from a previously taller frame.
+	fmt.Print("\033[J")
 }
 
 // tailStreamMsg is a minimal struct for parsing stream log JSON entries.
@@ -331,8 +349,7 @@ func runTailView(repo string) error {
 func drawTailFrame(repo string) error {
 	state, err := daemonstate.LoadDaemonState(repo)
 	if err != nil {
-		clearScreen()
-		fmt.Printf("Error loading state: %v\n", err)
+		writeFrameFlickerFree(fmt.Sprintf("Error loading state: %v\n", err))
 		return nil
 	}
 
@@ -349,15 +366,16 @@ func drawTailFrame(repo string) error {
 
 	rows, cols := terminalSize()
 
-	clearScreen()
-
+	// Render into a buffer first, then write to the terminal in one flicker-free
+	// pass so the screen never goes blank between frames.
+	var buf bytes.Buffer
 	if len(items) == 0 {
-		fmt.Println("No active work items.")
-		fmt.Printf("\n  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
-		return nil
+		fmt.Fprintln(&buf, "No active work items.")
+		fmt.Fprintf(&buf, "\n  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
+	} else {
+		renderTailView(&buf, items, rows-2, cols)
+		fmt.Fprintf(&buf, "  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
 	}
-
-	renderTailView(os.Stdout, items, rows-2, cols)
-	fmt.Printf("  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
+	writeFrameFlickerFree(buf.String())
 	return nil
 }
