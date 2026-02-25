@@ -201,6 +201,46 @@ func (a *commentPRAction) Execute(ctx context.Context, ac *workflow.ActionContex
 	return workflow.ActionResult{Success: true}
 }
 
+// asanaCommentAction implements the asana.comment action.
+type asanaCommentAction struct {
+	daemon *Daemon
+}
+
+// Execute posts a comment on the Asana task for the work item.
+func (a *asanaCommentAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceAsana); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("asana comment failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// linearCommentAction implements the linear.comment action.
+type linearCommentAction struct {
+	daemon *Daemon
+}
+
+// Execute posts a comment on the Linear issue for the work item.
+func (a *linearCommentAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceLinear); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("linear comment failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // addLabelAction implements the github.add_label action.
 type addLabelAction struct {
 	daemon *Daemon
@@ -1009,6 +1049,47 @@ func (d *Daemon) commentOnPR(ctx context.Context, item *daemonstate.WorkItem, pa
 		return fmt.Errorf("gh pr comment failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// commentViaProvider posts a comment on the issue for a work item using the
+// ProviderActions interface. expectedSource must match the work item's source;
+// if it doesn't, the call is a no-op (with a warning). Returns an error if the
+// provider is not registered, does not implement ProviderActions, the body is
+// empty, or the API call fails.
+func (d *Daemon) commentViaProvider(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper, expectedSource issues.Source) error {
+	if issues.Source(item.IssueRef.Source) != expectedSource {
+		d.logger.Warn("comment action skipped: source mismatch",
+			"workItem", item.ID, "source", item.IssueRef.Source, "expected", expectedSource)
+		return nil
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	bodyTemplate := params.String("body", "")
+	body, err := workflow.ResolveSystemPrompt(bodyTemplate, repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve comment body: %w", err)
+	}
+	if body == "" {
+		return fmt.Errorf("comment body is empty")
+	}
+
+	p := d.issueRegistry.GetProvider(expectedSource)
+	if p == nil {
+		return fmt.Errorf("%s provider not registered", expectedSource)
+	}
+	pa, ok := p.(issues.ProviderActions)
+	if !ok {
+		return fmt.Errorf("%s provider does not support commenting", expectedSource)
+	}
+
+	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	return pa.Comment(commentCtx, repoPath, item.IssueRef.ID, body)
 }
 
 // addLabel adds a label to the issue for a work item.
