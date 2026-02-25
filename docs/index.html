@@ -832,6 +832,24 @@
         }
       }
 
+      /* ---- Sidebar sub-links (category TOC) ---- */
+
+      .sidebar-sublink {
+        display: block;
+        padding: 0.2rem 1.25rem 0.2rem 2.75rem;
+        font-size: 0.75rem;
+        font-family: "IBM Plex Mono", monospace;
+        color: var(--text-dim);
+        text-decoration: none;
+        transition: color 0.15s;
+        line-height: 1.5;
+      }
+
+      .sidebar-sublink:hover {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
       /* ---- Action reference ---- */
 
       .action-ref {
@@ -1079,7 +1097,12 @@
             <span class="sidebar-section-title">Reference</span>
             <a href="#cli" class="sidebar-link">CLI commands</a>
             <a href="#actions" class="sidebar-link">Actions</a>
+            <a href="#actions-ai" class="sidebar-sublink">ai</a>
+            <a href="#actions-github" class="sidebar-sublink">github</a>
+            <a href="#actions-git" class="sidebar-sublink">git</a>
             <a href="#events" class="sidebar-link">Wait events</a>
+            <a href="#events-pr" class="sidebar-sublink">pr</a>
+            <a href="#events-ci" class="sidebar-sublink">ci</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
@@ -1546,7 +1569,7 @@
           <code>choice</code> states can inspect.
         </p>
 
-        <h3>AI actions</h3>
+        <h3 id="actions-ai">AI actions</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -1748,7 +1771,7 @@
           </div>
         </div>
 
-        <h3>GitHub actions</h3>
+        <h3 id="actions-github">GitHub actions</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -2083,7 +2106,7 @@
           </div>
         </div>
 
-        <h3>Git actions</h3>
+        <h3 id="actions-git">Git actions</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -2141,6 +2164,8 @@
           the state machine when the event fires. All wait states support
           <code>timeout</code> and <code>timeout_next</code>.
         </p>
+
+        <h3 id="events-pr">PR events</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -2234,6 +2259,8 @@
             </table>
           </div>
         </div>
+
+        <h3 id="events-ci">CI events</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -3504,7 +3531,7 @@ stateDiagram-v2
       })();
 
       // Close sidebar on link click (mobile)
-      document.querySelectorAll(".sidebar-link").forEach(function (link) {
+      document.querySelectorAll(".sidebar-link, .sidebar-sublink").forEach(function (link) {
         link.addEventListener("click", function () {
           if (window.innerWidth <= 860) {
             document.getElementById("sidebar").classList.remove("open");
