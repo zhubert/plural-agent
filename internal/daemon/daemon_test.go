@@ -520,6 +520,10 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR(t *testing.T) {
 	})
 	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
+	// Backdate so recovery doesn't skip this item due to the grace period
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
 
 	d.recoverFromState(context.Background())
 
@@ -557,6 +561,10 @@ func TestDaemon_RecoverFromState_AsyncPendingNoPR(t *testing.T) {
 	})
 	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
+	// Backdate so recovery doesn't skip this item due to the grace period
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
 
 	d.recoverFromState(context.Background())
 
@@ -907,6 +915,10 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromAwaitReview(t *testing.T
 		CurrentStep: "await_review",
 	})
 	d.state.AdvanceWorkItem("item-1", "await_review", "async_pending")
+	// Backdate so recovery doesn't skip this item due to the grace period
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
 
 	d.recoverFromState(context.Background())
 
@@ -945,6 +957,10 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromFixCI(t *testing.T) {
 		CurrentStep: "fix_ci",
 	})
 	d.state.AdvanceWorkItem("item-1", "fix_ci", "async_pending")
+	// Backdate so recovery doesn't skip this item due to the grace period
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
 
 	d.recoverFromState(context.Background())
 
