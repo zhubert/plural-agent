@@ -477,6 +477,11 @@
         color: var(--text-dim);
       }
 
+      .sf-step {
+        display: flex;
+        align-items: center;
+      }
+
       .sf-arrow {
         color: var(--text-dim);
         font-size: 0.75rem;
@@ -821,6 +826,7 @@
 
         .state-flow {
           padding: 1rem 0;
+          flex-wrap: wrap;
         }
       }
 
@@ -1249,31 +1255,41 @@
 
         <h3>Pipeline overview</h3>
         <div class="state-flow">
-          <div class="sf-node">
-            <div class="sf-box sf-task">coding</div>
-            <span class="sf-type">ai.code</span>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-task">coding</div>
+              <span class="sf-type">ai.code</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
           </div>
-          <span class="sf-arrow">&rarr;</span>
-          <div class="sf-node">
-            <div class="sf-box sf-task">open_pr</div>
-            <span class="sf-type">github.create_pr</span>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-task">open_pr</div>
+              <span class="sf-type">github.create_pr</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
           </div>
-          <span class="sf-arrow">&rarr;</span>
-          <div class="sf-node">
-            <div class="sf-box sf-wait">await_review</div>
-            <span class="sf-type">pr.reviewed</span>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-wait">await_review</div>
+              <span class="sf-type">pr.reviewed</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
           </div>
-          <span class="sf-arrow">&rarr;</span>
-          <div class="sf-node">
-            <div class="sf-box sf-wait">await_ci</div>
-            <span class="sf-type">ci.complete</span>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-wait">await_ci</div>
+              <span class="sf-type">ci.complete</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
           </div>
-          <span class="sf-arrow">&rarr;</span>
-          <div class="sf-node">
-            <div class="sf-box sf-task">merge</div>
-            <span class="sf-type">github.merge</span>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-task">merge</div>
+              <span class="sf-type">github.merge</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
           </div>
-          <span class="sf-arrow">&rarr;</span>
           <div class="sf-node">
             <div class="sf-box sf-done">done</div>
             <span class="sf-type">succeed</span>
