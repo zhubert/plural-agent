@@ -2084,3 +2084,35 @@ func TestFindOrphanedWorktrees_LegacyLocation(t *testing.T) {
 		t.Errorf("Orphan ID = %q, want %q", orphans[0].ID, sessionID)
 	}
 }
+
+func TestDelete_EmptyWorktreePath_SkipsWorktreeRemoval(t *testing.T) {
+	repoPath := createTestRepo(t)
+	defer os.RemoveAll(repoPath)
+
+	// Create a branch that we can verify gets deleted
+	cmd := exec.Command("git", "branch", "stale-branch")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	sess := &config.Session{
+		ID:       "sess-empty-wt",
+		RepoPath: repoPath,
+		WorkTree: "", // Empty — the bug scenario
+		Branch:   "stale-branch",
+	}
+
+	err := svc.Delete(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("Delete with empty worktree should not return error, got: %v", err)
+	}
+
+	// Branch should still have been deleted
+	cmd = exec.Command("git", "branch", "--list", "stale-branch")
+	cmd.Dir = repoPath
+	output, _ := cmd.Output()
+	if strings.TrimSpace(string(output)) != "" {
+		t.Error("expected branch to be deleted even with empty worktree path")
+	}
+}
