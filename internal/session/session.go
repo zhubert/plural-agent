@@ -402,6 +402,23 @@ func (s *SessionService) Delete(ctx context.Context, sess *config.Session) error
 		"worktree", sess.WorkTree,
 		"branch", sess.Branch)
 
+	// Guard against empty worktree path — this can happen when sessions are
+	// reconstructed during recovery without a WorkTree field. Running
+	// `git worktree remove ""` would fail with "fatal: '' is not a working tree".
+	if sess.WorkTree == "" {
+		log.Warn("skipping worktree removal: empty worktree path", "sessionID", sess.ID)
+		// Still attempt branch deletion below
+		if sess.Branch != "" {
+			branchOutput, err := s.executor.CombinedOutput(ctx, sess.RepoPath, "git", "branch", "-D", sess.Branch)
+			if err != nil {
+				log.Warn("failed to delete branch (may already be deleted)", "output", string(branchOutput))
+			} else {
+				log.Debug("branch deleted successfully", "branch", sess.Branch)
+			}
+		}
+		return nil
+	}
+
 	// Remove the worktree
 	output, err := s.executor.CombinedOutput(ctx, sess.RepoPath, "git", "worktree", "remove", sess.WorkTree, "--force")
 	if err != nil {

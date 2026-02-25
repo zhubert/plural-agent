@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
-	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // reconstructSessions creates minimal config.Session objects for recovered work items
@@ -31,9 +33,18 @@ func (d *Daemon) reconstructSessions() {
 		// Only mark PRCreated if the item is past the coding step.
 		prCreated := item.CurrentStep != "" && item.CurrentStep != "coding"
 
+		// Reconstruct the worktree path from the session ID. Worktrees follow
+		// a deterministic layout: <worktreesDir>/<sessionID>. Without this,
+		// cleanup operations fail because they try to run `git worktree remove ""`.
+		var worktreePath string
+		if worktreesDir, err := paths.WorktreesDir(); err == nil {
+			worktreePath = filepath.Join(worktreesDir, item.SessionID)
+		}
+
 		sess := config.Session{
 			ID:            item.SessionID,
 			RepoPath:      d.state.RepoPath,
+			WorkTree:      worktreePath,
 			Branch:        item.Branch,
 			DaemonManaged: true,
 			Autonomous:    true,
@@ -164,6 +175,12 @@ func (d *Daemon) resetPhaseToIdle(item *daemonstate.WorkItem) {
 	})
 }
 
+// recoveryGracePeriod is how long after a work item was last updated before
+// recovery will treat it as stale. This prevents a race where a freshly started
+// session gets cleaned up because recovery runs before the worker has time to
+// make progress (e.g., create a PR).
+const recoveryGracePeriod = 2 * time.Minute
+
 // recoverAsyncPending handles recovery when a worker was active but daemon restarted.
 func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.WorkItem, log interface{ Info(string, ...any) }) {
 	if item.Branch == "" {
@@ -174,6 +191,15 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 			it.Phase = "idle"
 			it.UpdatedAt = time.Now()
 		})
+		return
+	}
+
+	// Skip items that were updated very recently — they likely have a live
+	// worker that hasn't finished yet. Without this guard, recovery can race
+	// with a freshly started session and clean it up before it produces a PR.
+	if time.Since(item.UpdatedAt) < recoveryGracePeriod {
+		log.Info("item updated recently, skipping recovery to avoid racing with active worker",
+			"updatedAt", item.UpdatedAt, "age", time.Since(item.UpdatedAt))
 		return
 	}
 
