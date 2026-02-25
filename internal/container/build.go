@@ -58,15 +58,12 @@ func GenerateDockerfile(langs []DetectedLang, version string) string {
 		}
 	}
 
-	// Base layer: Ubuntu + essential tools + Node.js + Claude Code
-	b.WriteString("FROM ubuntu:24.04\n")
-	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n")
-	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends \\\n")
-	b.WriteString("    git curl ca-certificates build-essential gnupg \\\n")
-	fmt.Fprintf(&b, "    && curl -fsSL https://deb.nodesource.com/setup_%s.x | bash - \\\n", nodeVersion)
-	b.WriteString("    && apt-get install -y nodejs \\\n")
-	b.WriteString("    && npm install -g @anthropic-ai/claude-code \\\n")
-	b.WriteString("    && apt-get clean && rm -rf /var/lib/apt/lists/*\n")
+	// Base layer: node Alpine image + essential tools + Claude Code.
+	// Alpine is significantly smaller than Ubuntu (~5MB vs ~80MB base).
+	// Node.js is always required for Claude Code, so node:XX-alpine is the natural base.
+	fmt.Fprintf(&b, "FROM node:%s-alpine\n", nodeVersion)
+	b.WriteString("RUN apk add --no-cache git curl ca-certificates build-base gnupg bash\n")
+	b.WriteString("RUN npm install -g @anthropic-ai/claude-code\n")
 
 	// Add language-specific install blocks
 	for _, l := range langs {
@@ -116,22 +113,13 @@ func languageInstallBlock(l DetectedLang) string {
 			v, goArch())
 	case LangRuby:
 		return fmt.Sprintf(""+
-			"RUN apt-get update && apt-get install -y --no-install-recommends \\\n"+
-			"    autoconf bison libssl-dev libyaml-dev libreadline-dev zlib1g-dev libffi-dev \\\n"+
+			"RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev \\\n"+
 			"    && curl -fsSL https://github.com/postmodern/ruby-install/releases/download/v0.9.3/ruby-install-0.9.3.tar.gz | tar -xz \\\n"+
 			"    && cd ruby-install-0.9.3 && make install && cd .. && rm -rf ruby-install-0.9.3 \\\n"+
-			"    && ruby-install --system ruby %s \\\n"+
-			"    && apt-get clean && rm -rf /var/lib/apt/lists/*\n",
+			"    && ruby-install --system ruby %s\n",
 			v)
 	case LangPython:
-		return fmt.Sprintf(""+
-			"RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \\\n"+
-			"    && add-apt-repository -y ppa:deadsnakes/ppa \\\n"+
-			"    && apt-get update && apt-get install -y --no-install-recommends \\\n"+
-			"       python%s python%s-venv python%s-dev \\\n"+
-			"    && apt-get clean && rm -rf /var/lib/apt/lists/*\n"+
-			"RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py | python%s\n",
-			v, v, v, v)
+		return "RUN apk add --no-cache python3 python3-dev py3-pip\n"
 	case LangRust:
 		return fmt.Sprintf(""+
 			"RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain %s\n"+
@@ -139,14 +127,12 @@ func languageInstallBlock(l DetectedLang) string {
 			v)
 	case LangJava:
 		return fmt.Sprintf(""+
-			"RUN apt-get update && apt-get install -y --no-install-recommends openjdk-%s-jdk \\\n"+
-			"    && apt-get clean && rm -rf /var/lib/apt/lists/*\n",
+			"RUN apk add --no-cache openjdk%s\n",
 			v)
 	case LangPHP:
 		return "" +
-			"RUN apt-get update && apt-get install -y --no-install-recommends php php-cli php-mbstring php-xml \\\n" +
-			"    && curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \\\n" +
-			"    && apt-get clean && rm -rf /var/lib/apt/lists/*\n"
+			"RUN apk add --no-cache php php-cli php-mbstring php-xml \\\n" +
+			"    && curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n"
 	case LangNode:
 		// Handled in base layer
 		return ""

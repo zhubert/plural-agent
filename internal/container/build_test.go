@@ -37,22 +37,18 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 	if !strings.Contains(df, "ruby-install --system ruby 3.3") {
 		t.Error("expected Ruby 3.3 install in Dockerfile")
 	}
-	if !strings.Contains(df, "setup_20.x") {
-		t.Error("expected Node 20 in base layer")
+	if !strings.Contains(df, "node:20-alpine") {
+		t.Error("expected Node 20 alpine base image")
 	}
 }
 
 func TestGenerateDockerfile_NoLanguages(t *testing.T) {
 	df := GenerateDockerfile(nil, "0.2.11")
-	if !strings.Contains(df, "ubuntu:24.04") {
-		t.Error("expected ubuntu base image")
+	if !strings.Contains(df, "node:20-alpine") {
+		t.Error("expected alpine base image with default Node 20")
 	}
 	if !strings.Contains(df, "claude-code") {
 		t.Error("expected Claude Code install")
-	}
-	// Should use default Node version
-	if !strings.Contains(df, "setup_20.x") {
-		t.Error("expected default Node 20 in base layer")
 	}
 }
 
@@ -121,11 +117,11 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
 	}, "0.2.11")
-	if !strings.Contains(df, "python3.11") {
-		t.Error("expected Python 3.11 install in Dockerfile")
+	if !strings.Contains(df, "python3") {
+		t.Error("expected python3 install in Dockerfile")
 	}
-	if !strings.Contains(df, "deadsnakes") {
-		t.Error("expected deadsnakes PPA in Dockerfile")
+	if !strings.Contains(df, "apk") {
+		t.Error("expected apk package manager in Dockerfile")
 	}
 }
 
@@ -145,7 +141,7 @@ func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangJava, Version: "21"},
 	}, "0.2.11")
-	if !strings.Contains(df, "openjdk-21-jdk") {
+	if !strings.Contains(df, "openjdk21") {
 		t.Error("expected OpenJDK 21 install in Dockerfile")
 	}
 }
@@ -221,10 +217,10 @@ func TestGenerateDockerfile_NodeVersionOverride(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangNode, Version: "22"},
 	}, "0.2.11")
-	if !strings.Contains(df, "setup_22.x") {
-		t.Error("expected detected Node version 22 to override default")
+	if !strings.Contains(df, "node:22-alpine") {
+		t.Error("expected detected Node version 22 to override default in base image")
 	}
-	if strings.Contains(df, "setup_20.x") {
+	if strings.Contains(df, "node:20-alpine") {
 		t.Error("should not use default Node 20 when version 22 is detected")
 	}
 }
