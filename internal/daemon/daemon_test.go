@@ -149,6 +149,22 @@ func TestDaemonOptions(t *testing.T) {
 	})
 }
 
+func TestWithPreacquiredLock_SkipsAcquire(t *testing.T) {
+	cfg := testConfig()
+	// Create a real lock (we just need a non-nil *DaemonLock)
+	tmpDir := t.TempDir()
+	lock, err := daemonstate.AcquireLock(filepath.Join(tmpDir, "preacquired-repo"))
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer lock.Release()
+
+	d := New(cfg, nil, nil, nil, discardLogger(), WithPreacquiredLock(lock))
+	if d.lock == nil {
+		t.Error("expected lock to be pre-set via WithPreacquiredLock")
+	}
+}
+
 func TestDaemon_GetMaxConcurrent(t *testing.T) {
 	t.Run("uses config when no override", func(t *testing.T) {
 		cfg := testConfig()

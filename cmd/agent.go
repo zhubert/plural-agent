@@ -79,10 +79,17 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	}
 	agentRepo = resolved
 
-	// Check no daemon already running for this repo
-	if pid, running := daemonstate.ReadLockStatus(agentRepo); running {
-		return fmt.Errorf("daemon already running for this repo (PID %d)", pid)
+	// Acquire exclusive lock BEFORE spawning child to prevent race conditions.
+	lock, err := daemonstate.AcquireLock(agentRepo)
+	if err != nil {
+		return fmt.Errorf("daemon already running or lock held: %w", err)
 	}
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			lock.Release()
+		}
+	}()
 
 	// Set up cancellable context for image build phase
 	ctx, cancel := context.WithCancel(context.Background())
@@ -131,14 +138,22 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	}
 	childPID := child.Process.Pid
 
+	// Transfer lock ownership to child process
+	if err := lock.UpdatePID(childPID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to update lock PID: %v\n", err)
+	}
+	lock.Detach()
+	lockReleased = true
+
 	// Detach — we don't wait for the child
 	if err := child.Process.Release(); err != nil {
 		return fmt.Errorf("failed to detach daemon process: %w", err)
 	}
 
-	// Poll lock file to confirm child started (timeout 30s)
-	if err := waitForDaemonLock(agentRepo, childPID, 30*time.Second); err != nil {
-		return err
+	// Brief wait to confirm child didn't exit immediately
+	time.Sleep(500 * time.Millisecond)
+	if _, running := daemonstate.ReadLockStatus(agentRepo); !running {
+		return fmt.Errorf("daemon child exited immediately (PID %d)", childPID)
 	}
 
 	logPath, _ := logger.DefaultLogPath()

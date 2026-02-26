@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zhubert/erg/internal/daemonstate"
 )
 
 // mockCWDGetter implements cwdGitRootGetter for tests.
@@ -275,4 +277,39 @@ func containsAny(s string, substrs ...string) bool {
 		}
 	}
 	return false
+}
+
+// TestDaemonize_LockPreventsRace validates that AcquireLock is exclusive:
+// after one lock is acquired for a repo, a second attempt for the same repo fails.
+// This is the primitive behavior that the daemonize function depends on to
+// prevent race conditions between multiple `erg start` invocations.
+func TestDaemonize_LockPreventsRace(t *testing.T) {
+	tmpDir := t.TempDir()
+	repo := filepath.Join(tmpDir, "race-test-repo")
+
+	// First lock acquisition should succeed
+	lock1, err := daemonstate.AcquireLock(repo)
+	if err != nil {
+		t.Fatalf("first AcquireLock failed: %v", err)
+	}
+	defer lock1.Release()
+
+	// Second lock acquisition for the same repo should fail
+	_, err = daemonstate.AcquireLock(repo)
+	if err == nil {
+		t.Fatal("expected second AcquireLock to fail, but it succeeded")
+	}
+
+	// Error message should indicate the lock is held
+	if !strings.Contains(err.Error(), "lock already held") {
+		t.Errorf("expected error about lock being held, got: %v", err)
+	}
+
+	// After releasing the first lock, acquisition should succeed again
+	lock1.Release()
+	lock2, err := daemonstate.AcquireLock(repo)
+	if err != nil {
+		t.Fatalf("AcquireLock after release failed: %v", err)
+	}
+	defer lock2.Release()
 }

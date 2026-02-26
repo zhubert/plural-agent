@@ -114,6 +114,12 @@ func WithMergeMethod(method string) Option {
 	return func(d *Daemon) { d.mergeMethod = method }
 }
 
+// WithPreacquiredLock tells the daemon that the lock was already acquired
+// by the parent process. The daemon will adopt it instead of acquiring a new one.
+func WithPreacquiredLock(lock *daemonstate.DaemonLock) Option {
+	return func(d *Daemon) { d.lock = lock }
+}
+
 // New creates a new daemon.
 func New(cfg agentconfig.Config, gitSvc *git.GitService, sessSvc *session.SessionService, registry *issues.ProviderRegistry, logger *slog.Logger, opts ...Option) *Daemon {
 	d := &Daemon{
@@ -146,12 +152,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"autoMerge", d.autoMerge,
 	)
 
-	// Acquire lock
-	lock, err := daemonstate.AcquireLock(d.repoFilter)
-	if err != nil {
-		return fmt.Errorf("failed to acquire daemon lock: %w", err)
+	// Acquire lock (unless pre-acquired by parent process)
+	if d.lock == nil {
+		lock, err := daemonstate.AcquireLock(d.repoFilter)
+		if err != nil {
+			return fmt.Errorf("failed to acquire daemon lock: %w", err)
+		}
+		d.lock = lock
 	}
-	d.lock = lock
 	defer d.releaseLock()
 
 	// Load or create state
