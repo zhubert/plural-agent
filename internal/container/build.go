@@ -196,7 +196,7 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 	tag := ImageTag(dockerfile)
 
 	// Check if image already exists (cached)
-	if _, err := dockerCommandFunc(ctx, "", "image", "inspect", tag); err == nil {
+	if ImageExists(ctx, langs, version) {
 		logger.Info("using cached container image", "image", tag)
 		return tag, nil
 	}
