@@ -893,4 +893,70 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestValidateRebaseParams(t *testing.T) {
+	tests := []struct {
+		name      string
+		params    map[string]any
+		wantError bool
+	}{
+		{"nil params", nil, false},
+		{"empty params", map[string]any{}, false},
+		{"valid max_rebase_rounds", map[string]any{"max_rebase_rounds": 3}, false},
+		{"zero max_rebase_rounds", map[string]any{"max_rebase_rounds": 0}, true},
+		{"negative max_rebase_rounds", map[string]any{"max_rebase_rounds": -1}, true},
+		{"float64 valid", map[string]any{"max_rebase_rounds": float64(2)}, false},
+		{"float64 zero", map[string]any{"max_rebase_rounds": float64(0)}, true},
+		{"float64 negative", map[string]any{"max_rebase_rounds": float64(-1)}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateRebaseParams("states.rebase", tt.params)
+			if tt.wantError && len(errs) == 0 {
+				t.Error("expected validation error")
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("unexpected validation errors: %v", errs)
+			}
+		})
+	}
+}
+
+func TestValidate_GitRebaseAction(t *testing.T) {
+	// A workflow with git.rebase and invalid max_rebase_rounds should fail validation
+	cfg := &Config{
+		Workflow: "test",
+		Start:   "rebase",
+		Source:   SourceConfig{Provider: "github", Filter: FilterConfig{Label: "queued"}},
+		States: map[string]*State{
+			"rebase": {
+				Type:   StateTypeTask,
+				Action: "git.rebase",
+				Params: map[string]any{
+					"max_rebase_rounds": 0,
+				},
+				Next:  "done",
+				Error: "failed",
+			},
+			"done": {
+				Type: StateTypeSucceed,
+			},
+			"failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+
+	errs := Validate(cfg)
+	found := false
+	for _, e := range errs {
+		if e.Field == "states.rebase.params.max_rebase_rounds" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected validation error for max_rebase_rounds=0, got errors: %v", errs)
+	}
+}
+
 

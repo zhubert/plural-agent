@@ -365,11 +365,39 @@ func primaryWorkflowPath(cfg *workflow.Config) []string {
 		case workflow.StateTypeTask, workflow.StateTypeWait, workflow.StateTypePass:
 			current = state.Next
 		case workflow.StateTypeChoice:
-			if len(state.Choices) > 0 {
-				current = state.Choices[0].Next
-			} else {
-				current = state.Default
+			// Pick the first choice that leads forward through the graph,
+			// preferring choices that don't dead-end back into already-visited
+			// states. This ensures the displayed path follows the "happy path"
+			// (e.g., ci_passed → await_review) rather than a bounded loop
+			// (e.g., conflicting → rebase → await_ci).
+			picked := ""
+			for _, c := range state.Choices {
+				if c.Next == "" || visited[c.Next] {
+					continue
+				}
+				// Check if this choice leads to a state that immediately
+				// loops back to an already-visited state
+				if nextState, ok := cfg.States[c.Next]; ok {
+					if nextState.Next != "" && visited[nextState.Next] {
+						continue
+					}
+				}
+				picked = c.Next
+				break
 			}
+			// Fallback: first unvisited choice
+			if picked == "" {
+				for _, c := range state.Choices {
+					if c.Next != "" && !visited[c.Next] {
+						picked = c.Next
+						break
+					}
+				}
+			}
+			if picked == "" {
+				picked = state.Default
+			}
+			current = picked
 		case workflow.StateTypeSucceed, workflow.StateTypeFail:
 			// Terminal — include it but stop traversal
 			current = ""

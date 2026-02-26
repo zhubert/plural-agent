@@ -1387,6 +1387,79 @@ func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, e
 	return logs, nil
 }
 
+// rebaseAction implements the git.rebase action.
+type rebaseAction struct {
+	daemon *Daemon
+}
+
+// Execute rebases the work item's branch onto the base branch.
+func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	// Check max rounds
+	maxRounds := ac.Params.Int("max_rebase_rounds", 3)
+	rounds := getRebaseRounds(item.StepData)
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max rebase rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	// Refresh stale session to ensure worktree exists
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	// Determine base branch
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	// Increment rounds
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["rebase_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
+
+	// Perform the rebase
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	rebaseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	if err := d.gitService.RebaseBranch(rebaseCtx, workDir, item.Branch, baseBranch); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("rebase failed: %w", err)}
+	}
+
+	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1)
+	return workflow.ActionResult{Success: true}
+}
+
+// getRebaseRounds extracts the rebase round counter from step data.
+func getRebaseRounds(stepData map[string]any) int {
+	v, ok := stepData["rebase_rounds"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
 // formatAction implements the git.format action.
 type formatAction struct {
 	daemon *Daemon

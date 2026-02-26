@@ -140,6 +140,7 @@ var ValidActions = map[string]bool{
 	"github.request_review": true,
 	"ai.fix_ci":             true,
 	"git.format":            true,
+	"git.rebase":            true,
 }
 
 // ValidEvents is the set of recognized event names for wait states.
