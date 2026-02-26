@@ -47,8 +47,13 @@ type WorkItem struct {
 
 // ConsumesSlot returns true if the work item currently consumes a concurrency slot.
 // This is true when the item has an active async worker (Phase == "async_pending"
-// or Phase == "addressing_feedback").
+// or Phase == "addressing_feedback"), UNLESS the item is in the await_review step.
+// Items awaiting review are "set aside" — they should never block new coding work
+// from starting, even while actively addressing PR feedback comments.
 func (item *WorkItem) ConsumesSlot() bool {
+	if item.CurrentStep == "await_review" {
+		return false
+	}
 	return item.Phase == "async_pending" || item.Phase == "addressing_feedback"
 }
 
