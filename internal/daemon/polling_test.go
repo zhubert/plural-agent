@@ -228,6 +228,76 @@ func TestStartQueuedItems_RespectsFullSlots(t *testing.T) {
 	}
 }
 
+// TestStartQueuedItems_AwaitReviewDoesNotBlockNewWork verifies that a work item in
+// await_review (including when actively addressing feedback) never blocks new coding
+// work from starting. This is the core invariant for issue #158: items awaiting
+// review are "set aside" and must not consume a concurrency slot.
+func TestStartQueuedItems_AwaitReviewDoesNotBlockNewWork(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("git", []string{"rev-parse"}, exec.MockResponse{
+		Err: errGHFailed,
+	})
+	mockExec.AddPrefixMatch("git", []string{"worktree"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"checkout"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+	d.maxConcurrent = 1
+	cfg.Repos = []string{"/test/repo"}
+
+	tests := []struct {
+		name        string
+		reviewPhase string
+	}{
+		{
+			name:        "await_review/idle does not block new coding work",
+			reviewPhase: "idle",
+		},
+		{
+			name:        "await_review/addressing_feedback does not block new coding work",
+			reviewPhase: "addressing_feedback",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d.state = daemonstate.NewDaemonState("/test/repo")
+
+			// Add an item actively awaiting review (consuming no coding slot)
+			d.state.AddWorkItem(&daemonstate.WorkItem{
+				ID:       "review-item",
+				IssueRef: config.IssueRef{Source: "github", ID: "10"},
+			})
+			d.state.AdvanceWorkItem("review-item", "await_review", tc.reviewPhase)
+			d.state.UpdateWorkItem("review-item", func(it *daemonstate.WorkItem) {
+				it.State = daemonstate.WorkItemActive
+			})
+
+			// Verify it doesn't consume a slot
+			if d.activeSlotCount() != 0 {
+				t.Fatalf("await_review/%s should not consume a slot, got %d", tc.reviewPhase, d.activeSlotCount())
+			}
+
+			// Add a new queued issue
+			d.state.AddWorkItem(&daemonstate.WorkItem{
+				ID:       "new-item",
+				IssueRef: config.IssueRef{Source: "github", ID: "99", Title: "New issue"},
+			})
+
+			// startQueuedItems should attempt to start the new item despite the await_review item
+			d.startQueuedItems(context.Background())
+
+			// The new item should no longer be in queued state (it was processed)
+			newItem := d.state.GetWorkItem("new-item")
+			if newItem.State == daemonstate.WorkItemQueued && newItem.CurrentStep == "" {
+				t.Errorf("new item should have been processed (not blocked by await_review/%s), still queued", tc.reviewPhase)
+			}
+		})
+	}
+}
+
 // TestCheckLinkedPRsAndUnqueue_WithLinkedPR verifies that when a GitHub issue has
 // an open linked PR, checkLinkedPRsAndUnqueue returns true and marks the item completed.
 func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
