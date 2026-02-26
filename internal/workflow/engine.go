@@ -521,6 +521,118 @@ func mergeData(base, overlay map[string]any) map[string]any {
 	return result
 }
 
+// FindRecoveryWaitStep returns the most appropriate wait state to recover to
+// when an async worker was interrupted at the given step. It resolves in order:
+//  1. currentStep itself, if it is a wait state.
+//  2. The last wait state seen before currentStep when traversing the workflow
+//     graph from the start state (BFS, following all outgoing edges).
+//  3. The first wait state reachable forward from currentStep.
+//  4. Empty string if the workflow contains no wait states.
+//
+// This allows recovery to work correctly for any workflow, including custom ones
+// that use non-default step names such as "check_ci" or "wait_for_approval".
+func (e *Engine) FindRecoveryWaitStep(currentStep string) string {
+	if e.config == nil || e.config.States == nil {
+		return ""
+	}
+
+	// Case 1: current step is itself a wait state.
+	if state, ok := e.config.States[currentStep]; ok && state.Type == StateTypeWait {
+		return currentStep
+	}
+
+	// Case 2: BFS from the workflow start, tracking the last wait state seen on
+	// each shortest path. precedingWait[step] = the last wait state encountered
+	// before reaching step.
+	precedingWait := map[string]string{e.config.Start: ""}
+	queue := []string{e.config.Start}
+	visited := map[string]bool{e.config.Start: true}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		state, ok := e.config.States[cur]
+		if !ok || state.Type == StateTypeSucceed || state.Type == StateTypeFail {
+			continue
+		}
+
+		lastWait := precedingWait[cur]
+		if state.Type == StateTypeWait {
+			lastWait = cur
+		}
+
+		for _, next := range stateOutgoing(state) {
+			if !visited[next] {
+				visited[next] = true
+				precedingWait[next] = lastWait
+				queue = append(queue, next)
+			}
+		}
+	}
+
+	if pw, ok := precedingWait[currentStep]; ok && pw != "" {
+		return pw
+	}
+
+	// Case 3: walk forward from currentStep to find the first wait state.
+	fwdVisited := map[string]bool{currentStep: true}
+	fwdQueue := []string{currentStep}
+
+	for len(fwdQueue) > 0 {
+		cur := fwdQueue[0]
+		fwdQueue = fwdQueue[1:]
+
+		state, ok := e.config.States[cur]
+		if !ok || state.Type == StateTypeSucceed || state.Type == StateTypeFail {
+			continue
+		}
+
+		for _, next := range stateOutgoing(state) {
+			if fwdVisited[next] {
+				continue
+			}
+			fwdVisited[next] = true
+			nextState, ok := e.config.States[next]
+			if ok && nextState.Type == StateTypeWait {
+				return next
+			}
+			fwdQueue = append(fwdQueue, next)
+		}
+	}
+
+	return ""
+}
+
+// stateOutgoing returns all states directly reachable from state in one step,
+// following every possible transition edge (next, error, timeout_next, catch, choices, default).
+func stateOutgoing(state *State) []string {
+	var nexts []string
+	if state.Next != "" {
+		nexts = append(nexts, state.Next)
+	}
+	if state.Error != "" {
+		nexts = append(nexts, state.Error)
+	}
+	if state.TimeoutNext != "" {
+		nexts = append(nexts, state.TimeoutNext)
+	}
+	for _, c := range state.Catch {
+		if c.Next != "" {
+			nexts = append(nexts, c.Next)
+		}
+	}
+	for _, ch := range state.Choices {
+		if ch.Next != "" {
+			nexts = append(nexts, ch.Next)
+		}
+	}
+	if state.Default != "" {
+		nexts = append(nexts, state.Default)
+	}
+	return nexts
+}
+
 // GetState returns the state definition for a given state name.
 func (e *Engine) GetState(name string) *State {
 	if e.config.States == nil {

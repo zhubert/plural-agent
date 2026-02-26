@@ -11,6 +11,7 @@ import (
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 func TestDaemon_ReconstructSessions_RecoveredItemsGetSessions(t *testing.T) {
@@ -367,6 +368,139 @@ func TestDaemon_RecoverAsyncPending_RecoversStaleItems(t *testing.T) {
 	}
 	if item.Phase != "idle" {
 		t.Errorf("expected phase to be idle, got %s", item.Phase)
+	}
+}
+
+// TestDaemon_RecoverAsyncPending_CustomWorkflow verifies that recovery uses the
+// workflow engine to determine the correct wait state, rather than hardcoded
+// step names. A custom workflow with non-default step names like "check_ci" and
+// "wait_for_approval" should route to those steps correctly.
+func TestDaemon_RecoverAsyncPending_CustomWorkflow(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetPRState to return OPEN
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	// Register a custom workflow engine with non-default step names.
+	customCfg := &workflow.Config{
+		Start: "implement",
+		States: map[string]*workflow.State{
+			"implement":         {Type: workflow.StateTypeTask, Action: "ai.code", Next: "create_pr"},
+			"create_pr":         {Type: workflow.StateTypeTask, Action: "github.create_pr", Next: "check_ci"},
+			"check_ci":          {Type: workflow.StateTypeWait, Event: "ci.complete", Next: "wait_for_approval"},
+			"wait_for_approval": {Type: workflow.StateTypeWait, Event: "pr.reviewed", Next: "auto_merge"},
+			"auto_merge":        {Type: workflow.StateTypeTask, Action: "github.merge", Next: "finished"},
+			"finished":          {Type: workflow.StateTypeSucceed},
+			"error":             {Type: workflow.StateTypeFail},
+		},
+	}
+	d.engines = map[string]*workflow.Engine{
+		"/test/repo": workflow.NewEngine(customCfg, workflow.NewActionRegistry(), nil, discardLogger()),
+	}
+
+	// Item that was in "implement" (coding) step when daemon stopped, PR already exists.
+	sess := testSession("sess-custom")
+	sess.Branch = "issue-custom"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-custom",
+		IssueRef:    config.IssueRef{Source: "github", ID: "custom"},
+		SessionID:   "sess-custom",
+		Branch:      "issue-custom",
+		CurrentStep: "implement",
+		Phase:       "async_pending",
+		StepData:    map[string]any{},
+	})
+	d.state.AdvanceWorkItem("item-custom", "implement", "async_pending")
+	d.state.UpdateWorkItem("item-custom", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-custom")
+	if item.CurrentStep != "check_ci" {
+		t.Errorf("expected CurrentStep check_ci (custom CI wait state), got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected Phase idle, got %s", item.Phase)
+	}
+	if item.State == daemonstate.WorkItemQueued {
+		t.Error("expected State to not be WorkItemQueued after recovery with existing PR")
+	}
+}
+
+// TestDaemon_RecoverAsyncPending_CustomWorkflow_PastCI verifies that recovery
+// routes to the second wait state when the item was past the CI wait state.
+func TestDaemon_RecoverAsyncPending_CustomWorkflow_PastCI(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	customCfg := &workflow.Config{
+		Start: "implement",
+		States: map[string]*workflow.State{
+			"implement":         {Type: workflow.StateTypeTask, Action: "ai.code", Next: "create_pr"},
+			"create_pr":         {Type: workflow.StateTypeTask, Action: "github.create_pr", Next: "check_ci"},
+			"check_ci":          {Type: workflow.StateTypeWait, Event: "ci.complete", Next: "wait_for_approval"},
+			"wait_for_approval": {Type: workflow.StateTypeWait, Event: "pr.reviewed", Next: "auto_merge"},
+			"auto_merge":        {Type: workflow.StateTypeTask, Action: "github.merge", Next: "finished"},
+			"finished":          {Type: workflow.StateTypeSucceed},
+			"error":             {Type: workflow.StateTypeFail},
+		},
+	}
+	d.engines = map[string]*workflow.Engine{
+		"/test/repo": workflow.NewEngine(customCfg, workflow.NewActionRegistry(), nil, discardLogger()),
+	}
+
+	sess := testSession("sess-past-ci")
+	sess.Branch = "issue-past-ci"
+	cfg.AddSession(*sess)
+
+	// Item was at "auto_merge" (after both wait states) when daemon stopped.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-past-ci",
+		IssueRef:    config.IssueRef{Source: "github", ID: "past-ci"},
+		SessionID:   "sess-past-ci",
+		Branch:      "issue-past-ci",
+		CurrentStep: "auto_merge",
+		Phase:       "async_pending",
+		StepData:    map[string]any{},
+	})
+	d.state.AdvanceWorkItem("item-past-ci", "auto_merge", "async_pending")
+	d.state.UpdateWorkItem("item-past-ci", func(it *daemonstate.WorkItem) {
+		it.UpdatedAt = time.Now().Add(-3 * time.Minute)
+	})
+
+	d.recoverFromState(context.Background())
+
+	item := d.state.GetWorkItem("item-past-ci")
+	if item.CurrentStep != "wait_for_approval" {
+		t.Errorf("expected CurrentStep wait_for_approval (last wait state before auto_merge), got %s", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected Phase idle, got %s", item.Phase)
 	}
 }
 
