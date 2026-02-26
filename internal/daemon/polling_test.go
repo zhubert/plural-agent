@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
@@ -13,6 +14,19 @@ import (
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/session"
 )
+
+// alwaysFiredChecker is an EventChecker that always fires for the given event.
+type alwaysFiredChecker struct {
+	event string
+	data  map[string]any
+}
+
+func (c *alwaysFiredChecker) CheckEvent(_ context.Context, event string, _ *workflow.ParamHelper, _ *workflow.WorkItemView) (bool, map[string]any, error) {
+	if event == c.event {
+		return true, c.data, nil
+	}
+	return false, nil, nil
+}
 
 func TestFetchIssuesForProvider_GitHub(t *testing.T) {
 	cfg := testConfig()
@@ -452,5 +466,180 @@ func TestCheckLinkedPRsAndUnqueue_NonNumericID(t *testing.T) {
 	// No calls should have been made.
 	if len(mockExec.GetCalls()) != 0 {
 		t.Errorf("expected no CLI calls for non-numeric ID, got %d", len(mockExec.GetCalls()))
+	}
+}
+
+// TestStartQueuedItems_PrioritizesAwaitReviewBeforeNewWork verifies that when there
+// are both set-aside await_review items and new queued items, startQueuedItems checks
+// the await_review items first — even if the regular review-poll interval has not yet
+// elapsed. This ensures existing work is finished before new work is started.
+func TestStartQueuedItems_PrioritizesAwaitReviewBeforeNewWork(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Minimal workflow: await_review fires → item succeeds immediately.
+	// Using a succeed terminal avoids needing any sync-action mocks.
+	wfCfg := &workflow.Config{
+		Start: "await_review",
+		Source: workflow.SourceConfig{Provider: "github"},
+		States: map[string]*workflow.State{
+			"await_review": {
+				Type:  workflow.StateTypeWait,
+				Event: "pr.reviewed",
+				Next:  "done",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+
+	checker := &alwaysFiredChecker{
+		event: "pr.reviewed",
+		data:  map[string]any{"review_approved": true},
+	}
+	customEngine := workflow.NewEngine(wfCfg, workflow.NewActionRegistry(), checker, discardLogger())
+
+	// Inject the custom engine for the session's repo path.
+	repoPath := "/test/repo"
+	d.engines = map[string]*workflow.Engine{repoPath: customEngine}
+	d.repoFilter = repoPath
+	d.maxConcurrent = 1
+	cfg.Repos = []string{repoPath}
+
+	// Simulate a recent review poll so processWorkItems would skip processWaitItems.
+	// startQueuedItems must call processWaitItems itself to honour the priority rule.
+	d.lastReviewPollAt = time.Now()
+
+	// Set up a session for the await_review item.
+	sess := testSession("sess-await")
+	sess.RepoPath = repoPath
+	cfg.AddSession(*sess)
+
+	// Add the await_review item.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "await-item",
+		IssueRef:  config.IssueRef{Source: "github", ID: "10"},
+		SessionID: sess.ID,
+		Branch:    sess.Branch,
+	})
+	d.state.AdvanceWorkItem("await-item", "await_review", "idle")
+	d.state.UpdateWorkItem("await-item", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+
+	// Add a new queued item.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "new-item",
+		IssueRef: config.IssueRef{Source: "github", ID: "99", Title: "New issue"},
+	})
+
+	d.startQueuedItems(context.Background())
+
+	// The await_review item must have advanced out of await_review — its event
+	// was ready and startQueuedItems must have checked it before starting new work.
+	awaitItem := d.state.GetWorkItem("await-item")
+	if awaitItem.CurrentStep == "await_review" {
+		t.Error("await-item should have advanced out of await_review: startQueuedItems must prioritise set-aside workflows")
+	}
+	if !awaitItem.IsTerminal() {
+		t.Errorf("await-item should be terminal after the event fired and led to 'done', got step=%q phase=%q", awaitItem.CurrentStep, awaitItem.Phase)
+	}
+}
+
+// asyncHoldAction is a test Action that simulates spawning async work by
+// returning Async: true. This causes the engine to set the work item's phase
+// to "async_pending", which consumes a concurrency slot without any real side effects.
+type asyncHoldAction struct{}
+
+func (a *asyncHoldAction) Execute(_ context.Context, _ *workflow.ActionContext) workflow.ActionResult {
+	return workflow.ActionResult{Async: true}
+}
+
+// TestStartQueuedItems_AwaitReviewConsumesSlotPreventsNewWork verifies that when a
+// set-aside await_review item is resumed and its continuation requires an async slot,
+// new queued work does not start — the existing workflow gets priority.
+func TestStartQueuedItems_AwaitReviewConsumesSlotPreventsNewWork(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Workflow: await_review → hold (async) so that resuming the review item
+	// consumes the one available concurrency slot via async_pending phase.
+	wfCfg := &workflow.Config{
+		Start:  "await_review",
+		Source: workflow.SourceConfig{Provider: "github"},
+		States: map[string]*workflow.State{
+			"await_review": {
+				Type:  workflow.StateTypeWait,
+				Event: "pr.reviewed",
+				Next:  "hold",
+			},
+			// Async task: returns Async:true, setting phase to async_pending
+			// and consuming the concurrency slot.
+			"hold": {
+				Type:   workflow.StateTypeTask,
+				Action: "test.async_hold",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+
+	checker := &alwaysFiredChecker{
+		event: "pr.reviewed",
+		data:  map[string]any{"review_approved": true},
+	}
+	registry := workflow.NewActionRegistry()
+	registry.Register("test.async_hold", &asyncHoldAction{})
+	customEngine := workflow.NewEngine(wfCfg, registry, checker, discardLogger())
+
+	repoPath := "/test/repo"
+	d.engines = map[string]*workflow.Engine{repoPath: customEngine}
+	d.repoFilter = repoPath
+	d.maxConcurrent = 1
+	cfg.Repos = []string{repoPath}
+
+	// Suppress the normal review-poll so any wait-item processing comes only
+	// from startQueuedItems calling processWaitItems.
+	d.lastReviewPollAt = time.Now()
+
+	sess := testSession("sess-await2")
+	sess.RepoPath = repoPath
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "await-item2",
+		IssueRef:  config.IssueRef{Source: "github", ID: "20"},
+		SessionID: sess.ID,
+		Branch:    sess.Branch,
+	})
+	d.state.AdvanceWorkItem("await-item2", "await_review", "idle")
+	d.state.UpdateWorkItem("await-item2", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+
+	// Add a new queued item.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "new-item2",
+		IssueRef: config.IssueRef{Source: "github", ID: "100", Title: "Brand new issue"},
+	})
+
+	d.startQueuedItems(context.Background())
+
+	// await-item2 must have left await_review and be in async_pending (slot consumed).
+	awaitItem := d.state.GetWorkItem("await-item2")
+	if awaitItem.CurrentStep == "await_review" {
+		t.Error("await-item2 should have advanced out of await_review")
+	}
+	if awaitItem.Phase != "async_pending" {
+		t.Errorf("await-item2 should be in async_pending phase (slot consumed), got %q", awaitItem.Phase)
+	}
+
+	// new-item2 must still be queued: the single concurrency slot is held by
+	// the resumed await_review workflow in async_pending phase.
+	newItem := d.state.GetWorkItem("new-item2")
+	if newItem.State != daemonstate.WorkItemQueued {
+		t.Errorf("new-item2 should remain queued when the slot is taken by the resumed await_review item, got state=%q", newItem.State)
 	}
 }
