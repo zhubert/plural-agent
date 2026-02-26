@@ -22,7 +22,7 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	}
 
 	// Verify expected states exist
-	expectedStates := []string{"coding", "open_pr", "await_ci", "check_ci_result", "rebase", "fix_ci", "push_ci_fix", "await_review", "merge", "done", "failed"}
+	expectedStates := []string{"coding", "open_pr", "await_ci", "check_ci_result", "rebase", "resolve_conflicts", "push_conflict_fix", "fix_ci", "push_ci_fix", "await_review", "merge", "done", "failed"}
 	for _, name := range expectedStates {
 		if _, ok := cfg.States[name]; !ok {
 			t.Errorf("expected state %q to exist", name)
@@ -92,12 +92,40 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	if rebase.Next != "await_ci" {
 		t.Errorf("rebase next: expected await_ci, got %s", rebase.Next)
 	}
-	if rebase.Error != "failed" {
-		t.Errorf("rebase error: expected failed, got %s", rebase.Error)
+	if rebase.Error != "resolve_conflicts" {
+		t.Errorf("rebase error: expected resolve_conflicts, got %s", rebase.Error)
 	}
 	rbp := NewParamHelper(rebase.Params)
 	if rbp.Int("max_rebase_rounds", 0) != 3 {
 		t.Error("rebase max_rebase_rounds: expected 3")
+	}
+
+	// resolve_conflicts state
+	resolveConflicts := cfg.States["resolve_conflicts"]
+	if resolveConflicts.Type != StateTypeTask {
+		t.Errorf("resolve_conflicts type: expected task, got %s", resolveConflicts.Type)
+	}
+	if resolveConflicts.Action != "ai.resolve_conflicts" {
+		t.Errorf("resolve_conflicts action: expected ai.resolve_conflicts, got %s", resolveConflicts.Action)
+	}
+	if resolveConflicts.Next != "push_conflict_fix" {
+		t.Errorf("resolve_conflicts next: expected push_conflict_fix, got %s", resolveConflicts.Next)
+	}
+	if resolveConflicts.Error != "failed" {
+		t.Errorf("resolve_conflicts error: expected failed, got %s", resolveConflicts.Error)
+	}
+	rcp := NewParamHelper(resolveConflicts.Params)
+	if rcp.Int("max_conflict_rounds", 0) != 3 {
+		t.Error("resolve_conflicts max_conflict_rounds: expected 3")
+	}
+
+	// push_conflict_fix loops back to await_ci
+	pushConflictFix := cfg.States["push_conflict_fix"]
+	if pushConflictFix.Action != "github.push" {
+		t.Errorf("push_conflict_fix action: expected github.push, got %s", pushConflictFix.Action)
+	}
+	if pushConflictFix.Next != "await_ci" {
+		t.Errorf("push_conflict_fix next: expected await_ci, got %s", pushConflictFix.Next)
 	}
 
 	// fix_ci params
@@ -137,7 +165,7 @@ func TestDefaultWorkflowConfig_RetryOnNetworkStates(t *testing.T) {
 	cfg := DefaultWorkflowConfig()
 
 	// States that should have retry configured
-	retryStates := []string{"open_pr", "push_ci_fix", "rebase", "merge"}
+	retryStates := []string{"open_pr", "push_ci_fix", "push_conflict_fix", "rebase", "merge"}
 	for _, name := range retryStates {
 		state, ok := cfg.States[name]
 		if !ok {

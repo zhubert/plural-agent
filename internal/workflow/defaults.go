@@ -6,13 +6,15 @@ import "time"
 //
 //	coding → open_pr → await_ci → check_ci_result
 //	  → conflicting=true: rebase → await_ci (loop, bounded by max_rebase_rounds)
+//	    → rebase error: resolve_conflicts (Claude AI) → push_conflict_fix → await_ci
 //	  → ci_passed=true:   await_review → merge → done
 //	  → ci_failed=true:   fix_ci → push_ci_fix → await_ci (loop)
 //	  → fix_ci error (max rounds): → failed
 //
 // CI is checked before review to avoid wasting reviewer time on failing builds.
 // The fix loop is bounded by max_ci_fix_rounds (default 3).
-// Merge conflicts are detected and rebased automatically (bounded by max_rebase_rounds, default 3).
+// Merge conflicts are first rebased mechanically (bounded by max_rebase_rounds, default 3).
+// If rebase fails (real conflicts), Claude resolves them via ai.resolve_conflicts.
 func DefaultWorkflowConfig() *Config {
 	return &Config{
 		Workflow: "issue-to-merge",
@@ -73,8 +75,24 @@ func DefaultWorkflowConfig() *Config {
 					"max_rebase_rounds": 3,
 				},
 				Next:  "await_ci",
-				Error: "failed",
+				Error: "resolve_conflicts",
 				Retry: []RetryConfig{DefaultRetryConfig()},
+			},
+			"resolve_conflicts": {
+				Type:   StateTypeTask,
+				Action: "ai.resolve_conflicts",
+				Params: map[string]any{
+					"max_conflict_rounds": 3,
+				},
+				Next:  "push_conflict_fix",
+				Error: "failed",
+			},
+			"push_conflict_fix": {
+				Type:   StateTypeTask,
+				Action: "github.push",
+				Next:   "await_ci",
+				Error:  "failed",
+				Retry:  []RetryConfig{DefaultRetryConfig()},
 			},
 			"fix_ci": {
 				Type:   StateTypeTask,

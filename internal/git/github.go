@@ -521,6 +521,37 @@ func (s *GitService) RebaseBranch(ctx context.Context, worktreePath, branch, bas
 	return nil
 }
 
+// MergeBaseIntoBranch merges origin/<baseBranch> into the current branch using
+// git merge (not rebase). This leaves conflict markers in the worktree when
+// there are conflicts, allowing Claude to resolve them.
+// Returns the list of conflicted files (nil if merge was clean) and an error
+// only for unexpected failures (not conflicts).
+func (s *GitService) MergeBaseIntoBranch(ctx context.Context, worktreePath, baseBranch string) ([]string, error) {
+	// Fetch latest base branch
+	_, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "fetch", "origin", baseBranch)
+	if err != nil {
+		return nil, fmt.Errorf("git fetch origin %s failed: %w", baseBranch, err)
+	}
+
+	// Attempt merge
+	_, mergeErr := s.executor.CombinedOutput(ctx, worktreePath, "git", "merge", "origin/"+baseBranch, "--no-edit")
+	if mergeErr != nil {
+		// Check if this is a conflict
+		conflictedFiles, conflictErr := s.GetConflictedFiles(ctx, worktreePath)
+		if conflictErr == nil && len(conflictedFiles) > 0 {
+			// Conflicts — leave the merge in progress for Claude to resolve
+			return conflictedFiles, nil
+		}
+
+		// Not a conflict — some other failure; abort to leave worktree clean
+		s.AbortMerge(ctx, worktreePath)
+		return nil, fmt.Errorf("git merge origin/%s failed: %w", baseBranch, mergeErr)
+	}
+
+	// Clean merge — no conflicts
+	return nil, nil
+}
+
 // CIStatus represents the overall CI check status for a PR.
 type CIStatus string
 

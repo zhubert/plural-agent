@@ -139,6 +139,7 @@ var ValidActions = map[string]bool{
 	"github.close_issue":    true,
 	"github.request_review": true,
 	"ai.fix_ci":             true,
+	"ai.resolve_conflicts":  true,
 	"git.format":            true,
 	"git.rebase":            true,
 	"asana.comment":         true,
