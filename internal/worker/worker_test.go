@@ -658,3 +658,30 @@ func TestSessionWorker_HandlePushBranch_Rejected(t *testing.T) {
 	// If we got here without hanging, the rejection worked.
 	// No further state to verify since push doesn't mark any session fields.
 }
+
+func TestSessionWorker_DoneChan_ClosedWhenDone(t *testing.T) {
+	w := NewDoneWorker()
+
+	select {
+	case <-w.DoneChan():
+		// expected: channel is already closed for a done worker
+	default:
+		t.Fatal("DoneChan() should be closed for a done worker")
+	}
+}
+
+func TestSessionWorker_DoneChan_BlocksUntilDone(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+	runner := claude.NewMockRunner("s1", false, nil)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	select {
+	case <-w.DoneChan():
+		t.Fatal("DoneChan() should not be closed for a running worker")
+	default:
+		// expected: channel is open while worker has not finished
+	}
+}

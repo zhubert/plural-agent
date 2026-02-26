@@ -146,6 +146,13 @@ func (w *SessionWorker) Done() bool {
 	}
 }
 
+// DoneChan returns the channel that is closed when the worker finishes.
+// Callers can select on this alongside other channels (e.g. ctx.Done())
+// to avoid blocking indefinitely if the worker never completes.
+func (w *SessionWorker) DoneChan() <-chan struct{} {
+	return w.done
+}
+
 // run is the main worker loop.
 func (w *SessionWorker) run() {
 	defer w.once.Do(func() { close(w.done) })

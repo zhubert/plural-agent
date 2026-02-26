@@ -917,11 +917,14 @@ func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.W
 	d.mu.Unlock()
 
 	go func() {
-		w.Wait()
 		select {
+		case <-w.DoneChan():
+			select {
+			case <-ctx.Done():
+			default:
+				d.notifyWorkerDone()
+			}
 		case <-ctx.Done():
-		default:
-			d.notifyWorkerDone()
 		}
 	}()
 
