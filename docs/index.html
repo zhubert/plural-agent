@@ -2242,6 +2242,129 @@
           </div>
         </div>
 
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.rebase</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Rebases the feature branch onto the latest base branch and
+            force-pushes. This is a mechanical rebase — if real file-level
+            conflicts exist, the rebase is aborted and an error is returned.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_rebase_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of rebase attempts before returning an error.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>rebase_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-ai-resolve">AI conflict resolution</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.resolve_conflicts</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Merges the base branch into the feature branch (leaving conflict
+            markers in place), then starts a Claude session to resolve the
+            conflicts. Claude reads each conflicted file, resolves the markers,
+            stages the files, and commits the merge.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_conflict_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of conflict resolution attempts before
+                    returning an error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the resolution session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>conflict_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Wait events reference -->
         <h2 id="events">Wait events</h2>
         <p>
@@ -2895,6 +3018,9 @@ states:
   check_ci:
     type: choice
     choices:
+      - variable: conflicting
+        equals: true
+        next: rebase            # Merge conflicts → rebase onto main
       - variable: ci_passed
         equals: true
         next: request_reviewer  # CI green → assign reviewer
@@ -2902,6 +3028,30 @@ states:
         equals: true
         next: fix_ci            # CI red → let Claude fix it
     default: failed
+
+  # Rebase branch onto main to resolve merge conflicts.
+  rebase:
+    type: task
+    action: git.rebase
+    params:
+      max_rebase_rounds: 3
+    next: await_ci
+    error: resolve_conflicts    # If rebase fails, use Claude
+
+  # Claude resolves merge conflicts that mechanical rebase cannot handle.
+  resolve_conflicts:
+    type: task
+    action: ai.resolve_conflicts
+    params:
+      max_conflict_rounds: 3
+    next: push_conflict_fix
+    error: failed
+
+  push_conflict_fix:
+    type: task
+    action: github.push
+    next: await_ci
+    error: failed
 
   # Claude attempts to fix failing CI. Loops back through check_ci (choice
   # state), which keeps the cycle valid per the workflow engine rules.
@@ -2994,9 +3144,16 @@ stateDiagram-v2
     await_ci --> check_ci : ci.complete
     await_ci --> ci_timed_out : timeout
     await_ci --> failed : error
+    check_ci --> rebase : conflicting is true
     check_ci --> request_reviewer : ci_passed is true
     check_ci --> fix_ci : ci_failed is true
     check_ci --> failed : default
+    rebase --> await_ci : git.rebase
+    rebase --> resolve_conflicts : error
+    resolve_conflicts --> push_conflict_fix : ai.resolve_conflicts
+    resolve_conflicts --> failed : error
+    push_conflict_fix --> await_ci : github.push
+    push_conflict_fix --> failed : error
     fix_ci --> push_ci_fix : ai.fix_ci
     fix_ci --> ci_unfixable : error
     push_ci_fix --> await_ci : github.push

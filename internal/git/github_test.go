@@ -1569,3 +1569,87 @@ func TestRebaseBranch_PushFails(t *testing.T) {
 		t.Errorf("expected push error, got: %v", err)
 	}
 }
+
+func TestMergeBaseIntoBranch_CleanMerge(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge", "origin/main", "--no-edit"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	files, err := svc.MergeBaseIntoBranch(context.Background(), "/worktree", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if files != nil {
+		t.Errorf("expected nil conflicted files for clean merge, got: %v", files)
+	}
+}
+
+func TestMergeBaseIntoBranch_WithConflicts(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge", "origin/main", "--no-edit"}, pexec.MockResponse{
+		Err: fmt.Errorf("merge conflict"),
+	})
+	// GetConflictedFiles: git diff --name-only --diff-filter=U
+	mock.AddExactMatch("git", []string{"diff", "--name-only", "--diff-filter=U"}, pexec.MockResponse{
+		Stdout: []byte("file1.go\nfile2.go\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	files, err := svc.MergeBaseIntoBranch(context.Background(), "/worktree", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 conflicted files, got %d: %v", len(files), files)
+	}
+	if files[0] != "file1.go" || files[1] != "file2.go" {
+		t.Errorf("unexpected conflicted files: %v", files)
+	}
+}
+
+func TestMergeBaseIntoBranch_FetchFailure(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Err: fmt.Errorf("network error"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	files, err := svc.MergeBaseIntoBranch(context.Background(), "/worktree", "main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("expected fetch error, got: %v", err)
+	}
+	if files != nil {
+		t.Errorf("expected nil files on error, got: %v", files)
+	}
+}
+
+func TestMergeBaseIntoBranch_NonConflictFailure(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge", "origin/main", "--no-edit"}, pexec.MockResponse{
+		Err: fmt.Errorf("some other error"),
+	})
+	// GetConflictedFiles returns no files (not a conflict)
+	mock.AddExactMatch("git", []string{"diff", "--name-only", "--diff-filter=U"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+	// AbortMerge
+	mock.AddExactMatch("git", []string{"merge", "--abort"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	files, err := svc.MergeBaseIntoBranch(context.Background(), "/worktree", "main")
+	if err == nil {
+		t.Fatal("expected error for non-conflict merge failure")
+	}
+	if !strings.Contains(err.Error(), "git merge") {
+		t.Errorf("expected merge error, got: %v", err)
+	}
+	if files != nil {
+		t.Errorf("expected nil files on error, got: %v", files)
+	}
+}

@@ -133,6 +133,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateRebaseParams(prefix, state.Params)...)
 		}
 
+		// Validate params for ai.resolve_conflicts action
+		if state.Action == "ai.resolve_conflicts" {
+			errs = append(errs, validateResolveConflictsParams(prefix, state.Params)...)
+		}
+
 	case StateTypeWait:
 		// Wait states require event
 		if state.Event == "" {
@@ -502,6 +507,35 @@ func validateRebaseParams(prefix string, params map[string]any) []ValidationErro
 				errs = append(errs, ValidationError{
 					Field:   prefix + ".params.max_rebase_rounds",
 					Message: "max_rebase_rounds must be greater than 0",
+				})
+			}
+		}
+	}
+
+	return errs
+}
+
+// validateResolveConflictsParams validates params for ai.resolve_conflicts actions.
+func validateResolveConflictsParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+	if params == nil {
+		return errs
+	}
+
+	if v, ok := params["max_conflict_rounds"]; ok {
+		switch n := v.(type) {
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_conflict_rounds",
+					Message: "max_conflict_rounds must be greater than 0",
+				})
+			}
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_conflict_rounds",
+					Message: "max_conflict_rounds must be greater than 0",
 				})
 			}
 		}

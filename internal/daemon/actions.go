@@ -1564,6 +1564,145 @@ func getRebaseRounds(stepData map[string]any) int {
 	}
 }
 
+// resolveConflictsAction implements the ai.resolve_conflicts action.
+// It merges origin/main into the feature branch (leaving conflict markers),
+// then starts a Claude session to resolve the conflicts.
+type resolveConflictsAction struct {
+	daemon *Daemon
+}
+
+// Execute merges the base branch and starts Claude to resolve any conflicts.
+func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item := d.state.GetWorkItem(ac.WorkItemID)
+	if item == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	// Check max rounds
+	maxRounds := ac.Params.Int("max_conflict_rounds", 3)
+	rounds := getConflictRounds(item.StepData)
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max conflict resolution rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	// Refresh stale session to ensure worktree exists
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	// Determine base branch
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	// Abort any stale merge that may be in progress from a previous attempt
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	mergeInProgress, _ := d.gitService.IsMergeInProgress(ctx, workDir)
+	if mergeInProgress {
+		d.gitService.AbortMerge(ctx, workDir)
+	}
+
+	// Increment rounds
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["conflict_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
+
+	// Merge base branch into feature branch
+	mergeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	conflictedFiles, err := d.gitService.MergeBaseIntoBranch(mergeCtx, workDir, baseBranch)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("merge failed: %w", err)}
+	}
+
+	// Clean merge — no conflicts to resolve
+	if len(conflictedFiles) == 0 {
+		d.logger.Info("merge was clean, no conflicts to resolve", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch)
+		return workflow.ActionResult{Success: true}
+	}
+
+	// Conflicts exist — start Claude to resolve them
+	if err := d.startResolveConflicts(ctx, item, sess, rounds+1, conflictedFiles); err != nil {
+		return workflow.ActionResult{Error: err}
+	}
+
+	return workflow.ActionResult{Success: true, Async: true}
+}
+
+// startResolveConflicts starts a Claude session to resolve merge conflicts.
+func (d *Daemon) startResolveConflicts(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, round int, conflictedFiles []string) error {
+	prompt := formatConflictResolutionPrompt(round, conflictedFiles)
+
+	// Resolve system prompt from workflow config
+	wfCfg := d.getWorkflowConfig(sess.RepoPath)
+	resolveState := wfCfg.States["resolve_conflicts"]
+	systemPrompt := ""
+	if resolveState != nil {
+		p := workflow.NewParamHelper(resolveState.Params)
+		systemPrompt = p.String("system_prompt", "")
+	}
+
+	resolvedPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, sess.RepoPath)
+	if err != nil {
+		d.logger.Warn("failed to resolve resolve_conflicts system prompt", "error", err)
+	}
+
+	if resolvedPrompt == "" {
+		resolvedPrompt = DefaultCodingSystemPrompt
+	}
+
+	d.startWorkerWithPrompt(ctx, item, sess, prompt, resolvedPrompt)
+	d.logger.Info("started conflict resolution session", "workItem", item.ID, "round", round, "conflictedFiles", len(conflictedFiles))
+	return nil
+}
+
+// formatConflictResolutionPrompt builds the prompt that instructs Claude to resolve merge conflicts.
+func formatConflictResolutionPrompt(round int, conflictedFiles []string) string {
+	fileList := strings.Join(conflictedFiles, "\n  ")
+	return fmt.Sprintf(`MERGE CONFLICT RESOLUTION — ROUND %d
+
+The base branch has been merged into this feature branch, but there are merge conflicts that need to be resolved.
+
+CONFLICTED FILES:
+  %s
+
+INSTRUCTIONS:
+1. Read each conflicted file and understand the conflict markers (<<<<<<< HEAD, =======, >>>>>>> origin/...)
+2. Resolve each conflict by choosing the correct code or combining both sides appropriately
+3. After resolving all conflicts in a file, stage it with: git add <file>
+4. After all conflicts are resolved and staged, complete the merge with: git commit --no-edit
+5. Run relevant tests to verify your resolution is correct
+
+DO NOT push — the system handles pushing after you commit.`, round, fileList)
+}
+
+// getConflictRounds extracts the conflict resolution round counter from step data.
+func getConflictRounds(stepData map[string]any) int {
+	v, ok := stepData["conflict_rounds"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
 // formatAction implements the git.format action.
 type formatAction struct {
 	daemon *Daemon
