@@ -38,7 +38,7 @@ For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
 
 ## Workflow Configuration
 
-Drop a `.erg/workflow.yaml` in your repo to customize the pipeline — polling source, merge strategy, concurrency, timeouts, and state machine transitions. See `examples/` for ready-made configs or the [full docs](https://zhubert.com/erg/) for all options.
+Drop a `.erg/workflow.yaml` in your repo to customize the pipeline — polling source, merge strategy, concurrency, timeouts, and state machine transitions. Run `erg workflow init` to generate a starting config or see the [full docs](https://zhubert.com/erg/) for all options.
 
 ## How It Works
 

@@ -2794,7 +2794,9 @@
         <h2 id="examples">Example workflows</h2>
         <p>
           Ready-made configs for common use cases. Copy any of these into
-          <code>.erg/workflow.yaml</code> in your repo and customize as needed.
+          <code>.erg/workflow.yaml</code> in your repo, or run
+          <code>erg workflow init</code> to generate the CI-gate config as a
+          starting point.
         </p>
 
         <h3 id="example-minimal">Minimal</h3>
@@ -2815,15 +2817,7 @@
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/minimal.yaml</span>
-                <a
-                  href="https://github.com/zhubert/erg/blob/main/examples/minimal.yaml"
-                  style="
-                    font-family: "IBM Plex Mono", monospace;
-                    font-size: 0.75rem;
-                  "
-                  >view on github</a
-                >
+                <span class="code-filename">minimal.yaml</span>
               </div>
               <pre>
 # Minimal workflow — code, open PR, wait for approval + CI, merge.
@@ -2948,15 +2942,7 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/supervised.yaml</span>
-                <a
-                  href="https://github.com/zhubert/erg/blob/main/examples/supervised.yaml"
-                  style="
-                    font-family: "IBM Plex Mono", monospace;
-                    font-size: 0.75rem;
-                  "
-                  >view on github</a
-                >
+                <span class="code-filename">supervised.yaml</span>
               </div>
               <pre>
 # Supervised workflow — for complex features spanning multiple files.
@@ -3116,8 +3102,10 @@ stateDiagram-v2
         <p>
           CI must pass before a reviewer is assigned. A
           <code>choice</code> state routes on the CI result: green goes to
-          review, red triggers a Claude fix loop that retries up to three times
-          before giving up.
+          review, red triggers a Claude fix loop, merge conflicts are rebased
+          automatically or resolved by Claude. Failures comment on the issue
+          before terminating. This is what <code>erg workflow init</code>
+          generates.
         </p>
         <div class="example-tabs">
           <div class="tab-bar">
@@ -3131,29 +3119,22 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/ci-gate.yaml</span>
-                <a
-                  href="https://github.com/zhubert/erg/blob/main/examples/ci-gate.yaml"
-                  style="
-                    font-family: "IBM Plex Mono", monospace;
-                    font-size: 0.75rem;
-                  "
-                  >view on github</a
-                >
+                <span class="code-filename">ci-gate.yaml</span>
               </div>
               <pre>
 # CI-gate workflow — CI must pass before any human reviews the code.
 #
 # Use this for open-source projects or teams where failing CI wastes
 # reviewers' time. Claude automatically attempts to fix CI failures
-# before requesting review from a designated maintainer.
+# and merge conflicts before requesting review from a designated maintainer.
 #
 # Highlights:
 #   - CI runs before review (open_pr → await_ci → check_ci → request_reviewer)
 #   - choice state routes CI results: pass → reviewer, fail → fix loop
 #   - ai.fix_ci loop (bounded by max_ci_fix_rounds) with choice-gated cycle
+#   - Merge conflict handling: git.rebase → ai.resolve_conflicts fallback
 #   - github.request_review to assign a specific reviewer once CI is green
-#   - timeout with PR comment before failing
+#   - notify_failed comments on the issue before terminating
 
 workflow: ci-gate
 start: coding
@@ -3171,7 +3152,7 @@ states:
       max_turns: 50
       max_duration: 30m
     next: open_pr
-    error: failed
+    error: notify_failed
 
   open_pr:
     type: task
@@ -3179,7 +3160,7 @@ states:
     params:
       link_issue: true
     next: await_ci              # Check CI before requesting review
-    error: failed
+    error: notify_failed
 
   await_ci:
     type: wait
@@ -3189,7 +3170,7 @@ states:
     params:
       on_failure: fix           # Fire event with ci_failed=true on CI failure
     next: check_ci              # Route based on CI result
-    error: failed
+    error: notify_failed
 
   # Branch on the CI result written into step data by ci.complete.
   check_ci:
@@ -3204,7 +3185,7 @@ states:
       - variable: ci_failed
         equals: true
         next: fix_ci            # CI red → let Claude fix it
-    default: failed
+    default: notify_failed
 
   # Rebase branch onto main to resolve merge conflicts.
   rebase:
@@ -3222,13 +3203,13 @@ states:
     params:
       max_conflict_rounds: 3
     next: push_conflict_fix
-    error: failed
+    error: notify_failed
 
   push_conflict_fix:
     type: task
     action: github.push
     next: await_ci
-    error: failed
+    error: notify_failed
 
   # Claude attempts to fix failing CI. Loops back through check_ci (choice
   # state), which keeps the cycle valid per the workflow engine rules.
@@ -3244,7 +3225,7 @@ states:
     type: task
     action: github.push
     next: await_ci              # Loop back: await_ci → check_ci → fix_ci (cycle through choice)
-    error: failed
+    error: notify_failed
 
   # Notify when all fix attempts are exhausted.
   ci_unfixable:
@@ -3252,16 +3233,16 @@ states:
     action: github.comment_pr
     params:
       body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
-    next: failed
-    error: failed
+    next: notify_failed
+    error: notify_failed
 
   ci_timed_out:
     type: task
     action: github.comment_pr
     params:
       body: "CI has been running for over 2h. Please check the CI pipeline."
-    next: failed
-    error: failed
+    next: notify_failed
+    error: notify_failed
 
   # Assign a reviewer only after CI is green, avoiding wasted review time.
   request_reviewer:
@@ -3281,28 +3262,35 @@ states:
       auto_address: true
       max_feedback_rounds: 3
     next: merge
-    error: failed
+    error: notify_failed
 
   # Comment on the issue when review takes too long, then fail.
-  # (Looping back to await_review would create an unbounded cycle.)
   review_overdue:
     type: task
     action: github.comment_issue
     params:
       body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
-    next: failed
-    error: failed
+    next: notify_failed
+    error: notify_failed
 
   merge:
     type: task
     action: github.merge
     params:
-      method: squash
+      method: rebase
       cleanup: true
     next: done
 
   done:
     type: succeed
+
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
 
   failed:
     type: fail</pre
@@ -3315,38 +3303,36 @@ states:
 stateDiagram-v2
     [*] --> coding
     coding --> open_pr : ai.code
-    coding --> failed : error
+    coding --> notify_failed : error
     open_pr --> await_ci : github.create_pr
-    open_pr --> failed : error
+    open_pr --> notify_failed : error
     await_ci --> check_ci : ci.complete
     await_ci --> ci_timed_out : timeout
-    await_ci --> failed : error
+    await_ci --> notify_failed : error
     check_ci --> rebase : conflicting is true
     check_ci --> request_reviewer : ci_passed is true
     check_ci --> fix_ci : ci_failed is true
-    check_ci --> failed : default
+    check_ci --> notify_failed : default
     rebase --> await_ci : git.rebase
     rebase --> resolve_conflicts : error
     resolve_conflicts --> push_conflict_fix : ai.resolve_conflicts
-    resolve_conflicts --> failed : error
+    resolve_conflicts --> notify_failed : error
     push_conflict_fix --> await_ci : github.push
-    push_conflict_fix --> failed : error
+    push_conflict_fix --> notify_failed : error
     fix_ci --> push_ci_fix : ai.fix_ci
     fix_ci --> ci_unfixable : error
     push_ci_fix --> await_ci : github.push
-    push_ci_fix --> failed : error
-    ci_unfixable --> failed : github.comment_pr
-    ci_unfixable --> failed : error
-    ci_timed_out --> failed : github.comment_pr
-    ci_timed_out --> failed : error
+    push_ci_fix --> notify_failed : error
+    ci_unfixable --> notify_failed : github.comment_pr
+    ci_timed_out --> notify_failed : github.comment_pr
     request_reviewer --> await_review : github.request_review
     request_reviewer --> await_review : error
     await_review --> merge : pr.reviewed
     await_review --> review_overdue : timeout
-    await_review --> failed : error
-    review_overdue --> failed : github.comment_issue
-    review_overdue --> failed : error
+    await_review --> notify_failed : error
+    review_overdue --> notify_failed : github.comment_issue
     merge --> done : github.merge
+    notify_failed --> failed : github.comment_issue
     done --> [*]
     failed --> [*]</pre
               >
@@ -3374,15 +3360,7 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/label-tracking.yaml</span>
-                <a
-                  href="https://github.com/zhubert/erg/blob/main/examples/label-tracking.yaml"
-                  style="
-                    font-family: "IBM Plex Mono", monospace;
-                    font-size: 0.75rem;
-                  "
-                  >view on github</a
-                >
+                <span class="code-filename">label-tracking.yaml</span>
               </div>
               <pre>
 # Label-tracking workflow — use GitHub labels to show workflow progress.
@@ -3570,7 +3548,7 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/asana.yaml</span>
+                <span class="code-filename">asana.yaml</span>
               </div>
               <pre>
 # Asana integration — polls Asana tasks and processes them automatically.
@@ -3708,15 +3686,7 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">examples/linear.yaml</span>
-                <a
-                  href="https://github.com/zhubert/erg/blob/main/examples/linear.yaml"
-                  style="
-                    font-family: "IBM Plex Mono", monospace;
-                    font-size: 0.75rem;
-                  "
-                  >view on github</a
-                >
+                <span class="code-filename">linear.yaml</span>
               </div>
               <pre>
 # Linear integration — polls Linear issues and processes them automatically.

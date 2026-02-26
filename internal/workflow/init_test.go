@@ -45,6 +45,7 @@ func TestWriteTemplate_CreatesFile(t *testing.T) {
 	for _, stateType := range []string{
 		"type: task",
 		"type: wait",
+		"type: choice",
 		"type: succeed",
 		"type: fail",
 	} {
@@ -56,8 +57,15 @@ func TestWriteTemplate_CreatesFile(t *testing.T) {
 	// Verify action names
 	for _, action := range []string{
 		"action: ai.code",
+		"action: ai.fix_ci",
+		"action: ai.resolve_conflicts",
 		"action: github.create_pr",
+		"action: github.push",
 		"action: github.merge",
+		"action: github.request_review",
+		"action: github.comment_pr",
+		"action: github.comment_issue",
+		"action: git.rebase",
 	} {
 		if !strings.Contains(content, action) {
 			t.Errorf("template should contain %q", action)
@@ -72,6 +80,20 @@ func TestWriteTemplate_CreatesFile(t *testing.T) {
 		if !strings.Contains(content, event) {
 			t.Errorf("template should contain %q", event)
 		}
+	}
+
+	// Verify CI-gate pattern: CI before review
+	ciIdx := strings.Index(content, "check_ci:")
+	reviewIdx := strings.Index(content, "await_review:")
+	if ciIdx < 0 || reviewIdx < 0 {
+		t.Error("template should contain both check_ci and await_review states")
+	} else if ciIdx > reviewIdx {
+		t.Error("check_ci should appear before await_review (CI gates review)")
+	}
+
+	// Verify notify_failed state exists (failures are not silent)
+	if !strings.Contains(content, "notify_failed:") {
+		t.Error("template should contain notify_failed state for failure notifications")
 	}
 }
 

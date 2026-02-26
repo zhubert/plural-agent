@@ -7,12 +7,21 @@ import (
 )
 
 // Template is the default workflow.yaml content with the step-functions format.
+// It uses the CI-gate pattern: CI must pass before any human reviews the code.
+// This avoids wasting reviewer time on failing builds. Claude automatically
+// attempts to fix CI failures and merge conflicts before requesting review.
 const Template = `# Erg Workflow Configuration
 # See: https://github.com/zhubert/erg for full documentation
 #
-# This file defines a state machine that controls how the erg
-# daemon processes issues. States are nodes connected by next (success)
-# and error (failure) edges.
+# CI-gate workflow — CI must pass before any human reviews the code.
+# Claude automatically fixes CI failures and merge conflicts before
+# requesting review, so reviewers only see green builds.
+#
+# Flow:
+#   coding → open_pr → await_ci → check_ci
+#     → conflicting    → rebase (or ai.resolve_conflicts) → await_ci
+#     → ci_passed      → request_reviewer → await_review → merge → done
+#     → ci_failed      → ai.fix_ci → push → await_ci (bounded loop)
 #
 # State types:
 #   task    - Execute an action (sync or async)
@@ -22,7 +31,7 @@ const Template = `# Erg Workflow Configuration
 #   succeed - Terminal success
 #   fail    - Terminal failure
 
-workflow: issue-to-merge
+workflow: ci-gate
 start: coding
 
 source:
@@ -46,16 +55,8 @@ states:
     #   - run: "make deps"
     # after:                   # Hooks to run after coding completes (fire-and-forget)
     #   - run: "make lint"
-    # retry:                   # Retry on failure with exponential backoff
-    #   - max_attempts: 3
-    #     interval: 30s
-    #     backoff_rate: 2.0
-    #     errors: ["*"]        # Error patterns to match ("*" = all)
-    # catch:                   # Route specific errors to recovery states
-    #   - errors: ["*"]
-    #     next: failed
     next: open_pr
-    error: failed
+    error: notify_failed
 
   open_pr:
     type: task
@@ -63,64 +64,144 @@ states:
     params:
       link_issue: true         # Link PR to the source issue
       # template: ""           # PR body template (inline or file:path/to/template.md)
-    next: await_review
-    error: failed
+    next: await_ci              # CI runs before review
+    error: notify_failed
 
-  await_review:
-    type: wait
-    event: pr.reviewed
-    params:
-      auto_address: true       # Automatically address PR review comments
-      max_feedback_rounds: 3   # Max review/feedback cycles
-      # system_prompt: ""      # Custom system prompt for review phase
-    next: await_ci
-    error: failed
+  # --- CI gate: wait for CI, then route based on result ---
 
   await_ci:
     type: wait
     event: ci.complete
-    timeout: 2h                # Enforced: transitions to error after 2h
-    # timeout_next: ci_timed_out  # Optional: dedicated timeout transition (instead of error)
+    timeout: 2h
+    timeout_next: ci_timed_out
     params:
-      on_failure: retry        # What to do on CI failure: retry, abandon, or notify
+      on_failure: fix           # Report CI failure in step data (ci_failed=true)
+    next: check_ci
+    error: notify_failed
+
+  check_ci:
+    type: choice
+    choices:
+      - variable: conflicting
+        equals: true
+        next: rebase              # Merge conflicts → rebase onto main
+      - variable: ci_passed
+        equals: true
+        next: request_reviewer    # CI green → assign reviewer
+      - variable: ci_failed
+        equals: true
+        next: fix_ci              # CI red → let Claude fix it
+    default: notify_failed
+
+  # --- Merge conflict resolution ---
+
+  rebase:
+    type: task
+    action: git.rebase
+    params:
+      max_rebase_rounds: 3
+    next: await_ci
+    error: resolve_conflicts      # If rebase fails (real conflicts), use Claude
+
+  resolve_conflicts:
+    type: task
+    action: ai.resolve_conflicts
+    params:
+      max_conflict_rounds: 3
+    next: push_conflict_fix
+    error: notify_failed
+
+  push_conflict_fix:
+    type: task
+    action: github.push
+    next: await_ci
+    error: notify_failed
+
+  # --- CI fix loop (bounded by max_ci_fix_rounds) ---
+
+  fix_ci:
+    type: task
+    action: ai.fix_ci
+    params:
+      max_ci_fix_rounds: 3       # Give up after 3 unsuccessful fix attempts
+    next: push_ci_fix
+    error: ci_unfixable
+
+  push_ci_fix:
+    type: task
+    action: github.push
+    next: await_ci                # Loop: await_ci → check_ci → fix_ci (cycle through choice)
+    error: notify_failed
+
+  ci_unfixable:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
+    next: notify_failed
+    error: notify_failed
+
+  ci_timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI has been running for over 2h. Please check the CI pipeline."
+    next: notify_failed
+    error: notify_failed
+
+  # --- Review (only after CI is green) ---
+
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: your-github-username   # Replace with the reviewer's GitHub username
+    next: await_review
+    error: await_review                # If request fails, still wait for review
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true           # Automatically address PR review comments
+      max_feedback_rounds: 3       # Max review/feedback cycles
+      # system_prompt: ""          # Custom system prompt for review phase
     next: merge
-    error: failed
+    error: notify_failed
+
+  review_overdue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  # --- Merge and terminal states ---
 
   merge:
     type: task
     action: github.merge
     params:
-      method: rebase           # Merge method: rebase, squash, or merge
-      cleanup: true            # Delete branch after merge
-    # after:
-    #   - run: "echo merged"
+      method: rebase             # Merge method: rebase, squash, or merge
+      cleanup: true              # Delete branch after merge
     next: done
 
   done:
     type: succeed
 
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
   failed:
     type: fail
-
-  # --- Example: choice state (conditional branching) ---
-  # check_result:
-  #   type: choice
-  #   choices:
-  #     - variable: ci_passed        # Step data key set by ci.complete event
-  #       equals: true               # Condition: equals, not_equals, or is_present
-  #       next: merge
-  #     - variable: pr_merged_externally  # Step data key set by pr.reviewed event
-  #       equals: true
-  #       next: done
-  #   default: await_ci              # Fallback if no rule matches
-
-  # --- Example: pass state (data injection) ---
-  # set_defaults:
-  #   type: pass
-  #   data:
-  #     merge_method: squash
-  #     cleanup_branch: true
-  #   next: coding
 
 # Agent settings (optional — override defaults for this repo)
 # settings:
