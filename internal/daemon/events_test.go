@@ -39,7 +39,8 @@ func TestCheckPRReviewed_PRClosed(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -80,7 +81,8 @@ func TestCheckPRReviewed_PRMergedExternally(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -123,7 +125,8 @@ func TestCheckPRReviewed_AddressingFeedbackPhase(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -162,7 +165,8 @@ func TestCheckPRReviewed_PushingPhase(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -212,7 +216,8 @@ func TestCheckPRReviewed_ReviewApproved(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	// The pr view mock returns the OPEN state for the first call (GetPRState)
 	// and the reviews JSON for the second call (CheckPRReviewDecision).
@@ -250,7 +255,8 @@ func TestCheckPRReviewed_NoSession(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -288,7 +294,8 @@ func TestCheckCIComplete_CIPassing_AutoMergeEnabled(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -329,7 +336,8 @@ func TestCheckCIComplete_CIPassing_AutoMergeDisabled(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -367,7 +375,8 @@ func TestCheckCIComplete_CIFailing_AbandonPolicy(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "abandon"})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -411,7 +420,8 @@ func TestCheckCIComplete_CIFailing_DefaultRetry(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil) // default on_failure = "retry"
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -455,7 +465,8 @@ func TestCheckCIComplete_CIPending(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -480,7 +491,8 @@ func TestCheckCIComplete_NoSession(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -538,7 +550,8 @@ func TestCheckPRReviewed_MaxFeedbackRoundsReached(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"auto_address": true, "max_feedback_rounds": 3})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -596,7 +609,8 @@ func TestCheckPRReviewed_AutoAddressDisabled(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"auto_address": false})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRReviewed(context.Background(), params, view)
 	if err != nil {
@@ -634,7 +648,8 @@ func TestCheckPRMergeable_PRClosed(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -675,7 +690,8 @@ func TestCheckPRMergeable_PRMergedExternally(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -720,7 +736,8 @@ func TestCheckPRMergeable_NotApproved(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -777,7 +794,8 @@ func TestCheckPRMergeable_CIPending(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -834,7 +852,8 @@ func TestCheckPRMergeable_CIFailing(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -862,7 +881,8 @@ func TestCheckPRMergeable_NoSession(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkPRMergeable(context.Background(), params, view)
 	if err != nil {
@@ -900,7 +920,8 @@ func TestCheckCIComplete_CIFailing_FixPolicy(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "fix"})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -949,7 +970,8 @@ func TestCheckCIComplete_Conflicting(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "fix"})
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -996,7 +1018,8 @@ func TestCheckCIComplete_MergeableCheckFails_FallsThroughToCI(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {
@@ -1048,7 +1071,8 @@ func TestCheckCIComplete_MergeableUnknown_FallsThroughToCI(t *testing.T) {
 
 	checker := NewEventChecker(d)
 	params := workflow.NewParamHelper(nil)
-	view := d.workItemView(d.state.GetWorkItem("item-1"))
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
 
 	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
 	if err != nil {

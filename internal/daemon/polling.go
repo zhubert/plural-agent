@@ -218,7 +218,7 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 
 		// Process through the engine — this will invoke codingAction.Execute
 		// which calls startCoding to create the session and spawn the worker.
-		d.executeSyncChain(ctx, item, engine)
+		d.executeSyncChain(ctx, item.ID, engine)
 	}
 }
 
@@ -284,7 +284,7 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	// Add to state, run unqueue operations, then mark completed so it
 	// doesn't re-appear on the next poll.
 	d.state.AddWorkItem(item)
-	d.unqueueIssue(ctx, item, comment)
+	d.unqueueIssue(ctx, *item, comment)
 	if err := d.state.MarkWorkItemTerminal(item.ID, true); err != nil {
 		log.Debug("failed to mark pre-flight item terminal", "error", err)
 	}

@@ -148,8 +148,8 @@ func TestPollForNewIssues_StoresBodyInStepData(t *testing.T) {
 	d.pollForNewIssues(context.Background())
 
 	// Check that issue body is stored in StepData
-	item5 := d.state.GetWorkItem("/test/repo-5")
-	if item5 == nil {
+	item5, ok5 := d.state.GetWorkItem("/test/repo-5")
+	if !ok5 {
 		t.Fatal("expected work item for issue 5")
 	}
 	body, ok := item5.StepData["issue_body"].(string)
@@ -158,8 +158,8 @@ func TestPollForNewIssues_StoresBodyInStepData(t *testing.T) {
 	}
 
 	// Issue with empty body should not have issue_body in StepData
-	item6 := d.state.GetWorkItem("/test/repo-6")
-	if item6 == nil {
+	item6, ok6 := d.state.GetWorkItem("/test/repo-6")
+	if !ok6 {
 		t.Fatal("expected work item for issue 6")
 	}
 	if _, ok := item6.StepData["issue_body"]; ok {
@@ -205,7 +205,7 @@ func TestStartQueuedItems_StartsWhenSlotsAvailable(t *testing.T) {
 	// will move out of queued state showing that the start was attempted.
 	d.startQueuedItems(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// Item should have been processed (either started coding or failed due to mock)
 	// The key point is that it was attempted when slots are available.
 	if item.State == daemonstate.WorkItemQueued && item.CurrentStep == "" {
@@ -226,7 +226,9 @@ func TestStartQueuedItems_RespectsFullSlots(t *testing.T) {
 		ID:       "active-1",
 		IssueRef: config.IssueRef{Source: "github", ID: "0"},
 	})
-	d.state.GetWorkItem("active-1").Phase = "async_pending"
+	d.state.UpdateWorkItem("active-1", func(it *daemonstate.WorkItem) {
+		it.Phase = "async_pending"
+	})
 
 	// Add a queued item
 	d.state.AddWorkItem(&daemonstate.WorkItem{
@@ -237,7 +239,8 @@ func TestStartQueuedItems_RespectsFullSlots(t *testing.T) {
 	d.startQueuedItems(context.Background())
 
 	// item-1 should still be queued
-	if d.state.GetWorkItem("item-1").State != daemonstate.WorkItemQueued {
+	queuedItem, _ := d.state.GetWorkItem("item-1")
+	if queuedItem.State != daemonstate.WorkItemQueued {
 		t.Error("item-1 should still be queued when slots are full")
 	}
 }
@@ -304,7 +307,7 @@ func TestStartQueuedItems_AwaitReviewDoesNotBlockNewWork(t *testing.T) {
 			d.startQueuedItems(context.Background())
 
 			// The new item should no longer be in queued state (it was processed)
-			newItem := d.state.GetWorkItem("new-item")
+			newItem, _ := d.state.GetWorkItem("new-item")
 			if newItem.State == daemonstate.WorkItemQueued && newItem.CurrentStep == "" {
 				t.Errorf("new item should have been processed (not blocked by await_review/%s), still queued", tc.reviewPhase)
 			}
@@ -369,8 +372,8 @@ func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
 
 	// The work item should be created and marked completed.
 	itemID := "/test/repo-42"
-	item := d.state.GetWorkItem(itemID)
-	if item == nil {
+	item, okItem := d.state.GetWorkItem(itemID)
+	if !okItem {
 		t.Fatal("expected work item to be created in state")
 	}
 	if item.State != daemonstate.WorkItemCompleted {
@@ -537,7 +540,7 @@ func TestStartQueuedItems_PrioritizesAwaitReviewBeforeNewWork(t *testing.T) {
 
 	// The await_review item must have advanced out of await_review — its event
 	// was ready and startQueuedItems must have checked it before starting new work.
-	awaitItem := d.state.GetWorkItem("await-item")
+	awaitItem, _ := d.state.GetWorkItem("await-item")
 	if awaitItem.CurrentStep == "await_review" {
 		t.Error("await-item should have advanced out of await_review: startQueuedItems must prioritise set-aside workflows")
 	}
@@ -628,7 +631,7 @@ func TestStartQueuedItems_AwaitReviewConsumesSlotPreventsNewWork(t *testing.T) {
 	d.startQueuedItems(context.Background())
 
 	// await-item2 must have left await_review and be in async_pending (slot consumed).
-	awaitItem := d.state.GetWorkItem("await-item2")
+	awaitItem, _ := d.state.GetWorkItem("await-item2")
 	if awaitItem.CurrentStep == "await_review" {
 		t.Error("await-item2 should have advanced out of await_review")
 	}
@@ -638,7 +641,7 @@ func TestStartQueuedItems_AwaitReviewConsumesSlotPreventsNewWork(t *testing.T) {
 
 	// new-item2 must still be queued: the single concurrency slot is held by
 	// the resumed await_review workflow in async_pending phase.
-	newItem := d.state.GetWorkItem("new-item2")
+	newItem, _ := d.state.GetWorkItem("new-item2")
 	if newItem.State != daemonstate.WorkItemQueued {
 		t.Errorf("new-item2 should remain queued when the slot is taken by the resumed await_review item, got state=%q", newItem.State)
 	}
