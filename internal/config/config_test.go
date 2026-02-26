@@ -2444,3 +2444,47 @@ func TestConfig_Validate_DuplicateRepoFilesystem(t *testing.T) {
 		t.Error("Validate should detect filesystem-level duplicate repos")
 	}
 }
+
+func TestConfig_Save_Atomic(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "erg-config-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := &Config{
+		Repos:    []string{"/path/to/repo"},
+		Sessions: []Session{},
+		filePath: configPath,
+	}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// The target file must exist after a successful save.
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Fatal("Config file was not created after Save()")
+	}
+
+	// No leftover temp file should remain after a successful save.
+	tmpPath := configPath + ".tmp"
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("Temp file should not exist after successful Save()")
+	}
+
+	// The written file must be valid JSON containing the expected data.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read config file: %v", err)
+	}
+	var loaded Config
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("Config file is not valid JSON after Save(): %v", err)
+	}
+	if len(loaded.Repos) != 1 || loaded.Repos[0] != "/path/to/repo" {
+		t.Errorf("Unexpected repos after Save(): %v", loaded.Repos)
+	}
+}
