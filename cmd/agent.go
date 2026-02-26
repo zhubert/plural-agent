@@ -136,10 +136,23 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	child.Stdin = nil
 	child.Stdout = nil
-	child.Stderr = nil
+
+	// Capture child stderr to the log file so panics and Cobra errors are visible
+	stderrLogPath, _ := logger.DefaultLogPath()
+	stderrFile, stderrErr := os.OpenFile(stderrLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if stderrErr == nil {
+		child.Stderr = stderrFile
+	}
 
 	if err := child.Start(); err != nil {
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
 		return fmt.Errorf("failed to start daemon: %w", err)
+	}
+	// Close parent's copy of the fd; child inherits its own
+	if stderrFile != nil {
+		stderrFile.Close()
 	}
 	childPID := child.Process.Pid
 
@@ -206,6 +219,16 @@ func runDaemonChild(_ *cobra.Command, _ []string) error {
 	}
 	agentRepo = resolved
 
+	// Re-claim the lock that the parent process transferred to us.
+	// The parent wrote our PID into the lock file before detaching.
+	lock, err := daemonstate.AdoptLock(agentRepo)
+	if err != nil {
+		return fmt.Errorf("failed to adopt daemon lock: %w", err)
+	}
+	// Safety net: release if runDaemonWithLogger fails before daemon.Run takes over.
+	// Release is idempotent, so the daemon's own defer releaseLock is harmless.
+	defer lock.Release() //nolint:errcheck
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -221,7 +244,7 @@ func runDaemonChild(_ *cobra.Command, _ []string) error {
 		os.Exit(1)
 	}()
 
-	return runDaemonWithLogger(ctx, fileLogger)
+	return runDaemonWithLogger(ctx, fileLogger, lock)
 }
 
 // runForeground runs the daemon in the current process with a live status display.
@@ -336,7 +359,8 @@ func runForeground(_ *cobra.Command, _ []string) error {
 
 // runDaemonWithLogger creates all services and runs the daemon with the given logger.
 // This is the shared core between runDaemonChild and runForeground.
-func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger) error {
+// If preacquiredLock is non-nil, it is passed to the daemon so it skips lock acquisition.
+func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacquiredLock ...*daemonstate.DaemonLock) error {
 	gitSvc := git.NewGitService()
 	sessSvc := session.NewSessionService()
 
@@ -400,6 +424,9 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger) error {
 	opts = append(opts, daemon.WithRepoFilter(agentRepo))
 	if wfCfg.Settings != nil && wfCfg.Settings.AutoMerge != nil {
 		opts = append(opts, daemon.WithAutoMerge(*wfCfg.Settings.AutoMerge))
+	}
+	if len(preacquiredLock) > 0 && preacquiredLock[0] != nil {
+		opts = append(opts, daemon.WithPreacquiredLock(preacquiredLock[0]))
 	}
 
 	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, daemonLogger, opts...)

@@ -87,12 +87,18 @@ func AcquireLock(repoPath string) (*DaemonLock, error) {
 	return nil, fmt.Errorf("daemon lock already held at %s", fp)
 }
 
-// Release releases the daemon lock.
+// Release releases the daemon lock. It is idempotent — calling it multiple
+// times is safe and subsequent calls are no-ops.
 func (l *DaemonLock) Release() error {
 	if l.file != nil {
 		l.file.Close()
+		l.file = nil
 	}
-	return os.Remove(l.path)
+	err := os.Remove(l.path)
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // UpdatePID overwrites the lock file with a new PID. Used by the parent
@@ -117,6 +123,41 @@ func (l *DaemonLock) Detach() {
 		l.file.Close()
 		l.file = nil
 	}
+}
+
+// AdoptLock re-claims a lock file that was created by a parent process and
+// transferred to this process via UpdatePID. It verifies the lock file exists
+// and contains this process's PID, then re-opens the file for ownership.
+// This is used by the daemon child process after fork/exec, since the file
+// descriptor from the parent cannot survive across exec.
+func AdoptLock(repoPath string) (*DaemonLock, error) {
+	fp := LockFilePath(repoPath)
+
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("lock file does not exist at %s", fp)
+		}
+		return nil, fmt.Errorf("failed to read lock file: %w", err)
+	}
+
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return nil, fmt.Errorf("corrupt PID in lock file %s: %w", fp, err)
+	}
+
+	if pid != os.Getpid() {
+		return nil, fmt.Errorf("lock file PID %d does not match current process %d", pid, os.Getpid())
+	}
+
+	// Re-open the file (not O_EXCL) for ownership
+	f, err := os.OpenFile(fp, os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-open lock file: %w", err)
+	}
+
+	return &DaemonLock{path: fp, file: f}, nil
 }
 
 // ClearLockForRepo removes the lock file for a specific repo path.
