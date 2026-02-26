@@ -95,6 +95,39 @@ func (l *DaemonLock) Release() error {
 	return os.Remove(l.path)
 }
 
+// UpdatePID overwrites the lock file with a new PID. Used by the parent
+// process to transfer lock ownership to a forked child process.
+func (l *DaemonLock) UpdatePID(pid int) error {
+	if err := l.file.Truncate(0); err != nil {
+		return fmt.Errorf("failed to truncate lock file: %w", err)
+	}
+	if _, err := l.file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek lock file: %w", err)
+	}
+	if _, err := fmt.Fprintf(l.file, "%d", pid); err != nil {
+		return fmt.Errorf("failed to write PID: %w", err)
+	}
+	return l.file.Sync()
+}
+
+// Detach closes the file handle without removing the lock file.
+// Used by the parent process after transferring ownership to a child.
+func (l *DaemonLock) Detach() {
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
+	}
+}
+
+// ClearLockForRepo removes the lock file for a specific repo path.
+func ClearLockForRepo(repoPath string) error {
+	fp := LockFilePath(repoPath)
+	if err := os.Remove(fp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // ClearLocks finds and removes all daemon lock files.
 // Returns the number of lock files removed.
 func ClearLocks() (int, error) {

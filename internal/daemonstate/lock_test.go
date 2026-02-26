@@ -222,6 +222,79 @@ func TestLockFilePath_Deterministic(t *testing.T) {
 	}
 }
 
+func TestDaemonLock_UpdatePID(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-updatepid")
+
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer lock.Release()
+
+	newPID := 99999
+	if err := lock.UpdatePID(newPID); err != nil {
+		t.Fatalf("UpdatePID failed: %v", err)
+	}
+
+	// Verify lock file contains new PID
+	data, err := os.ReadFile(lock.path)
+	if err != nil {
+		t.Fatalf("failed to read lock file: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != fmt.Sprintf("%d", newPID) {
+		t.Errorf("expected PID %d in lock file, got %s", newPID, string(data))
+	}
+}
+
+func TestDaemonLock_Detach(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-detach")
+
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+
+	lock.Detach()
+
+	// Lock file should still exist after Detach
+	if _, err := os.Stat(lock.path); os.IsNotExist(err) {
+		t.Error("lock file should still exist after Detach")
+	}
+
+	// Clean up manually since Release won't work after Detach
+	os.Remove(lock.path)
+}
+
+func TestClearLockForRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-clear")
+
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	lock.file.Close() // Close handle so we can remove
+
+	if err := ClearLockForRepo(repoPath); err != nil {
+		t.Fatalf("ClearLockForRepo failed: %v", err)
+	}
+
+	// Lock file should be gone
+	fp := LockFilePath(repoPath)
+	if _, err := os.Stat(fp); !os.IsNotExist(err) {
+		t.Error("lock file should be removed after ClearLockForRepo")
+	}
+}
+
+func TestClearLockForRepo_NoFile(t *testing.T) {
+	// Should not error when no lock file exists
+	if err := ClearLockForRepo("/nonexistent/repo/path"); err != nil {
+		t.Fatalf("ClearLockForRepo should not error on missing file: %v", err)
+	}
+}
+
 func TestAcquireLock_StaleLockCleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoPath := filepath.Join(tmpDir, "test-repo-stale")
