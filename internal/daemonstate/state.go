@@ -328,13 +328,16 @@ func (s *DaemonState) UpdateWorkItem(id string, fn func(*WorkItem)) {
 }
 
 // SetErrorMessage sets the error message on a work item and increments the error count.
+// ErrorCount is only incremented when msg is non-empty; passing "" clears the message without affecting the count.
 func (s *DaemonState) SetErrorMessage(id, msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if item, ok := s.WorkItems[id]; ok {
 		item.ErrorMessage = msg
-		item.ErrorCount++
+		if msg != "" {
+			item.ErrorCount++
+		}
 		item.UpdatedAt = time.Now()
 	}
 }
