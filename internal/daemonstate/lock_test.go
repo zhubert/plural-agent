@@ -297,6 +297,93 @@ func TestClearLockForRepo_NoFile(t *testing.T) {
 	}
 }
 
+func TestAdoptLock_HappyPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-adopt")
+
+	// Simulate what the parent process does: acquire lock, update PID to current process
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	// The lock already has our PID (since we're the same process), so just detach
+	lock.Detach()
+
+	// Now adopt the lock (simulating the child process re-claiming it)
+	adopted, err := AdoptLock(repoPath)
+	if err != nil {
+		t.Fatalf("AdoptLock failed: %v", err)
+	}
+	defer adopted.Release()
+
+	// Should be able to release cleanly
+	if _, err := os.Stat(adopted.path); os.IsNotExist(err) {
+		t.Error("lock file should exist after adoption")
+	}
+}
+
+func TestAdoptLock_WrongPID(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-adopt-wrong")
+
+	// Write a lock file with a different PID
+	fp := LockFilePath(repoPath)
+	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+		t.Fatalf("failed to create lock dir: %v", err)
+	}
+	if err := os.WriteFile(fp, []byte("999999999"), 0o644); err != nil {
+		t.Fatalf("failed to write lock file: %v", err)
+	}
+	defer os.Remove(fp)
+
+	_, err := AdoptLock(repoPath)
+	if err == nil {
+		t.Fatal("expected error when PID doesn't match")
+	}
+	if !strings.Contains(err.Error(), "does not match") {
+		t.Errorf("expected 'does not match' in error, got: %v", err)
+	}
+}
+
+func TestAdoptLock_ReleaseIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-adopt-idempotent")
+
+	lock, err := AcquireLock(repoPath)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	lock.Detach()
+
+	adopted, err := AdoptLock(repoPath)
+	if err != nil {
+		t.Fatalf("AdoptLock failed: %v", err)
+	}
+
+	// First release should succeed
+	if err := adopted.Release(); err != nil {
+		t.Fatalf("first Release failed: %v", err)
+	}
+
+	// Second release should be a no-op (idempotent)
+	if err := adopted.Release(); err != nil {
+		t.Fatalf("second Release should be idempotent, got: %v", err)
+	}
+}
+
+func TestAdoptLock_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo-adopt-missing")
+
+	_, err := AdoptLock(repoPath)
+	if err == nil {
+		t.Fatal("expected error when lock file doesn't exist")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("expected 'does not exist' in error, got: %v", err)
+	}
+}
+
 func TestAcquireLock_StaleLockCleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoPath := filepath.Join(tmpDir, "test-repo-stale")
