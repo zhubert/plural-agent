@@ -350,6 +350,16 @@ func TestDaemonState_SetErrorMessage(t *testing.T) {
 		t.Errorf("expected error count 2, got %d", item.ErrorCount)
 	}
 
+	// Clearing with empty string should not increment ErrorCount
+	state.SetErrorMessage("item-1", "")
+	item = state.GetWorkItem("item-1")
+	if item.ErrorMessage != "" {
+		t.Errorf("expected empty error message after clear, got %q", item.ErrorMessage)
+	}
+	if item.ErrorCount != 2 {
+		t.Errorf("expected error count to remain 2 after clearing, got %d", item.ErrorCount)
+	}
+
 	// No-op for nonexistent item
 	state.SetErrorMessage("nonexistent", "error")
 }
