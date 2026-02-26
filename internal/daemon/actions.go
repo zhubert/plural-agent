@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	osexec "os/exec"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/google/uuid"
@@ -1811,4 +1815,127 @@ func (d *Daemon) saveRunnerMessages(sessionID string, runner claude.RunnerInterf
 	if err := d.sessionMgr.SaveRunnerMessages(sessionID, runner); err != nil {
 		d.logger.Error("failed to save session messages", "sessionID", sessionID, "error", err)
 	}
+}
+
+// slackNotifyAction implements the slack.notify action.
+type slackNotifyAction struct {
+	daemon *Daemon
+}
+
+// Execute posts a notification message to Slack via an incoming webhook.
+func (a *slackNotifyAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.sendSlackNotification(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("slack.notify failed: %v", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// slackTemplateData holds the variables available for slack.notify message templates.
+type slackTemplateData struct {
+	Title    string
+	IssueID  string
+	IssueURL string
+	PRURL    string
+	Branch   string
+	Status   string
+}
+
+// slackWebhookPayload is the JSON body sent to a Slack incoming webhook.
+type slackWebhookPayload struct {
+	Text      string `json:"text"`
+	Username  string `json:"username,omitempty"`
+	IconEmoji string `json:"icon_emoji,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+}
+
+// sendSlackNotification posts a message to a Slack incoming webhook for a work item.
+// Required params:
+//   - webhook_url: Slack incoming webhook URL. Supports $ENV_VAR syntax for secret injection.
+//   - message: Message text. Supports Go text/template syntax with .Title, .IssueID,
+//     .IssueURL, .PRURL, .Branch, and .Status variables.
+//
+// Optional params:
+//   - username: display name shown in Slack (defaults to "erg")
+//   - icon_emoji: emoji icon, e.g. ":robot_face:" (defaults to ":robot_face:")
+//   - channel: channel override, e.g. "#alerts" (defaults to webhook's configured channel)
+func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	// Resolve webhook URL — support $ENV_VAR expansion so secrets stay out of config files.
+	rawURL := params.String("webhook_url", "")
+	if rawURL == "" {
+		return fmt.Errorf("webhook_url parameter is required")
+	}
+	webhookURL := os.ExpandEnv(rawURL)
+	if webhookURL == "" {
+		return fmt.Errorf("webhook_url resolved to empty string (env var not set?)")
+	}
+
+	// Resolve and render the message template.
+	messageTemplate := params.String("message", "")
+	if messageTemplate == "" {
+		return fmt.Errorf("message parameter is required")
+	}
+
+	tmpl, err := template.New("slack").Parse(messageTemplate)
+	if err != nil {
+		return fmt.Errorf("invalid message template: %w", err)
+	}
+
+	data := slackTemplateData{
+		Title:    item.IssueRef.Title,
+		IssueID:  item.IssueRef.ID,
+		IssueURL: item.IssueRef.URL,
+		PRURL:    item.PRURL,
+		Branch:   item.Branch,
+		Status:   string(item.State),
+	}
+
+	var msgBuf bytes.Buffer
+	if err := tmpl.Execute(&msgBuf, data); err != nil {
+		return fmt.Errorf("failed to render message template: %w", err)
+	}
+	message := strings.TrimSpace(msgBuf.String())
+	if message == "" {
+		return fmt.Errorf("rendered message is empty")
+	}
+
+	payload := slackWebhookPayload{
+		Text:      message,
+		Username:  params.String("username", "erg"),
+		IconEmoji: params.String("icon_emoji", ":robot_face:"),
+		Channel:   params.String("channel", ""),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Slack payload: %w", err)
+	}
+
+	notifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(notifyCtx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request to Slack failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Slack webhook returned non-200 status: %d", resp.StatusCode)
+	}
+
+	d.logger.Info("slack notification sent", "workItem", item.ID, "channel", payload.Channel)
+	return nil
 }

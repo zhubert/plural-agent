@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	osexec "os/exec"
 	"path/filepath"
 	"slices"
@@ -4205,4 +4207,275 @@ func TestLinearCommentAction_NoProvider(t *testing.T) {
 	if result.Error == nil {
 		t.Error("expected error when linear provider is not registered")
 	}
+}
+
+// ---- slack.notify tests ----
+
+func TestSlackNotifyAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": "https://hooks.slack.com/services/test",
+		"message":     "Hello!",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestSlackNotifyAction_MissingWebhookURL(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1", Title: "Test Issue"},
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"message": "Hello!",
+		// no webhook_url
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when webhook_url is missing")
+	}
+	if result.Error == nil {
+		t.Error("expected error when webhook_url is missing")
+	}
+}
+
+func TestSlackNotifyAction_MissingMessage(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1", Title: "Test Issue"},
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": "https://hooks.slack.com/services/test",
+		// no message
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when message is missing")
+	}
+	if result.Error == nil {
+		t.Error("expected error when message is missing")
+	}
+}
+
+func TestSlackNotifyAction_InvalidTemplate(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1", Title: "Test Issue"},
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": "https://hooks.slack.com/services/test",
+		"message":     "{{.Unclosed",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for invalid template")
+	}
+	if result.Error == nil {
+		t.Error("expected error for invalid template")
+	}
+}
+
+func TestSlackNotifyAction_EnvVarWebhookURL(t *testing.T) {
+	// Set an env var to resolve the webhook URL, and point it at a test server.
+	srv := newSlackTestServer(t, http.StatusOK)
+	defer srv.Close()
+
+	t.Setenv("TEST_SLACK_WEBHOOK", srv.URL)
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Fix bug", URL: "https://github.com/o/r/issues/42"},
+		Branch:   "issue-42",
+		PRURL:    "https://github.com/o/r/pull/99",
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": "$TEST_SLACK_WEBHOOK",
+		"message":     "PR ready: {{.PRURL}}",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success with env-var webhook URL, got error: %v", result.Error)
+	}
+}
+
+func TestSlackNotifyAction_TemplateVariables(t *testing.T) {
+	// Verify that all template variables are populated correctly.
+	var capturedPayload slackWebhookPayload
+	srv := newSlackTestServerCapture(t, http.StatusOK, &capturedPayload)
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:    "item-1",
+		IssueRef: config.IssueRef{
+			Source: "github",
+			ID:     "99",
+			Title:  "Implement feature",
+			URL:    "https://github.com/o/r/issues/99",
+		},
+		Branch: "issue-99",
+		PRURL:  "https://github.com/o/r/pull/7",
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": srv.URL,
+		"message":     "{{.Title}} (#{{.IssueID}}) — PR: {{.PRURL}} branch: {{.Branch}} status: {{.Status}}",
+		"username":    "mybot",
+		"icon_emoji":  ":tada:",
+		"channel":     "#eng",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Fatalf("expected success, got error: %v", result.Error)
+	}
+
+	wantText := "Implement feature (#99) — PR: https://github.com/o/r/pull/7 branch: issue-99 status: queued"
+	if capturedPayload.Text != wantText {
+		t.Errorf("message text mismatch\n got: %q\nwant: %q", capturedPayload.Text, wantText)
+	}
+	if capturedPayload.Username != "mybot" {
+		t.Errorf("username: got %q, want %q", capturedPayload.Username, "mybot")
+	}
+	if capturedPayload.IconEmoji != ":tada:" {
+		t.Errorf("icon_emoji: got %q, want %q", capturedPayload.IconEmoji, ":tada:")
+	}
+	if capturedPayload.Channel != "#eng" {
+		t.Errorf("channel: got %q, want %q", capturedPayload.Channel, "#eng")
+	}
+}
+
+func TestSlackNotifyAction_DefaultUsernameAndEmoji(t *testing.T) {
+	var capturedPayload slackWebhookPayload
+	srv := newSlackTestServerCapture(t, http.StatusOK, &capturedPayload)
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1", Title: "Bug"},
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": srv.URL,
+		"message":     "Hello from erg",
+		// username and icon_emoji intentionally omitted — should get defaults
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Fatalf("expected success, got: %v", result.Error)
+	}
+
+	if capturedPayload.Username != "erg" {
+		t.Errorf("expected default username 'erg', got %q", capturedPayload.Username)
+	}
+	if capturedPayload.IconEmoji != ":robot_face:" {
+		t.Errorf("expected default icon ':robot_face:', got %q", capturedPayload.IconEmoji)
+	}
+}
+
+func TestSlackNotifyAction_SlackReturnsError(t *testing.T) {
+	// Slack returns 500 — action should fail.
+	srv := newSlackTestServer(t, http.StatusInternalServerError)
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1", Title: "Bug"},
+	})
+
+	action := &slackNotifyAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"webhook_url": srv.URL,
+		"message":     "Hello!",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when Slack returns non-200")
+	}
+	if result.Error == nil {
+		t.Error("expected error when Slack returns non-200")
+	}
+}
+
+func TestSlackNotifyAction_RegisteredInActionRegistry(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	registry := d.buildActionRegistry()
+
+	if !registry.Has("slack.notify") {
+		t.Error("expected slack.notify to be registered in action registry")
+	}
+}
+
+// newSlackTestServer creates an httptest.Server that returns the given status code.
+func newSlackTestServer(t *testing.T, statusCode int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(statusCode)
+	}))
+}
+
+// newSlackTestServerCapture creates an httptest.Server that captures the decoded
+// JSON payload into out and returns statusCode.
+func newSlackTestServerCapture(t *testing.T, statusCode int, out *slackWebhookPayload) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(out); err != nil {
+			t.Errorf("failed to decode Slack payload: %v", err)
+		}
+		w.WriteHeader(statusCode)
+	}))
 }
