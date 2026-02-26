@@ -179,6 +179,15 @@ func dockerCommand(ctx context.Context, stdin string, args ...string) ([]byte, e
 	return stdout.Bytes(), nil
 }
 
+// ImageExists reports whether the container image for the given languages
+// and version is already built and cached locally.
+func ImageExists(ctx context.Context, langs []DetectedLang, version string) bool {
+	dockerfile := GenerateDockerfile(langs, version)
+	tag := ImageTag(dockerfile)
+	_, err := dockerCommandFunc(ctx, "", "image", "inspect", tag)
+	return err == nil
+}
+
 // EnsureImage generates a Dockerfile for the detected languages, builds it if
 // not already cached, and returns the image tag. The erg binary is
 // always installed from GitHub releases (pinned or latest).
