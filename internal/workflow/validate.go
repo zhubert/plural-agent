@@ -128,6 +128,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateFormatParams(prefix, state.Params)...)
 		}
 
+		// Validate params for git.rebase action
+		if state.Action == "git.rebase" {
+			errs = append(errs, validateRebaseParams(prefix, state.Params)...)
+		}
+
 	case StateTypeWait:
 		// Wait states require event
 		if state.Event == "" {
@@ -476,6 +481,35 @@ func validateFormatParams(prefix string, params map[string]any) []ValidationErro
 	return errs
 }
 
+// validateRebaseParams validates params for git.rebase actions.
+func validateRebaseParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+	if params == nil {
+		return errs
+	}
+
+	if v, ok := params["max_rebase_rounds"]; ok {
+		switch n := v.(type) {
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_rebase_rounds",
+					Message: "max_rebase_rounds must be greater than 0",
+				})
+			}
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_rebase_rounds",
+					Message: "max_rebase_rounds must be greater than 0",
+				})
+			}
+		}
+	}
+
+	return errs
+}
+
 // validateCIParams validates params for ci.complete events.
 func validateCIParams(prefix string, params map[string]any) []ValidationError {
 	var errs []ValidationError
@@ -638,8 +672,11 @@ func detectCycles(cfg *Config) []ValidationError {
 						Field:   "states",
 						Message: fmt.Sprintf("cycle detected: %s", cycle),
 					})
+					return true
 				}
-				return true
+				// Allowed cycle (passes through choice state) — continue
+				// exploring other edges from this node so that all paths
+				// through the choice are visited.
 			case 0: // unvisited
 				if dfs(next) {
 					return true

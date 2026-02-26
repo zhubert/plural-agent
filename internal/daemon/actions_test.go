@@ -3220,3 +3220,240 @@ func TestUnqueueIssue_NoRepoPath(t *testing.T) {
 		t.Error("expected no CLI calls when repo path is empty")
 	}
 }
+
+// --- rebaseAction tests ---
+
+func TestRebaseAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestRebaseAction_Execute_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestRebaseAction_Execute_MaxRoundsExceeded(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"rebase_rounds": 3},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded")
+	}
+	if !strings.Contains(result.Error.Error(), "max rebase rounds exceeded") {
+		t.Errorf("expected 'max rebase rounds exceeded' error, got: %v", result.Error)
+	}
+}
+
+func TestRebaseAction_Execute_MaxRoundsFloat64(t *testing.T) {
+	// JSON deserialization produces float64 for numbers
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"rebase_rounds": float64(3)},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded (float64)")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded (float64)")
+	}
+}
+
+func TestRebaseAction_Execute_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock git fetch, rebase, push
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-sess-1"}, exec.MockResponse{})
+	// Mock GetDefaultBranch (git symbolic-ref)
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify rounds incremented
+	item := d.state.GetWorkItem("item-1")
+	rounds := getRebaseRounds(item.StepData)
+	if rounds != 1 {
+		t.Errorf("expected rebase_rounds=1, got %d", rounds)
+	}
+}
+
+func TestRebaseAction_Execute_RebaseFails(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock git fetch succeeds, rebase fails
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{
+		Err: fmt.Errorf("conflict"),
+	})
+	mockExec.AddExactMatch("git", []string{"rebase", "--abort"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when rebase fails")
+	}
+	if result.Error == nil {
+		t.Error("expected error when rebase fails")
+	}
+	if !strings.Contains(result.Error.Error(), "rebase failed") {
+		t.Errorf("expected 'rebase failed' error, got: %v", result.Error)
+	}
+}
+
+func TestGetRebaseRounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepData map[string]any
+		expected int
+	}{
+		{"nil step data", nil, 0},
+		{"empty step data", map[string]any{}, 0},
+		{"int value", map[string]any{"rebase_rounds": 2}, 2},
+		{"float64 value (JSON)", map[string]any{"rebase_rounds": float64(3)}, 3},
+		{"string value (invalid)", map[string]any{"rebase_rounds": "2"}, 0},
+		{"zero value", map[string]any{"rebase_rounds": 0}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getRebaseRounds(tt.stepData)
+			if got != tt.expected {
+				t.Errorf("expected %d, got %d", tt.expected, got)
+			}
+		})
+	}
+}

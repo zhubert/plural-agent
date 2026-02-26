@@ -1435,3 +1435,144 @@ func TestGetLinkedPRsForIssue_SkipsNonPRNodes(t *testing.T) {
 		t.Errorf("expected PR #15, got #%d", prs[0].Number)
 	}
 }
+
+func TestCheckPRMergeableStatus_Mergeable(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "mergeable"}, pexec.MockResponse{
+		Stdout: []byte(`{"mergeable":"MERGEABLE"}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRMergeableStatus(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != MergeableMergeable {
+		t.Errorf("expected MERGEABLE, got %s", status)
+	}
+}
+
+func TestCheckPRMergeableStatus_Conflicting(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "mergeable"}, pexec.MockResponse{
+		Stdout: []byte(`{"mergeable":"CONFLICTING"}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRMergeableStatus(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != MergeableConflicting {
+		t.Errorf("expected CONFLICTING, got %s", status)
+	}
+}
+
+func TestCheckPRMergeableStatus_Unknown(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "mergeable"}, pexec.MockResponse{
+		Stdout: []byte(`{"mergeable":"UNKNOWN"}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRMergeableStatus(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != MergeableUnknown {
+		t.Errorf("expected UNKNOWN, got %s", status)
+	}
+}
+
+func TestCheckPRMergeableStatus_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "mergeable"}, pexec.MockResponse{
+		Err: fmt.Errorf("gh failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRMergeableStatus(context.Background(), "/repo", "feature-branch")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if status != MergeableUnknown {
+		t.Errorf("expected UNKNOWN on error, got %s", status)
+	}
+}
+
+func TestRebaseBranch_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"rebase", "origin/main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.RebaseBranch(context.Background(), "/worktree", "feature-branch", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRebaseBranch_FetchFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Err: fmt.Errorf("fetch failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.RebaseBranch(context.Background(), "/worktree", "feature-branch", "main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("expected fetch error, got: %v", err)
+	}
+}
+
+func TestRebaseBranch_ConflictAborts(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"rebase", "origin/main"}, pexec.MockResponse{
+		Err: fmt.Errorf("merge conflict"),
+	})
+	mock.AddExactMatch("git", []string{"rebase", "--abort"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.RebaseBranch(context.Background(), "/worktree", "feature-branch", "main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "conflicts") {
+		t.Errorf("expected conflicts error, got: %v", err)
+	}
+
+	// Verify rebase --abort was called
+	calls := mock.GetCalls()
+	aborted := false
+	for _, c := range calls {
+		if c.Name == "git" && len(c.Args) >= 2 && c.Args[0] == "rebase" && c.Args[1] == "--abort" {
+			aborted = true
+		}
+	}
+	if !aborted {
+		t.Error("expected git rebase --abort to be called")
+	}
+}
+
+func TestRebaseBranch_PushFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"rebase", "origin/main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{
+		Err: fmt.Errorf("push rejected"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.RebaseBranch(context.Background(), "/worktree", "feature-branch", "main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "push") {
+		t.Errorf("expected push error, got: %v", err)
+	}
+}

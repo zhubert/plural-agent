@@ -5,12 +5,14 @@ import "time"
 // DefaultWorkflowConfig returns a Config with the default state graph:
 //
 //	coding → open_pr → await_ci → check_ci_result
-//	  → ci_passed=true:  await_review → merge → done
-//	  → ci_failed=true:  fix_ci → push_ci_fix → await_ci (loop)
+//	  → conflicting=true: rebase → await_ci (loop, bounded by max_rebase_rounds)
+//	  → ci_passed=true:   await_review → merge → done
+//	  → ci_failed=true:   fix_ci → push_ci_fix → await_ci (loop)
 //	  → fix_ci error (max rounds): → failed
 //
 // CI is checked before review to avoid wasting reviewer time on failing builds.
 // The fix loop is bounded by max_ci_fix_rounds (default 3).
+// Merge conflicts are detected and rebased automatically (bounded by max_rebase_rounds, default 3).
 func DefaultWorkflowConfig() *Config {
 	return &Config{
 		Workflow: "issue-to-merge",
@@ -57,10 +59,20 @@ func DefaultWorkflowConfig() *Config {
 			"check_ci_result": {
 				Type: StateTypeChoice,
 				Choices: []ChoiceRule{
+					{Variable: "conflicting", Equals: true, Next: "rebase"},
 					{Variable: "ci_passed", Equals: true, Next: "await_review"},
 					{Variable: "ci_failed", Equals: true, Next: "fix_ci"},
 				},
 				Default: "failed",
+			},
+			"rebase": {
+				Type:   StateTypeTask,
+				Action: "git.rebase",
+				Params: map[string]any{
+					"max_rebase_rounds": 3,
+				},
+				Next:  "await_ci",
+				Error: "failed",
 			},
 			"fix_ci": {
 				Type:   StateTypeTask,

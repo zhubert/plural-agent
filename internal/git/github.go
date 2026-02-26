@@ -468,6 +468,67 @@ func (s *GitService) UploadTranscriptToPR(ctx context.Context, repoPath, branch,
 	return nil
 }
 
+// MergeableStatus represents whether a PR can be cleanly merged.
+type MergeableStatus string
+
+const (
+	MergeableMergeable   MergeableStatus = "MERGEABLE"
+	MergeableConflicting MergeableStatus = "CONFLICTING"
+	MergeableUnknown     MergeableStatus = "UNKNOWN"
+)
+
+// CheckPRMergeableStatus checks the mergeable status of a PR for the given branch.
+// Uses `gh pr view --json mergeable` which returns MERGEABLE, CONFLICTING, or UNKNOWN.
+func (s *GitService) CheckPRMergeableStatus(ctx context.Context, repoPath, branch string) (MergeableStatus, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "mergeable")
+	if err != nil {
+		return MergeableUnknown, fmt.Errorf("gh pr view --json mergeable failed: %w", err)
+	}
+
+	var result struct {
+		Mergeable string `json:"mergeable"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return MergeableUnknown, fmt.Errorf("failed to parse mergeable status: %w", err)
+	}
+
+	switch MergeableStatus(result.Mergeable) {
+	case MergeableMergeable:
+		return MergeableMergeable, nil
+	case MergeableConflicting:
+		return MergeableConflicting, nil
+	default:
+		return MergeableUnknown, nil
+	}
+}
+
+// RebaseBranch rebases a branch onto the latest base branch and force-pushes.
+// This is a mechanical rebase (no Claude needed). If real file-level conflicts
+// exist, the rebase is aborted and an error is returned.
+func (s *GitService) RebaseBranch(ctx context.Context, worktreePath, branch, baseBranch string) error {
+	// Fetch latest base branch
+	_, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "fetch", "origin", baseBranch)
+	if err != nil {
+		return fmt.Errorf("git fetch origin %s failed: %w", baseBranch, err)
+	}
+
+	// Attempt rebase
+	_, rebaseErr := s.executor.CombinedOutput(ctx, worktreePath, "git", "rebase", "origin/"+baseBranch)
+	if rebaseErr != nil {
+		// Abort the rebase to leave the worktree in a clean state
+		s.executor.CombinedOutput(ctx, worktreePath, "git", "rebase", "--abort")
+		return fmt.Errorf("git rebase origin/%s failed (conflicts): %w", baseBranch, rebaseErr)
+	}
+
+	// Force-push with lease for safety
+	_, pushErr := s.executor.CombinedOutput(ctx, worktreePath, "git", "push", "--force-with-lease", "origin", branch)
+	if pushErr != nil {
+		return fmt.Errorf("git push --force-with-lease failed: %w", pushErr)
+	}
+
+	return nil
+}
+
 // CIStatus represents the overall CI check status for a PR.
 type CIStatus string
 

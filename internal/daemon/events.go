@@ -134,6 +134,8 @@ func (c *EventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 }
 
 // checkCIComplete checks CI status and returns true when CI has passed.
+// It first checks for merge conflicts — if the PR is CONFLICTING, it fires
+// with {conflicting: true} so the workflow can route to a rebase step.
 func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "ci.complete")
@@ -146,6 +148,15 @@ func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 
 	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// Check mergeable status first — conflicts prevent CI from running
+	mergeStatus, mergeErr := d.gitService.CheckPRMergeableStatus(pollCtx, sess.RepoPath, item.Branch)
+	if mergeErr != nil {
+		log.Debug("mergeable check failed, falling through to CI", "error", mergeErr)
+	} else if mergeStatus == git.MergeableConflicting {
+		log.Warn("PR has merge conflicts")
+		return true, map[string]any{"conflicting": true}, nil
+	}
 
 	ciStatus, err := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
 	if err != nil {
