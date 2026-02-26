@@ -274,40 +274,6 @@ func TestImageTag_Format(t *testing.T) {
 	}
 }
 
-func TestImageExists_ReturnsTrueWhenCached(t *testing.T) {
-	orig := dockerCommandFunc
-	defer func() { dockerCommandFunc = orig }()
-
-	dockerCommandFunc = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		if args[0] == "image" && args[1] == "inspect" {
-			return []byte("exists"), nil
-		}
-		return nil, fmt.Errorf("unexpected call")
-	}
-
-	got := ImageExists(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11")
-	if !got {
-		t.Error("ImageExists should return true when image is cached")
-	}
-}
-
-func TestImageExists_ReturnsFalseWhenNotCached(t *testing.T) {
-	orig := dockerCommandFunc
-	defer func() { dockerCommandFunc = orig }()
-
-	dockerCommandFunc = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		if args[0] == "image" && args[1] == "inspect" {
-			return nil, fmt.Errorf("not found")
-		}
-		return nil, fmt.Errorf("unexpected call")
-	}
-
-	got := ImageExists(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11")
-	if got {
-		t.Error("ImageExists should return false when image is not cached")
-	}
-}
-
 func TestEnsureImage_Cached(t *testing.T) {
 	orig := dockerCommandFunc
 	defer func() { dockerCommandFunc = orig }()
@@ -323,12 +289,15 @@ func TestEnsureImage_Cached(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
+	tag, built, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !inspectCalled {
 		t.Error("expected docker image inspect to be called")
+	}
+	if built {
+		t.Error("expected built to be false when image is cached")
 	}
 	if !strings.HasPrefix(tag, "erg:") {
 		t.Errorf("expected tag to start with 'erg:', got %q", tag)
@@ -358,12 +327,15 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	tag, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
+	tag, built, err := EnsureImage(context.Background(), []DetectedLang{{Lang: LangGo, Version: "1.23"}}, "0.2.11", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !buildCalled {
 		t.Error("expected docker build to be called")
+	}
+	if !built {
+		t.Error("expected built to be true when image was not cached")
 	}
 	if !strings.HasPrefix(tag, "erg:") {
 		t.Errorf("expected valid tag, got %q", tag)
@@ -382,7 +354,7 @@ func TestEnsureImage_BuildFailure(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	_, err := EnsureImage(context.Background(), nil, "0.2.11", logger)
+	_, _, err := EnsureImage(context.Background(), nil, "0.2.11", logger)
 	if err == nil {
 		t.Fatal("expected error on build failure")
 	}
@@ -406,7 +378,7 @@ func TestEnsureImage_DevUsesCaching(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	_, err := EnsureImage(context.Background(), nil, "dev", logger)
+	_, _, err := EnsureImage(context.Background(), nil, "dev", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

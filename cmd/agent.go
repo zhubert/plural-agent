@@ -112,14 +112,13 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
 
-		if !container.ImageExists(ctx, detected, version) {
-			fmt.Println("Building container image (this may take a few minutes)...")
-		}
-
-		image, err := container.EnsureImage(ctx, detected, version, buildLogger)
+		image, built, err := container.EnsureImage(ctx, detected, version, buildLogger)
 		if err != nil {
 			return fmt.Errorf("failed to auto-build container image: %w\n\n"+
 				"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
+		}
+		if built {
+			fmt.Println("Container image built successfully.")
 		}
 		_ = image // image cached; child will find it
 	}
@@ -288,7 +287,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
 
-		image, err := container.EnsureImage(ctx, detected, version, buildLogger)
+		image, _, err := container.EnsureImage(ctx, detected, version, buildLogger)
 		if err != nil {
 			return fmt.Errorf("failed to auto-build container image: %w\n\n"+
 				"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
@@ -349,7 +348,7 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger) error {
 	// Auto-detect container image if not set (should be cached from parent)
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
-		image, err := container.EnsureImage(ctx, detected, version, daemonLogger)
+		image, _, err := container.EnsureImage(ctx, detected, version, daemonLogger)
 		if err != nil {
 			return fmt.Errorf("failed to auto-build container image: %w", err)
 		}
