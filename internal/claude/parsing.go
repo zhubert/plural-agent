@@ -434,8 +434,8 @@ func truncateForLog(s string) string {
 	return s
 }
 
-// formatToolIcon returns a human-readable verb for the tool type
-func formatToolIcon(toolName string) string {
+// FormatToolIcon returns a human-readable verb for the tool type.
+func FormatToolIcon(toolName string) string {
 	switch toolName {
 	case "Read":
 		return "Reading"
@@ -455,10 +455,10 @@ func formatToolIcon(toolName string) string {
 		return "Fetching"
 	case "WebSearch":
 		return "Searching"
-	// Note: TodoWrite is handled specially via ChunkTypeTodoUpdate,
-	// so it won't reach this function in normal operation
+	case "TodoWrite":
+		return "Updating todos"
 	default:
-		return "Using"
+		return "Using " + toolName
 	}
 }
 

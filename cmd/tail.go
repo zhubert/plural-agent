@@ -14,6 +14,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/zhubert/erg/internal/claude"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/logger"
 )
@@ -70,32 +71,6 @@ type tailStreamMsg struct {
 			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 	} `json:"message"`
-}
-
-// tailToolVerb returns a short display verb for the given tool name.
-func tailToolVerb(name string) string {
-	switch name {
-	case "Read":
-		return "Reading"
-	case "Edit":
-		return "Editing"
-	case "Write":
-		return "Writing"
-	case "Glob", "Grep":
-		return "Searching"
-	case "Bash":
-		return "Running"
-	case "Task":
-		return "Delegating"
-	case "WebFetch":
-		return "Fetching"
-	case "WebSearch":
-		return "Searching"
-	case "TodoWrite":
-		return "Updating todos"
-	default:
-		return "Using " + name
-	}
 }
 
 // tailToolDesc extracts a short description from tool input JSON.
@@ -178,7 +153,7 @@ func readStreamLogLines(sessionID string) ([]string, error) {
 					}
 				}
 			case "tool_use":
-				verb := tailToolVerb(c.Name)
+				verb := claude.FormatToolIcon(c.Name)
 				desc := tailToolDesc(c.Name, c.Input)
 				if desc != "" {
 					lines = append(lines, fmt.Sprintf("[%s: %s]", verb, desc))
