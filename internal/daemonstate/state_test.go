@@ -659,6 +659,21 @@ func TestDaemonState_Spend(t *testing.T) {
 	})
 }
 
+func TestDaemonState_SetLastPollAt(t *testing.T) {
+	s := NewDaemonState("/test/repo")
+
+	if !s.LastPollAt.IsZero() {
+		t.Error("expected LastPollAt to be zero initially")
+	}
+
+	now := time.Now().Truncate(time.Second)
+	s.SetLastPollAt(now)
+
+	if !s.LastPollAt.Equal(now) {
+		t.Errorf("expected LastPollAt %v, got %v", now, s.LastPollAt)
+	}
+}
+
 func TestNewDaemonState(t *testing.T) {
 	state := NewDaemonState("/my/repo")
 

@@ -99,7 +99,7 @@ func (d *Daemon) saveState() {
 	if d.state == nil {
 		return
 	}
-	d.state.LastPollAt = time.Now()
+	d.state.SetLastPollAt(time.Now())
 	if err := d.state.Save(); err != nil {
 		d.logger.Error("failed to save daemon state", "error", err)
 	}
