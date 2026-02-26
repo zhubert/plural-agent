@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	osexec "os/exec"
@@ -4792,4 +4793,363 @@ func newSlackTestServerCapture(t *testing.T, statusCode int, out *slackWebhookPa
 		}
 		w.WriteHeader(statusCode)
 	}))
+}
+
+// --- webhook.post tests ---
+
+func TestWebhookPostAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  "http://example.com/hook",
+		"body": `{"msg": "hello"}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error for missing work item")
+	}
+}
+
+func TestWebhookPostAction_Execute_MissingURL(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"body": `{"msg": "hello"}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when url is missing")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "url parameter is required") {
+		t.Errorf("expected 'url parameter is required' error, got: %v", result.Error)
+	}
+}
+
+func TestWebhookPostAction_Execute_MissingBody(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url": "http://example.com/hook",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when body is missing")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "body parameter is required") {
+		t.Errorf("expected 'body parameter is required' error, got: %v", result.Error)
+	}
+}
+
+func TestWebhookPostAction_Execute_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "42"},
+		Branch:   "issue-42",
+		PRURL:    "https://github.com/owner/repo/pull/7",
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  srv.URL,
+		"body": `{"issue": "42"}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if result.Data == nil || result.Data["response_status"] != 200 {
+		t.Errorf("expected response_status=200 in Data, got: %v", result.Data)
+	}
+}
+
+func TestWebhookPostAction_Execute_UnexpectedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  srv.URL,
+		"body": `{}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for unexpected status code")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error for unexpected status code")
+	}
+}
+
+func TestWebhookPostAction_Execute_CustomExpectedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":             srv.URL,
+		"body":            `{}`,
+		"expected_status": 204,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success for matching expected_status=204, got error: %v", result.Error)
+	}
+	if result.Data == nil || result.Data["response_status"] != 204 {
+		t.Errorf("expected response_status=204 in Data, got: %v", result.Data)
+	}
+}
+
+func TestWebhookPostAction_Execute_WithHeaders(t *testing.T) {
+	var receivedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  srv.URL,
+		"body": `{}`,
+		"headers": map[string]any{
+			"Authorization": "Bearer secret-token",
+		},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if receivedAuth != "Bearer secret-token" {
+		t.Errorf("expected Authorization header 'Bearer secret-token', got %q", receivedAuth)
+	}
+}
+
+func TestWebhookPostAction_Execute_TemplateInterpolation(t *testing.T) {
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "99", Title: "Fix the bug"},
+		Branch:   "issue-99",
+		PRURL:    "https://github.com/owner/repo/pull/5",
+	})
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  srv.URL,
+		"body": `{"issue_id":"{{.IssueID}}","title":"{{.IssueTitle}}","pr":"{{.PRURL}}","branch":"{{.Branch}}","state":"{{.State}}"}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal([]byte(receivedBody), &got); err != nil {
+		t.Fatalf("failed to parse received body as JSON: %v\nbody: %s", err, receivedBody)
+	}
+
+	if got["issue_id"] != "99" {
+		t.Errorf("expected issue_id=99, got %q", got["issue_id"])
+	}
+	if got["title"] != "Fix the bug" {
+		t.Errorf("expected title='Fix the bug', got %q", got["title"])
+	}
+	if got["pr"] != "https://github.com/owner/repo/pull/5" {
+		t.Errorf("expected pr URL, got %q", got["pr"])
+	}
+	if got["branch"] != "issue-99" {
+		t.Errorf("expected branch=issue-99, got %q", got["branch"])
+	}
+	if got["state"] != "active" {
+		t.Errorf("expected state=active, got %q", got["state"])
+	}
+}
+
+func TestWebhookPostAction_Execute_DefaultContentType(t *testing.T) {
+	var receivedContentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":  srv.URL,
+		"body": `{}`,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if receivedContentType != "application/json" {
+		t.Errorf("expected Content-Type=application/json, got %q", receivedContentType)
+	}
+}
+
+func TestInterpolateWebhookBody_ValidTemplate(t *testing.T) {
+	data := webhookTemplateData{
+		IssueID:     "42",
+		IssueTitle:  "Fix crash",
+		IssueURL:    "https://github.com/o/r/issues/42",
+		IssueSource: "github",
+		PRURL:       "https://github.com/o/r/pull/7",
+		Branch:      "issue-42",
+		State:       "active",
+		WorkItemID:  "wi-1",
+	}
+
+	tmpl := `{"id":"{{.IssueID}}","pr":"{{.PRURL}}","source":"{{.IssueSource}}"}`
+	got, err := interpolateWebhookBody(tmpl, data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("interpolated body is not valid JSON: %v\nbody: %s", err, got)
+	}
+	if result["id"] != "42" {
+		t.Errorf("expected id=42, got %q", result["id"])
+	}
+	if result["pr"] != "https://github.com/o/r/pull/7" {
+		t.Errorf("expected pr URL, got %q", result["pr"])
+	}
+	if result["source"] != "github" {
+		t.Errorf("expected source=github, got %q", result["source"])
+	}
+}
+
+func TestInterpolateWebhookBody_InvalidTemplate(t *testing.T) {
+	data := webhookTemplateData{IssueID: "1"}
+	_, err := interpolateWebhookBody(`{{.Unclosed`, data)
+	if err == nil {
+		t.Error("expected error for invalid template syntax")
+	}
+}
+
+func TestWebhookPostAction_Execute_CustomTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	action := &webhookPostAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"url":     srv.URL,
+		"body":    `{}`,
+		"timeout": "5s",
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success with custom timeout, got error: %v", result.Error)
+	}
 }

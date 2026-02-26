@@ -827,6 +827,7 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("asana.comment", &asanaCommentAction{daemon: d})
 	registry.Register("linear.comment", &linearCommentAction{daemon: d})
 	registry.Register("slack.notify", &slackNotifyAction{daemon: d})
+	registry.Register("webhook.post", &webhookPostAction{daemon: d})
 	return registry
 }
 
