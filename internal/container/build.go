@@ -179,26 +179,17 @@ func dockerCommand(ctx context.Context, stdin string, args ...string) ([]byte, e
 	return stdout.Bytes(), nil
 }
 
-// ImageExists reports whether the container image for the given languages
-// and version is already built and cached locally.
-func ImageExists(ctx context.Context, langs []DetectedLang, version string) bool {
-	dockerfile := GenerateDockerfile(langs, version)
-	tag := ImageTag(dockerfile)
-	_, err := dockerCommandFunc(ctx, "", "image", "inspect", tag)
-	return err == nil
-}
-
 // EnsureImage generates a Dockerfile for the detected languages, builds it if
-// not already cached, and returns the image tag. The erg binary is
-// always installed from GitHub releases (pinned or latest).
-func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logger *slog.Logger) (string, error) {
+// not already cached, and returns the image tag plus whether a build was needed.
+// The erg binary is always installed from GitHub releases (pinned or latest).
+func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logger *slog.Logger) (string, bool, error) {
 	dockerfile := GenerateDockerfile(langs, version)
 	tag := ImageTag(dockerfile)
 
 	// Check if image already exists (cached)
-	if ImageExists(ctx, langs, version) {
+	if _, err := dockerCommandFunc(ctx, "", "image", "inspect", tag); err == nil {
 		logger.Info("using cached container image", "image", tag)
-		return tag, nil
+		return tag, false, nil
 	}
 
 	// Build the image
@@ -214,9 +205,9 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 
 	_, err := dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", ".")
 	if err != nil {
-		return "", fmt.Errorf("docker build failed: %w", err)
+		return "", false, fmt.Errorf("docker build failed: %w", err)
 	}
 
 	logger.Info("container image built successfully", "image", tag)
-	return tag, nil
+	return tag, true, nil
 }
