@@ -621,7 +621,7 @@ func TestStartCoding_SkipsCleanupWhenPRExists(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	err := d.startCoding(context.Background(), item)
+	err := d.startCoding(context.Background(), *item)
 	if err == nil {
 		t.Fatal("startCoding should return error when branch has existing PR")
 	}
@@ -637,7 +637,11 @@ func TestStartCoding_SkipsCleanupWhenPRExists(t *testing.T) {
 	if !sessions[0].PRCreated {
 		t.Error("tracking session should have PRCreated=true")
 	}
-	if item.SessionID == "" {
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist in state")
+	}
+	if updatedItem.SessionID == "" {
 		t.Error("work item should have SessionID set")
 	}
 }
@@ -670,7 +674,7 @@ func TestStartCoding_SkipsCleanupWhenPRMerged(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	err := d.startCoding(context.Background(), item)
+	err := d.startCoding(context.Background(), *item)
 	if err == nil {
 		t.Fatal("startCoding should return error when branch has merged PR")
 	}
@@ -683,7 +687,11 @@ func TestStartCoding_SkipsCleanupWhenPRMerged(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 tracking session, got %d", len(sessions))
 	}
-	if item.SessionID == "" {
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist in state")
+	}
+	if updatedItem.SessionID == "" {
 		t.Error("work item should have SessionID set")
 	}
 }
@@ -723,7 +731,7 @@ func TestStartCoding_CleansUpWhenNoPR(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	err := d.startCoding(context.Background(), item)
+	err := d.startCoding(context.Background(), *item)
 	if err != nil {
 		t.Fatalf("startCoding should succeed when no PR exists on branch, got: %v", err)
 	}
@@ -779,7 +787,7 @@ func TestStartCoding_CleansUpStaleBranch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := d.startCoding(ctx, item)
+	err := d.startCoding(ctx, *item)
 	if err != nil {
 		t.Fatalf("startCoding should succeed after cleaning up stale branch, got: %v", err)
 	}
@@ -840,7 +848,7 @@ func TestStartCoding_CleansUpOrphanedBranch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := d.startCoding(ctx, item)
+	err := d.startCoding(ctx, *item)
 	if err != nil {
 		t.Fatalf("startCoding should succeed after cleaning up orphaned branch, got: %v", err)
 	}
@@ -884,7 +892,7 @@ func TestStartCoding_FailsWhenCleanupFails(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	err := d.startCoding(context.Background(), item)
+	err := d.startCoding(context.Background(), *item)
 	if err == nil {
 		t.Fatal("startCoding should fail when branch cannot be cleaned up")
 	}
@@ -932,21 +940,27 @@ func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := d.startCoding(ctx, item)
+	err := d.startCoding(ctx, *item)
 	if err != nil {
 		t.Fatalf("startCoding should succeed, got: %v", err)
 	}
 
+	// Re-fetch the item from state to see the updates applied via UpdateWorkItem.
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist in state")
+	}
+
 	// item.SessionID must be set so that a subsequent saveState records the
 	// reference — this is the core of the bug fix.
-	if item.SessionID == "" {
+	if updatedItem.SessionID == "" {
 		t.Error("item.SessionID must be set before saveConfig is called (regression: orphaned session on crash)")
 	}
-	if item.Branch == "" {
+	if updatedItem.Branch == "" {
 		t.Error("item.Branch must be set after startCoding")
 	}
-	if item.State != daemonstate.WorkItemActive {
-		t.Errorf("item.State must be WorkItemActive, got %q", item.State)
+	if updatedItem.State != daemonstate.WorkItemActive {
+		t.Errorf("item.State must be WorkItemActive, got %q", updatedItem.State)
 	}
 
 	// The SessionID on the work item must match the session recorded in config,
@@ -955,8 +969,8 @@ func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	if len(sessions) == 0 {
 		t.Fatal("expected a session to be recorded in config")
 	}
-	if sessions[0].ID != item.SessionID {
-		t.Errorf("config session ID %q does not match item.SessionID %q", sessions[0].ID, item.SessionID)
+	if sessions[0].ID != updatedItem.SessionID {
+		t.Errorf("config session ID %q does not match item.SessionID %q", sessions[0].ID, updatedItem.SessionID)
 	}
 }
 
@@ -1727,7 +1741,8 @@ func TestRunFormatter_NoChanges(t *testing.T) {
 	// 'true' is a no-op command that succeeds but makes no file changes
 	params := workflow.NewParamHelper(map[string]any{"command": "true"})
 
-	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	workItem1, _ := d.state.GetWorkItem("item-1")
+	err := d.runFormatter(context.Background(), workItem1, params)
 	if err != nil {
 		t.Fatalf("expected no error for no-op formatter, got: %v", err)
 	}
@@ -1760,7 +1775,8 @@ func TestRunFormatter_WithChanges(t *testing.T) {
 	// Command that creates a new file, simulating a formatter adding/modifying files
 	params := workflow.NewParamHelper(map[string]any{"command": "echo 'formatted' > formatted.txt"})
 
-	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	workItem1, _ := d.state.GetWorkItem("item-1")
+	err := d.runFormatter(context.Background(), workItem1, params)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1798,7 +1814,8 @@ func TestRunFormatter_CustomCommitMessage(t *testing.T) {
 		"message": "chore: apply prettier formatting",
 	})
 
-	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	workItem1, _ := d.state.GetWorkItem("item-1")
+	err := d.runFormatter(context.Background(), workItem1, params)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1831,7 +1848,8 @@ func TestRunFormatter_CommandFails(t *testing.T) {
 	// Command that exits non-zero to simulate formatter failure
 	params := workflow.NewParamHelper(map[string]any{"command": "exit 1"})
 
-	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	workItem1, _ := d.state.GetWorkItem("item-1")
+	err := d.runFormatter(context.Background(), workItem1, params)
 	if err == nil {
 		t.Fatal("expected error when formatter command fails")
 	}
@@ -1863,7 +1881,8 @@ func TestRunFormatter_FallbackToRepoPath(t *testing.T) {
 
 	params := workflow.NewParamHelper(map[string]any{"command": "true"})
 
-	err := d.runFormatter(context.Background(), d.state.GetWorkItem("item-1"), params)
+	workItem1, _ := d.state.GetWorkItem("item-1")
+	err := d.runFormatter(context.Background(), workItem1, params)
 	if err != nil {
 		t.Fatalf("expected no error when falling back to RepoPath, got: %v", err)
 	}
@@ -1929,12 +1948,13 @@ func TestDaemon_RefreshStaleSession_ActiveWorker(t *testing.T) {
 	d.workers[item.ID] = &worker.SessionWorker{}
 	d.mu.Unlock()
 
-	result := d.refreshStaleSession(context.Background(), item, sess)
+	result := d.refreshStaleSession(context.Background(), *item, sess)
 
 	if result.ID != "sess-real" {
 		t.Errorf("expected session ID unchanged, got %s", result.ID)
 	}
-	if d.state.GetWorkItem("item-1").SessionID != "sess-real" {
+	stateItem1, _ := d.state.GetWorkItem("item-1")
+	if stateItem1.SessionID != "sess-real" {
 		t.Error("expected work item session ID unchanged")
 	}
 }
@@ -1964,7 +1984,7 @@ func TestDaemon_RefreshStaleSession_NoActiveWorker(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	result := d.refreshStaleSession(context.Background(), item, sess)
+	result := d.refreshStaleSession(context.Background(), *item, sess)
 
 	// Should have a new session ID
 	if result.ID == "sess-stale" {
@@ -1998,7 +2018,7 @@ func TestDaemon_RefreshStaleSession_NoActiveWorker(t *testing.T) {
 	}
 
 	// Work item should reference new session
-	updatedItem := d.state.GetWorkItem("item-stale")
+	updatedItem, _ := d.state.GetWorkItem("item-stale")
 	if updatedItem.SessionID != result.ID {
 		t.Errorf("expected work item to reference new session %s, got %s", result.ID, updatedItem.SessionID)
 	}
@@ -2024,7 +2044,7 @@ func TestDaemon_RefreshStaleSession_WorkTreeButNoWorker(t *testing.T) {
 
 	// No worker registered for this item — conversation is dead
 
-	result := d.refreshStaleSession(context.Background(), item, sess)
+	result := d.refreshStaleSession(context.Background(), *item, sess)
 
 	// Should have a new session ID
 	if result.ID == "sess-done" {
@@ -2052,7 +2072,7 @@ func TestDaemon_RefreshStaleSession_WorkTreeButNoWorker(t *testing.T) {
 	}
 
 	// Work item should reference new session
-	updatedItem := d.state.GetWorkItem("item-done")
+	updatedItem, _ := d.state.GetWorkItem("item-done")
 	if updatedItem.SessionID != result.ID {
 		t.Errorf("expected work item to reference new session %s, got %s", result.ID, updatedItem.SessionID)
 	}
@@ -2101,7 +2121,7 @@ func TestDaemon_RefreshStaleSession_RecreatesWorktree(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	result := d.refreshStaleSession(context.Background(), item, sess)
+	result := d.refreshStaleSession(context.Background(), *item, sess)
 
 	// Should have a new session ID
 	if result.ID == "sess-recovered" {
@@ -2169,7 +2189,7 @@ func TestDaemon_RefreshStaleSession_RemovesStaleWorktree(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	result := d.refreshStaleSession(context.Background(), item, sess)
+	result := d.refreshStaleSession(context.Background(), *item, sess)
 
 	if result.ID == "sess-stale-wt" {
 		t.Error("expected new session ID")
@@ -2381,7 +2401,7 @@ func TestCreatePR_NoChanges_ReturnsError(t *testing.T) {
 		StepData:  map[string]any{},
 	})
 
-	item := d.state.GetWorkItem("item-no-changes")
+	item, _ := d.state.GetWorkItem("item-no-changes")
 	_, err := d.createPR(context.Background(), item)
 	if err == nil {
 		t.Fatal("expected error when creating PR with no changes")
@@ -2446,11 +2466,11 @@ func TestAddressFeedback_TranscriptOnlyResetsPhase(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// batchCommentCount=1: 1 top-level comment + 0 actionable reviews
 	d.addressFeedback(context.Background(), item, 1)
 
-	updated := d.state.GetWorkItem("item-1")
+	updated, _ := d.state.GetWorkItem("item-1")
 	if updated.Phase != "idle" {
 		t.Errorf("expected phase to be reset to 'idle' after transcript-only comments, got %q", updated.Phase)
 	}
@@ -2507,9 +2527,9 @@ func TestAddressFeedback_CommentsAddressedMatchesBatchCount(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// batchCommentCount=1: the batch API sees 0 top-level comments + 1 review
-	d.addressFeedback(context.Background(), item, 1)
+	d.addressFeedback(context.Background(), *item, 1)
 
-	updated := d.state.GetWorkItem("item-1")
+	updated, _ := d.state.GetWorkItem("item-1")
 	// CommentsAddressed must equal the batchCommentCount (1), NOT the
 	// individual comment count from FetchPRReviewComments (5).
 	if updated.CommentsAddressed != 1 {
@@ -2649,7 +2669,7 @@ func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
 		StepData:  map[string]any{},
 	})
 
-	item := d.state.GetWorkItem("item-existing")
+	item, _ := d.state.GetWorkItem("item-existing")
 	_, err := d.createPR(context.Background(), item)
 	if err != nil {
 		t.Fatalf("expected no error for existing PR, got: %v", err)
@@ -2723,7 +2743,7 @@ func TestCloseIssueGracefully_NonGitHub(t *testing.T) {
 	}
 
 	// Should return immediately without error for non-GitHub issues
-	d.closeIssueGracefully(context.Background(), item)
+	d.closeIssueGracefully(context.Background(), *item)
 	// No assertion needed — just verifying it doesn't panic
 }
 
@@ -2753,7 +2773,8 @@ func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
 		StepData:    map[string]any{},
 	})
 
-	err := d.mergePR(context.Background(), d.state.GetWorkItem("item-1"))
+	mergeItem, _ := d.state.GetWorkItem("item-1")
+	err := d.mergePR(context.Background(), mergeItem)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2764,7 +2785,7 @@ func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
 	}
 
 	// Repo path should be preserved in step data
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	repoPath, ok := item.StepData["_repo_path"].(string)
 	if !ok || repoPath != "/actual/repo/path" {
 		t.Errorf("expected _repo_path=/actual/repo/path in step data, got %v", item.StepData["_repo_path"])
@@ -2807,7 +2828,7 @@ func TestHandleAsyncComplete_RunsFormatterOnSuccess(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// exitErr == nil → success path → formatter should run
-	d.handleAsyncComplete(context.Background(), item, nil)
+	d.handleAsyncComplete(context.Background(), *item, nil)
 
 	// Verify the formatting commit was created
 	cmd := osexec.Command("git", "log", "--format=%s", "-1")
@@ -2850,7 +2871,7 @@ func TestHandleAsyncComplete_SkipsFormatterOnFailure(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// exitErr != nil → failure path → formatter should NOT run
-	d.handleAsyncComplete(context.Background(), item, errors.New("worker failed"))
+	d.handleAsyncComplete(context.Background(), *item, errors.New("worker failed"))
 
 	// Verify no formatting commit was added (only the initial commit)
 	cmd := osexec.Command("git", "log", "--oneline")
@@ -2899,12 +2920,13 @@ func TestStartFixCI_FormatCommandStoredInStepData(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed: test failure")
+	_ = d.startFixCI(context.Background(), *item, sess, 1, "CI failed: test failure")
 
-	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "gofmt -l -w ." {
 		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
 	}
-	if got, _ := item.StepData["_format_message"].(string); got != "style: gofmt" {
+	if got, _ := updatedItem.StepData["_format_message"].(string); got != "style: gofmt" {
 		t.Errorf("expected _format_message=%q, got %q", "style: gofmt", got)
 	}
 }
@@ -2939,12 +2961,13 @@ func TestStartFixCI_FormatCommandDefaultMessage(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+	_ = d.startFixCI(context.Background(), *item, sess, 1, "CI failed")
 
-	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "gofmt -l -w ." {
 		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
 	}
-	if got, _ := item.StepData["_format_message"].(string); got != "Apply auto-formatting" {
+	if got, _ := updatedItem.StepData["_format_message"].(string); got != "Apply auto-formatting" {
 		t.Errorf("expected default _format_message=%q, got %q", "Apply auto-formatting", got)
 	}
 }
@@ -2973,10 +2996,11 @@ func TestStartFixCI_InheritsFormatCommandFromStepData(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+	_ = d.startFixCI(context.Background(), *item, sess, 1, "CI failed")
 
 	// Existing _format_command must not be cleared.
-	if got, _ := item.StepData["_format_command"].(string); got != "gofmt ./..." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "gofmt ./..." {
 		t.Errorf("expected _format_command=%q, got %q", "gofmt ./...", got)
 	}
 }
@@ -3015,12 +3039,13 @@ func TestStartFixCI_FormatCommandOverridesStepData(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	_ = d.startFixCI(context.Background(), item, sess, 1, "CI failed")
+	_ = d.startFixCI(context.Background(), *item, sess, 1, "CI failed")
 
-	if got, _ := item.StepData["_format_command"].(string); got != "prettier --write ." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "prettier --write ." {
 		t.Errorf("expected _format_command=%q, got %q", "prettier --write .", got)
 	}
-	if got, _ := item.StepData["_format_message"].(string); got != "style: prettier" {
+	if got, _ := updatedItem.StepData["_format_message"].(string); got != "style: prettier" {
 		t.Errorf("expected _format_message=%q, got %q", "style: prettier", got)
 	}
 }
@@ -3067,12 +3092,13 @@ func TestAddressFeedback_FormatCommandStoredInStepData(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// batchCommentCount=1: 0 top-level comments + 1 actionable review
-	d.addressFeedback(context.Background(), item, 1)
+	d.addressFeedback(context.Background(), *item, 1)
 
-	if got, _ := item.StepData["_format_command"].(string); got != "gofmt -l -w ." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "gofmt -l -w ." {
 		t.Errorf("expected _format_command=%q, got %q", "gofmt -l -w .", got)
 	}
-	if got, _ := item.StepData["_format_message"].(string); got != "style: gofmt" {
+	if got, _ := updatedItem.StepData["_format_message"].(string); got != "style: gofmt" {
 		t.Errorf("expected _format_message=%q, got %q", "style: gofmt", got)
 	}
 }
@@ -3106,10 +3132,11 @@ func TestAddressFeedback_InheritsFormatCommandFromStepData(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// batchCommentCount=1: 0 top-level comments + 1 actionable review
-	d.addressFeedback(context.Background(), item, 1)
+	d.addressFeedback(context.Background(), *item, 1)
 
 	// Existing _format_command must not be cleared.
-	if got, _ := item.StepData["_format_command"].(string); got != "gofmt ./..." {
+	updatedItem, _ := d.state.GetWorkItem(item.ID)
+	if got, _ := updatedItem.StepData["_format_command"].(string); got != "gofmt ./..." {
 		t.Errorf("expected _format_command=%q, got %q", "gofmt ./...", got)
 	}
 }
@@ -3140,7 +3167,7 @@ func TestHandleAsyncComplete_NoFormatCommandSkipsFormatter(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	d.handleAsyncComplete(context.Background(), item, nil)
+	d.handleAsyncComplete(context.Background(), *item, nil)
 
 	// Verify no extra commits
 	cmd := osexec.Command("git", "log", "--oneline")
@@ -3186,7 +3213,7 @@ func TestUnqueueIssue_GitHub(t *testing.T) {
 	}
 	d.state.AddWorkItem(item)
 
-	d.unqueueIssue(context.Background(), item, "Test unqueue reason.")
+	d.unqueueIssue(context.Background(), *item, "Test unqueue reason.")
 
 	calls := mockExec.GetCalls()
 
@@ -3248,7 +3275,7 @@ func TestUnqueueIssue_NoProviderActions(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// Should not panic or error — just a no-op.
-	d.unqueueIssue(context.Background(), item, "Test reason.")
+	d.unqueueIssue(context.Background(), *item, "Test reason.")
 
 	calls := mockExec.GetCalls()
 	if len(calls) != 0 {
@@ -3272,7 +3299,7 @@ func TestUnqueueIssue_NoRepoPath(t *testing.T) {
 	d.state.AddWorkItem(item)
 
 	// Should return early without calling any CLI commands.
-	d.unqueueIssue(context.Background(), item, "No repo path.")
+	d.unqueueIssue(context.Background(), *item, "No repo path.")
 
 	if len(mockExec.GetCalls()) != 0 {
 		t.Error("expected no CLI calls when repo path is empty")
@@ -3470,7 +3497,7 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 	}
 
 	// Verify rounds incremented
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	rounds := getRebaseRounds(item.StepData)
 	if rounds != 1 {
 		t.Errorf("expected rebase_rounds=1, got %d", rounds)

@@ -68,8 +68,8 @@ func (c *EventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 		return false, nil, nil
 	}
 
-	workItem := d.state.GetWorkItem(item.ID)
-	if workItem == nil {
+	workItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
 		return false, nil, nil
 	}
 

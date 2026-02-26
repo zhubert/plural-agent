@@ -227,7 +227,9 @@ func TestDaemon_ActiveSlotCount(t *testing.T) {
 		IssueRef: config.IssueRef{Source: "github", ID: "1"},
 	})
 	// Set phase to async_pending to consume a slot
-	d.state.GetWorkItem("item-1").Phase = "async_pending"
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.Phase = "async_pending"
+	})
 
 	if d.activeSlotCount() != 1 {
 		t.Errorf("expected 1 active slot, got %d", d.activeSlotCount())
@@ -248,7 +250,9 @@ func TestDaemon_CollectCompletedWorkers(t *testing.T) {
 	})
 	// Set phase after AddWorkItem since it resets Phase to "idle"
 	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
-	d.state.GetWorkItem("item-1").State = daemonstate.WorkItemActive
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 
 	// Add a session for the work item
 	sess := testSession("sess-1")
@@ -307,9 +311,9 @@ func TestDaemon_ProcessWorkItems_AwaitingReview_PRClosed(t *testing.T) {
 
 	// The event checker will detect the closed PR but the exact handling
 	// depends on the engine integration. Verify the item was processed.
-	item := d.state.GetWorkItem("item-1")
+	_, itemExists := d.state.GetWorkItem("item-1")
 	// Item should still be at await_review (event checker returns false for closed)
-	if item == nil {
+	if !itemExists {
 		t.Fatal("item should exist")
 	}
 }
@@ -355,7 +359,7 @@ func TestDaemon_ProcessWorkItems_AwaitingCI_Passing(t *testing.T) {
 	d.processWorkItems(context.Background())
 
 	// After CI passes, engine should advance to merge and then done
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.IsTerminal() && item.State == daemonstate.WorkItemCompleted {
 		// Successfully merged and completed
 	} else {
@@ -481,7 +485,7 @@ func TestDaemon_ReviewPollIntervalGating(t *testing.T) {
 	d.processWorkItems(context.Background())
 
 	// Should still be in await_review (review poll was gated)
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.CurrentStep != "await_review" {
 		t.Errorf("expected await_review (review poll gated), got %s", item.CurrentStep)
 	}
@@ -512,7 +516,7 @@ func TestDaemon_RecoverFromState_Queued(t *testing.T) {
 	d.recoverFromState(context.Background())
 
 	// Queued items should remain queued
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected queued, got %s", item.State)
 	}
@@ -551,7 +555,7 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// With the new workflow, await_ci comes before await_review,
 	// so recovery from coding step (not past CI) goes to await_ci.
 	if item.CurrentStep != "await_ci" {
@@ -592,7 +596,7 @@ func TestDaemon_RecoverFromState_AsyncPendingNoPR(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected queued (no PR), got %s", item.State)
 	}
@@ -614,7 +618,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_NoSession(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle, got %s", item.Phase)
 	}
@@ -650,7 +654,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_PRMerged(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemCompleted {
 		t.Errorf("expected completed, got %s", item.State)
 	}
@@ -689,7 +693,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_PRClosed(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemFailed {
 		t.Errorf("expected failed, got %s", item.State)
 	}
@@ -736,7 +740,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_PRApproved(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// Recovery should reset to idle at await_review (not advance to merge).
 	// The merge step is a sync task that requires executeSyncChain() to run,
 	// which only happens during the normal tick loop — not during recovery.
@@ -777,7 +781,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_PROpenNotApproved(t *testing
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle, got %s", item.Phase)
 	}
@@ -801,7 +805,7 @@ func TestDaemon_RecoverFromState_Pushing_NoSession(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle, got %s", item.Phase)
 	}
@@ -834,7 +838,7 @@ func TestDaemon_RecoverFromState_Pushing_PRMerged(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemCompleted {
 		t.Errorf("expected completed, got %s", item.State)
 	}
@@ -861,7 +865,7 @@ func TestDaemon_RecoverFromState_AddressingFeedback_NoBranch(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle, got %s", item.Phase)
 	}
@@ -886,10 +890,12 @@ func TestDaemon_RecoverFromState_TerminalStatesUntouched(t *testing.T) {
 	d.recoverFromState(context.Background())
 
 	// Should remain unchanged
-	if !d.state.GetWorkItem("completed-1").IsTerminal() {
+	completedItem, _ := d.state.GetWorkItem("completed-1")
+	if !completedItem.IsTerminal() {
 		t.Error("expected completed item to remain terminal")
 	}
-	if !d.state.GetWorkItem("failed-1").IsTerminal() {
+	failedItem, _ := d.state.GetWorkItem("failed-1")
+	if !failedItem.IsTerminal() {
 		t.Error("expected failed item to remain terminal")
 	}
 }
@@ -908,7 +914,7 @@ func TestDaemon_RecoverFromState_AsyncPendingNoBranch(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected queued (no branch), got %s", item.State)
 	}
@@ -946,7 +952,7 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromAwaitReview(t *testing.T
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// Was at await_review (past CI), should recover to await_review
 	if item.CurrentStep != "await_review" {
 		t.Errorf("expected await_review (was past CI), got %s", item.CurrentStep)
@@ -988,7 +994,7 @@ func TestDaemon_RecoverFromState_AsyncPendingWithPR_FromFixCI(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// fix_ci is not past CI, should recover to await_ci
 	if item.CurrentStep != "await_ci" {
 		t.Errorf("expected await_ci (fix_ci is not past CI), got %s", item.CurrentStep)
@@ -1022,7 +1028,9 @@ func TestDaemon_PollForNewIssues(t *testing.T) {
 			ID:       "active-1",
 			IssueRef: config.IssueRef{Source: "github", ID: "1"},
 		})
-		d.state.GetWorkItem("active-1").Phase = "async_pending"
+		d.state.UpdateWorkItem("active-1", func(it *daemonstate.WorkItem) {
+			it.Phase = "async_pending"
+		})
 
 		d.pollForNewIssues(context.Background())
 
@@ -1043,7 +1051,7 @@ func TestDaemon_IssueFromWorkItem(t *testing.T) {
 		},
 	}
 
-	issue := issueFromWorkItem(item)
+	issue := issueFromWorkItem(*item)
 
 	if issue.ID != "42" {
 		t.Errorf("expected ID 42, got %s", issue.ID)
@@ -1079,15 +1087,19 @@ func TestDaemon_StartQueuedItems(t *testing.T) {
 			ID:       "active-1",
 			IssueRef: config.IssueRef{Source: "github", ID: "3"},
 		})
-		d.state.GetWorkItem("active-1").Phase = "async_pending"
+		d.state.UpdateWorkItem("active-1", func(it *daemonstate.WorkItem) {
+			it.Phase = "async_pending"
+		})
 
 		d.startQueuedItems(context.Background())
 
 		// Both should still be queued since slot is full
-		if d.state.GetWorkItem("item-1").State != daemonstate.WorkItemQueued {
+		item1, _ := d.state.GetWorkItem("item-1")
+		if item1.State != daemonstate.WorkItemQueued {
 			t.Error("item-1 should still be queued")
 		}
-		if d.state.GetWorkItem("item-2").State != daemonstate.WorkItemQueued {
+		item2, _ := d.state.GetWorkItem("item-2")
+		if item2.State != daemonstate.WorkItemQueued {
 			t.Error("item-2 should still be queued")
 		}
 	})
@@ -1125,7 +1137,7 @@ func TestDaemon_HandleAsyncComplete_PRAlreadyCreated(t *testing.T) {
 	}
 
 	// Item should be in await_review (skipped open_pr)
-	item := d.state.GetWorkItem("item-pr-created")
+	item, _ := d.state.GetWorkItem("item-pr-created")
 	if item.CurrentStep != "await_review" {
 		t.Errorf("expected await_review, got %s", item.CurrentStep)
 	}
@@ -1162,7 +1174,7 @@ func TestDaemon_HandleAsyncComplete_PRAlreadyMerged(t *testing.T) {
 	}
 
 	// Item should be completed (fast-pathed)
-	item := d.state.GetWorkItem("item-pr-merged")
+	item, _ := d.state.GetWorkItem("item-pr-merged")
 	if item.State != daemonstate.WorkItemCompleted {
 		t.Errorf("expected completed, got %s", item.State)
 	}
@@ -1206,7 +1218,7 @@ func TestDaemon_WorkItemView_UsesSessionRepoPath(t *testing.T) {
 	})
 	d.state.AdvanceWorkItem("item-1", "coding", "async_pending")
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(item)
 
 	if view.RepoPath != "/actual/repo/path" {
@@ -1228,7 +1240,7 @@ func TestDaemon_WorkItemView_FallsBackToRepoFilter(t *testing.T) {
 		CurrentStep: "coding",
 	})
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(item)
 
 	if view.RepoPath != "/fallback/repo" {
@@ -1251,7 +1263,7 @@ func TestDaemon_WorkItemView_UsesStepDataRepoPath(t *testing.T) {
 		StepData:    map[string]any{"_repo_path": "/actual/repo/path"},
 	})
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(item)
 
 	if view.RepoPath != "/actual/repo/path" {
@@ -1375,12 +1387,13 @@ func TestDaemon_StartQueuedItems_SkipsWhenPaused(t *testing.T) {
 		IssueRef: config.IssueRef{Source: "github", ID: "1"},
 	})
 
-	initialState := d.state.GetWorkItem("item-1").State
+	initialStateItem, _ := d.state.GetWorkItem("item-1")
+	initialState := initialStateItem.State
 
 	d.startQueuedItems(context.Background())
 
 	// Item should remain in its original queued state — not promoted to coding
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != initialState {
 		t.Errorf("expected state unchanged (%s) when paused, got %s", initialState, item.State)
 	}
@@ -1404,7 +1417,9 @@ func TestDaemon_CollectCompletedWorkers_WorkerError(t *testing.T) {
 		CurrentStep: "coding",
 	})
 	d.state.AdvanceWorkItem("item-err", "coding", "async_pending")
-	d.state.GetWorkItem("item-err").State = daemonstate.WorkItemActive
+	d.state.UpdateWorkItem("item-err", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 
 	// Create a done worker WITH an error (simulating API 500)
 	mock := worker.NewDoneWorkerWithError(fmt.Errorf("API error detected in response stream"))
@@ -1419,7 +1434,7 @@ func TestDaemon_CollectCompletedWorkers_WorkerError(t *testing.T) {
 	}
 
 	// Item should be marked as failed (engine follows error edge to "failed" state)
-	item := d.state.GetWorkItem("item-err")
+	item, _ := d.state.GetWorkItem("item-err")
 	if !item.IsTerminal() {
 		t.Errorf("expected terminal state after worker error, got step=%s phase=%s state=%s",
 			item.CurrentStep, item.Phase, item.State)
@@ -1459,7 +1474,7 @@ func TestDaemon_CollectCompletedWorkers_FeedbackError(t *testing.T) {
 
 	// Item should be back to idle phase (skipped push due to error),
 	// NOT marked as terminal — it should just go back to waiting for review
-	item := d.state.GetWorkItem("item-fb-err")
+	item, _ := d.state.GetWorkItem("item-fb-err")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle phase after failed feedback, got %s", item.Phase)
 	}
@@ -1642,10 +1657,11 @@ type phaseMutatingEventChecker struct {
 
 func (c *phaseMutatingEventChecker) CheckEvent(_ context.Context, event string, _ *workflow.ParamHelper, _ *workflow.WorkItemView) (bool, map[string]any, error) {
 	if event == "pr.reviewed" {
-		// Simulate addressFeedback mutating the work item's phase directly
-		item := c.state.GetWorkItem(c.itemID)
-		if item != nil {
-			item.Phase = c.newPhase
+		// Simulate addressFeedback mutating the work item's phase via UpdateWorkItem
+		if _, ok := c.state.GetWorkItem(c.itemID); ok {
+			c.state.UpdateWorkItem(c.itemID, func(it *daemonstate.WorkItem) {
+				it.Phase = c.newPhase
+			})
 		}
 	}
 	return false, nil, nil
@@ -1692,7 +1708,7 @@ func TestProcessWaitItems_PreservesPhaseSetByEventHandler(t *testing.T) {
 	d.lastReviewPollAt = time.Time{} // Ensure processWaitItems runs
 	d.processWaitItems(context.Background())
 
-	item := d.state.GetWorkItem("item-phase")
+	item, _ := d.state.GetWorkItem("item-phase")
 	if item.Phase != "addressing_feedback" {
 		t.Errorf("expected phase 'addressing_feedback' to be preserved, got %q", item.Phase)
 	}
@@ -1826,7 +1842,7 @@ func TestDaemon_ProcessIdleSyncItems_ExecutesMerge(t *testing.T) {
 
 	d.processIdleSyncItems(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemCompleted {
 		t.Errorf("expected completed, got state=%s step=%s phase=%s", item.State, item.CurrentStep, item.Phase)
 	}
@@ -1855,7 +1871,7 @@ func TestDaemon_ProcessIdleSyncItems_SkipsWaitStates(t *testing.T) {
 
 	d.processIdleSyncItems(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// Should remain unchanged
 	if item.CurrentStep != "await_review" {
 		t.Errorf("expected await_review to be unchanged, got %s", item.CurrentStep)
@@ -1935,7 +1951,7 @@ func TestProcessCIItems_MergesEventDataIntoStepData(t *testing.T) {
 
 	d.processCIItems(context.Background())
 
-	item := d.state.GetWorkItem("item-ci")
+	item, _ := d.state.GetWorkItem("item-ci")
 
 	// With the fix, ci_passed should be merged and the choice routes to "done" (succeed).
 	// Without the fix, ci_passed is missing and the choice falls to "failed".
@@ -2010,7 +2026,7 @@ func TestProcessWaitItems_MergesEventDataIntoStepData(t *testing.T) {
 	d.lastReviewPollAt = time.Time{} // Ensure processWaitItems runs
 	d.processWaitItems(context.Background())
 
-	item := d.state.GetWorkItem("item-review")
+	item, _ := d.state.GetWorkItem("item-review")
 
 	if !item.IsTerminal() {
 		t.Fatalf("expected item to be terminal, got step=%q phase=%q", item.CurrentStep, item.Phase)
@@ -2050,7 +2066,7 @@ func TestStartQueuedItems_TransitionsStateFromQueued(t *testing.T) {
 	d.loadWorkflowConfigs()
 
 	// Snapshot: the item starts in WorkItemQueued state
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Fatalf("expected initial state queued, got %s", item.State)
 	}
@@ -2060,7 +2076,7 @@ func TestStartQueuedItems_TransitionsStateFromQueued(t *testing.T) {
 	// sync chain runs, not by startCoding itself.
 	d.startQueuedItems(context.Background())
 
-	item = d.state.GetWorkItem("item-1")
+	item, _ = d.state.GetWorkItem("item-1")
 	if item.State == daemonstate.WorkItemQueued {
 		t.Error("item State should no longer be WorkItemQueued after startQueuedItems processes it")
 	}
@@ -2090,7 +2106,7 @@ func TestTick_SkipsDispatchWhenDockerDown(t *testing.T) {
 	d.loadWorkflowConfigs()
 
 	// Verify the item starts queued
-	item := d.state.GetWorkItem("item-docker-down")
+	item, _ := d.state.GetWorkItem("item-docker-down")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Fatalf("expected initial state queued, got %s", item.State)
 	}
@@ -2099,7 +2115,7 @@ func TestTick_SkipsDispatchWhenDockerDown(t *testing.T) {
 	d.tick(context.Background())
 
 	// Item should still be queued (startQueuedItems was not called)
-	item = d.state.GetWorkItem("item-docker-down")
+	item, _ = d.state.GetWorkItem("item-docker-down")
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected item to remain queued when Docker is down, got state %s", item.State)
 	}
@@ -2261,7 +2277,9 @@ func TestCollectCompletedWorkers_DockerErrorMarksDockerPending(t *testing.T) {
 		CurrentStep: "coding",
 	})
 	d.state.AdvanceWorkItem("item-docker", "coding", "async_pending")
-	d.state.GetWorkItem("item-docker").State = daemonstate.WorkItemActive
+	d.state.UpdateWorkItem("item-docker", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
 
 	// Create a done worker with a Docker error
 	dockerErr := fmt.Errorf("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?")
@@ -2277,7 +2295,7 @@ func TestCollectCompletedWorkers_DockerErrorMarksDockerPending(t *testing.T) {
 	}
 
 	// Item should be in docker_pending phase, NOT terminal
-	item := d.state.GetWorkItem("item-docker")
+	item, _ := d.state.GetWorkItem("item-docker")
 	if item.Phase != "docker_pending" {
 		t.Errorf("expected docker_pending phase, got %s", item.Phase)
 	}
@@ -2338,7 +2356,7 @@ func TestResumeDockerPendingItems(t *testing.T) {
 	d.resumeDockerPendingItems()
 
 	// Docker-pending items should be reset
-	item1 := d.state.GetWorkItem("item-dp-1")
+	item1, _ := d.state.GetWorkItem("item-dp-1")
 	if item1.Phase != "idle" {
 		t.Errorf("expected idle phase for item-dp-1, got %s", item1.Phase)
 	}
@@ -2349,7 +2367,7 @@ func TestResumeDockerPendingItems(t *testing.T) {
 		t.Errorf("expected empty error message for item-dp-1, got %q", item1.ErrorMessage)
 	}
 
-	item2 := d.state.GetWorkItem("item-dp-2")
+	item2, _ := d.state.GetWorkItem("item-dp-2")
 	if item2.Phase != "idle" {
 		t.Errorf("expected idle phase for item-dp-2, got %s", item2.Phase)
 	}
@@ -2361,7 +2379,7 @@ func TestResumeDockerPendingItems(t *testing.T) {
 	}
 
 	// Normal item should be unchanged
-	itemNormal := d.state.GetWorkItem("item-normal")
+	itemNormal, _ := d.state.GetWorkItem("item-normal")
 	if itemNormal.Phase != "async_pending" {
 		t.Errorf("expected async_pending phase for item-normal, got %s", itemNormal.Phase)
 	}
@@ -2409,7 +2427,7 @@ func TestDockerRecovery_ResumesDockerPendingItems(t *testing.T) {
 	}
 
 	// Docker-pending item should be resumed
-	item := d.state.GetWorkItem("item-recover")
+	item, _ := d.state.GetWorkItem("item-recover")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle phase after Docker recovery, got %s", item.Phase)
 	}
@@ -2455,7 +2473,7 @@ func TestDockerDownAndRecovery_FullCycle(t *testing.T) {
 	// Tick with Docker down — item should stay in docker_pending
 	dockerUp = false
 	d.tick(context.Background())
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	if item.Phase != "docker_pending" {
 		t.Errorf("expected docker_pending phase during outage, got %s", item.Phase)
 	}
@@ -2463,7 +2481,7 @@ func TestDockerDownAndRecovery_FullCycle(t *testing.T) {
 	// Tick with Docker recovered — item should be reset to idle
 	dockerUp = true
 	d.tick(context.Background())
-	item = d.state.GetWorkItem("item-1")
+	item, _ = d.state.GetWorkItem("item-1")
 	if item.Phase != "idle" {
 		t.Errorf("expected idle phase after recovery, got %s", item.Phase)
 	}

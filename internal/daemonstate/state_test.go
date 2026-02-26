@@ -82,8 +82,8 @@ func TestDaemonState_AddAndGetWorkItem(t *testing.T) {
 
 	state.AddWorkItem(item)
 
-	got := state.GetWorkItem("item-1")
-	if got == nil {
+	got, ok := state.GetWorkItem("item-1")
+	if !ok {
 		t.Fatal("expected to find work item")
 	}
 	if got.State != WorkItemQueued {
@@ -100,8 +100,8 @@ func TestDaemonState_AddAndGetWorkItem(t *testing.T) {
 	}
 
 	// Not found
-	if state.GetWorkItem("nonexistent") != nil {
-		t.Error("expected nil for nonexistent item")
+	if _, found := state.GetWorkItem("nonexistent"); found {
+		t.Error("expected not found for nonexistent item")
 	}
 }
 
@@ -116,7 +116,10 @@ func TestDaemonState_AdvanceWorkItem(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	item := state.GetWorkItem("item-1")
+	item, ok := state.GetWorkItem("item-1")
+	if !ok {
+		t.Fatal("expected to find work item")
+	}
 	if item.CurrentStep != "coding" {
 		t.Errorf("expected step coding, got %s", item.CurrentStep)
 	}
@@ -141,7 +144,10 @@ func TestDaemonState_MarkWorkItemTerminal(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	item := state.GetWorkItem("item-1")
+	item, ok := state.GetWorkItem("item-1")
+	if !ok {
+		t.Fatal("expected to find work item")
+	}
 	if item.State != WorkItemCompleted {
 		t.Errorf("expected completed, got %s", item.State)
 	}
@@ -155,7 +161,10 @@ func TestDaemonState_MarkWorkItemTerminal(t *testing.T) {
 		IssueRef: config.IssueRef{Source: "github", ID: "2"},
 	})
 	state.MarkWorkItemTerminal("item-2", false)
-	item2 := state.GetWorkItem("item-2")
+	item2, ok2 := state.GetWorkItem("item-2")
+	if !ok2 {
+		t.Fatal("expected to find work item-2")
+	}
 	if item2.State != WorkItemFailed {
 		t.Errorf("expected failed, got %s", item2.State)
 	}
@@ -251,26 +260,26 @@ func TestDaemonState_ActiveSlotCount(t *testing.T) {
 	}
 
 	// async_pending consumes a slot
-	state.GetWorkItem("a").Phase = "async_pending"
+	state.UpdateWorkItem("a", func(it *WorkItem) { it.Phase = "async_pending" })
 	if state.ActiveSlotCount() != 1 {
 		t.Errorf("expected 1 active slot, got %d", state.ActiveSlotCount())
 	}
 
 	// addressing_feedback (for a non-review step) also consumes a slot
-	state.GetWorkItem("b").Phase = "addressing_feedback"
+	state.UpdateWorkItem("b", func(it *WorkItem) { it.Phase = "addressing_feedback" })
 	if state.ActiveSlotCount() != 2 {
 		t.Errorf("expected 2 active slots, got %d", state.ActiveSlotCount())
 	}
 
 	// idle does not consume a slot
-	state.GetWorkItem("a").Phase = "idle"
+	state.UpdateWorkItem("a", func(it *WorkItem) { it.Phase = "idle" })
 	if state.ActiveSlotCount() != 1 {
 		t.Errorf("expected 1 active slot, got %d", state.ActiveSlotCount())
 	}
 
 	// addressing_feedback in await_review step does NOT consume a slot —
 	// items awaiting review are set aside and must not block new coding work.
-	state.GetWorkItem("b").CurrentStep = "await_review"
+	state.UpdateWorkItem("b", func(it *WorkItem) { it.CurrentStep = "await_review" })
 	if state.ActiveSlotCount() != 0 {
 		t.Errorf("expected 0 active slots (await_review addressing_feedback should not consume slot), got %d", state.ActiveSlotCount())
 	}
@@ -390,7 +399,7 @@ func TestDaemonState_SetErrorMessage(t *testing.T) {
 	})
 
 	state.SetErrorMessage("item-1", "something went wrong")
-	item := state.GetWorkItem("item-1")
+	item, _ := state.GetWorkItem("item-1")
 	if item.ErrorMessage != "something went wrong" {
 		t.Errorf("expected error message, got %q", item.ErrorMessage)
 	}
@@ -399,13 +408,14 @@ func TestDaemonState_SetErrorMessage(t *testing.T) {
 	}
 
 	state.SetErrorMessage("item-1", "second error")
+	item, _ = state.GetWorkItem("item-1")
 	if item.ErrorCount != 2 {
 		t.Errorf("expected error count 2, got %d", item.ErrorCount)
 	}
 
 	// Clearing with empty string should not increment ErrorCount
 	state.SetErrorMessage("item-1", "")
-	item = state.GetWorkItem("item-1")
+	item, _ = state.GetWorkItem("item-1")
 	if item.ErrorMessage != "" {
 		t.Errorf("expected empty error message after clear, got %q", item.ErrorMessage)
 	}
@@ -738,6 +748,89 @@ func TestClearState(t *testing.T) {
 	if _, err := os.Stat(fp); !os.IsNotExist(err) {
 		t.Error("expected state file to be removed")
 	}
+}
+
+func TestGetWorkItem_ReturnsCopy(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+	state.AddWorkItem(&WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+
+	// GetWorkItem should return an independent copy; mutating it must not
+	// affect the stored item.
+	copy1, ok := state.GetWorkItem("item-1")
+	if !ok {
+		t.Fatal("expected to find work item")
+	}
+	copy1.Phase = "mutated"
+	copy1.CurrentStep = "mutated"
+
+	// The stored item should be unchanged.
+	copy2, _ := state.GetWorkItem("item-1")
+	if copy2.Phase == "mutated" {
+		t.Error("GetWorkItem returned a live pointer; mutation affected stored item")
+	}
+	if copy2.CurrentStep == "mutated" {
+		t.Error("GetWorkItem returned a live pointer; mutation affected stored item")
+	}
+}
+
+func TestGetActiveWorkItems_ReturnsCopies(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+	state.AddWorkItem(&WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+	state.AdvanceWorkItem("item-1", "coding", "async_pending")
+	// Set State to Active so GetActiveWorkItems includes it (it excludes WorkItemQueued).
+	state.UpdateWorkItem("item-1", func(it *WorkItem) {
+		it.State = WorkItemActive
+	})
+
+	items := state.GetActiveWorkItems()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 active item, got %d", len(items))
+	}
+
+	// Mutating the returned copy must not affect stored state.
+	items[0].Phase = "mutated"
+
+	fresh, _ := state.GetWorkItem("item-1")
+	if fresh.Phase == "mutated" {
+		t.Error("GetActiveWorkItems returned live pointers; mutation affected stored item")
+	}
+}
+
+func TestGetWorkItem_ConcurrentSafe(t *testing.T) {
+	// Run with -race to detect data races between concurrent reads via
+	// GetWorkItem and concurrent writes via UpdateWorkItem.
+	state := NewDaemonState("/test/repo")
+	state.AddWorkItem(&WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+	})
+	state.AdvanceWorkItem("item-1", "coding", "async_pending")
+
+	done := make(chan struct{})
+	// Writer goroutine: simulates worker calling UpdateWorkItem concurrently.
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			state.UpdateWorkItem("item-1", func(it *WorkItem) {
+				it.Phase = "async_pending"
+			})
+		}
+	}()
+
+	// Reader goroutine: simulates main loop reading work item snapshots.
+	for i := 0; i < 100; i++ {
+		item, ok := state.GetWorkItem("item-1")
+		if ok {
+			_ = item.Phase // read the snapshot
+		}
+	}
+	<-done
 }
 
 func TestLockFilePath(t *testing.T) {

@@ -262,8 +262,8 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 
 	// Phase 2: process each completed worker without holding d.mu.
 	for _, cw := range completed {
-		item := d.state.GetWorkItem(cw.workItemID)
-		if item == nil {
+		item, ok := d.state.GetWorkItem(cw.workItemID)
+		if !ok {
 			continue
 		}
 
@@ -308,7 +308,7 @@ func (d *Daemon) collectCompletedWorkers(ctx context.Context) {
 
 // handleAsyncComplete handles the completion of an async action.
 // exitErr is non-nil when the worker exited due to an error (API error, etc.).
-func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.WorkItem, exitErr error) {
+func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkItem, exitErr error) {
 	log := d.logger.With("workItem", item.ID, "step", item.CurrentStep)
 
 	sess := d.config.GetSession(item.SessionID)
@@ -407,13 +407,23 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item *daemonstate.Work
 	d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
 
 	// If the next step is a sync task (like open_pr), execute it now
-	d.executeSyncChain(ctx, item, engine)
+	d.executeSyncChain(ctx, item.ID, engine)
 }
 
 // executeSyncChain executes synchronous task states in sequence until
 // hitting an async task, a wait state, or a terminal state.
-func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkItem, engine *workflow.Engine) {
+// It re-fetches the work item at the start of each iteration so it always
+// sees the latest state after AdvanceWorkItem / UpdateWorkItem calls.
+func (d *Daemon) executeSyncChain(ctx context.Context, itemID string, engine *workflow.Engine) {
 	for {
+		// Re-fetch a fresh snapshot at the top of every iteration so we see
+		// any state changes made by AdvanceWorkItem / UpdateWorkItem calls
+		// from the previous iteration.
+		item, ok := d.state.GetWorkItem(itemID)
+		if !ok {
+			return
+		}
+
 		// Run before-hooks for the current step (blocking — failure stops execution)
 		beforeHooks := engine.GetBeforeHooks(item.CurrentStep)
 		if len(beforeHooks) > 0 {
@@ -511,7 +521,7 @@ func (d *Daemon) executeSyncChain(ctx context.Context, item *daemonstate.WorkIte
 }
 
 // handleFeedbackComplete handles the transition after Claude finishes addressing feedback.
-func (d *Daemon) handleFeedbackComplete(ctx context.Context, item *daemonstate.WorkItem) {
+func (d *Daemon) handleFeedbackComplete(ctx context.Context, item daemonstate.WorkItem) {
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
 
 	// Push changes
@@ -613,7 +623,7 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 				d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 			} else {
 				// Continue sync chain if next is a sync task
-				d.executeSyncChain(ctx, item, engine)
+				d.executeSyncChain(ctx, item.ID, engine)
 			}
 		}
 	}
@@ -666,7 +676,7 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 			if result.Terminal {
 				d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 			} else {
-				d.executeSyncChain(ctx, item, engine)
+				d.executeSyncChain(ctx, item.ID, engine)
 			}
 		}
 	}
@@ -698,7 +708,7 @@ func (d *Daemon) processIdleSyncItems(ctx context.Context) {
 		}
 
 		d.logger.Info("executing idle sync task", "workItem", item.ID, "step", item.CurrentStep)
-		d.executeSyncChain(ctx, item, engine)
+		d.executeSyncChain(ctx, item.ID, engine)
 	}
 }
 
@@ -732,7 +742,7 @@ func (d *Daemon) processRetryItems(ctx context.Context) {
 
 		// Reset to idle so the engine will re-process the task state
 		d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
-		d.executeSyncChain(ctx, item, engine)
+		d.executeSyncChain(ctx, item.ID, engine)
 	}
 }
 
@@ -921,7 +931,7 @@ func defaultDockerHealthCheck() error {
 }
 
 // runHooks runs the after-hooks for a given workflow step.
-func (d *Daemon) runHooks(ctx context.Context, hooks []workflow.HookConfig, item *daemonstate.WorkItem, sess *config.Session) {
+func (d *Daemon) runHooks(ctx context.Context, hooks []workflow.HookConfig, item daemonstate.WorkItem, sess *config.Session) {
 	if len(hooks) == 0 {
 		return
 	}

@@ -240,52 +240,55 @@ func (s *DaemonState) AddWorkItem(item *WorkItem) {
 	s.WorkItems[item.ID] = item
 }
 
-// GetWorkItem returns a work item by ID (nil if not found).
-func (s *DaemonState) GetWorkItem(id string) *WorkItem {
+// GetWorkItem returns a copy of the work item by ID.
+// Returns the zero value and false if not found.
+func (s *DaemonState) GetWorkItem(id string) (WorkItem, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.WorkItems[id]
+	item, ok := s.WorkItems[id]
+	if !ok {
+		return WorkItem{}, false
+	}
+	return *item, true
 }
 
-// GetWorkItemsByState returns all work items in a given state.
-func (s *DaemonState) GetWorkItemsByState(state WorkItemState) []*WorkItem {
+// GetWorkItemsByState returns copies of all work items in a given state.
+func (s *DaemonState) GetWorkItemsByState(state WorkItemState) []WorkItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var items []*WorkItem
+	var items []WorkItem
 	for _, item := range s.WorkItems {
 		if item.State == state {
-			items = append(items, item)
+			items = append(items, *item)
 		}
 	}
 	return items
 }
 
-// GetAllWorkItems returns a snapshot of all work items regardless of state.
-// Callers receive a slice of pointers; the slice itself is safe to iterate
-// without holding the lock, but individual WorkItem fields must not be
-// modified outside of the provided mutation helpers (UpdateWorkItem, etc.).
-func (s *DaemonState) GetAllWorkItems() []*WorkItem {
+// GetActiveWorkItems returns copies of all non-terminal, non-queued work items.
+func (s *DaemonState) GetActiveWorkItems() []WorkItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	items := make([]*WorkItem, 0, len(s.WorkItems))
-	for _, item := range s.WorkItems {
-		items = append(items, item)
-	}
-	return items
-}
-
-// GetActiveWorkItems returns all non-terminal, non-queued work items.
-func (s *DaemonState) GetActiveWorkItems() []*WorkItem {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var items []*WorkItem
+	var items []WorkItem
 	for _, item := range s.WorkItems {
 		if !item.IsTerminal() && item.State != WorkItemQueued {
-			items = append(items, item)
+			items = append(items, *item)
 		}
+	}
+	return items
+}
+
+// GetAllWorkItems returns copies of all work items regardless of state.
+// Safe to call concurrently; the returned slice is independent of internal state.
+func (s *DaemonState) GetAllWorkItems() []WorkItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]WorkItem, 0, len(s.WorkItems))
+	for _, item := range s.WorkItems {
+		items = append(items, *item)
 	}
 	return items
 }

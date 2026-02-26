@@ -69,8 +69,8 @@ type codingAction struct {
 // Execute creates a session and starts a Claude worker for the work item.
 func (a *codingAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -99,8 +99,8 @@ type createPRAction struct {
 // Execute creates a PR. This is a synchronous action.
 func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -131,8 +131,8 @@ type pushAction struct {
 // Execute pushes changes. This is a synchronous action.
 func (a *pushAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -151,8 +151,8 @@ type mergeAction struct {
 // Execute merges the PR. This is a synchronous action.
 func (a *mergeAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -171,8 +171,8 @@ type commentIssueAction struct {
 // Execute posts a comment on the GitHub issue for the work item.
 func (a *commentIssueAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -191,8 +191,8 @@ type commentPRAction struct {
 // Execute posts a comment on the PR for the work item.
 func (a *commentPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -211,8 +211,8 @@ type asanaCommentAction struct {
 // Execute posts a comment on the Asana task for the work item.
 func (a *asanaCommentAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -231,8 +231,8 @@ type linearCommentAction struct {
 // Execute posts a comment on the Linear issue for the work item.
 func (a *linearCommentAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -251,8 +251,8 @@ type addLabelAction struct {
 // Execute adds a label to the issue for the work item.
 func (a *addLabelAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -271,8 +271,8 @@ type removeLabelAction struct {
 // Execute removes a label from the issue for the work item.
 func (a *removeLabelAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -291,8 +291,8 @@ type closeIssueAction struct {
 // Execute closes the GitHub issue for the work item.
 func (a *closeIssueAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -311,8 +311,8 @@ type requestReviewAction struct {
 // Execute requests review on the PR for the work item.
 func (a *requestReviewAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -324,7 +324,7 @@ func (a *requestReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 }
 
 // startCoding creates a session and starts a Claude worker for a work item.
-func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) error {
+func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) error {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
 
 	// Find the matching repo path
@@ -375,9 +375,11 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 			}
 			d.config.AddSession(*trackingSess)
 
-			item.SessionID = trackingSess.ID
-			item.Branch = fullBranchName
-			item.UpdatedAt = time.Now()
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				it.SessionID = trackingSess.ID
+				it.Branch = fullBranchName
+				it.UpdatedAt = time.Now()
+			})
 
 			d.saveConfig("startCoding:existingPR")
 			d.saveState()
@@ -428,10 +430,12 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	// than the previous order (config saved, work item updated in memory only,
 	// state saved at end of tick). Recovery will detect the orphaned branch on
 	// the next start and clean it up.
-	item.SessionID = sess.ID
-	item.Branch = sess.Branch
-	item.State = daemonstate.WorkItemActive
-	item.UpdatedAt = time.Now()
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.SessionID = sess.ID
+		it.Branch = sess.Branch
+		it.State = daemonstate.WorkItemActive
+		it.UpdatedAt = time.Now()
+	})
 
 	d.saveConfig("startCoding")
 	d.saveState()
@@ -457,9 +461,11 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 	// each commit.
 	formatCommand := params.String("format_command", "")
 	if formatCommand != "" {
-		item.StepData["_format_command"] = formatCommand
 		formatMessage := params.String("format_message", "Apply auto-formatting")
-		item.StepData["_format_message"] = formatMessage
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.StepData["_format_command"] = formatCommand
+			it.StepData["_format_message"] = formatMessage
+		})
 		d.saveState()
 
 		codingPrompt = codingPrompt + "\n\nFORMATTING: Before committing any changes, run the following formatter command:\n  " + formatCommand + "\nStage and include all formatting changes in your commit."
@@ -481,7 +487,7 @@ func (d *Daemon) startCoding(ctx context.Context, item *daemonstate.WorkItem) er
 // addressFeedback resumes the Claude session to address review comments.
 // batchCommentCount is the CommentCount from GetBatchPRStatesWithComments,
 // which must be used to update CommentsAddressed so the two stay in sync.
-func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem, batchCommentCount int) {
+func (d *Daemon) addressFeedback(ctx context.Context, item daemonstate.WorkItem, batchCommentCount int) {
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
 
 	sess := d.config.GetSession(item.SessionID)
@@ -548,8 +554,10 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 			// handleAsyncComplete uses it as the formatter safety net after
 			// this feedback round completes.
 			formatMessage := p.String("format_message", "Apply auto-formatting")
-			item.StepData["_format_command"] = formatCommand
-			item.StepData["_format_message"] = formatMessage
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				it.StepData["_format_command"] = formatCommand
+				it.StepData["_format_message"] = formatMessage
+			})
 			d.saveState()
 		}
 	}
@@ -576,7 +584,7 @@ func (d *Daemon) addressFeedback(ctx context.Context, item *daemonstate.WorkItem
 }
 
 // createPR creates a pull request for a work item's session.
-func (d *Daemon) createPR(ctx context.Context, item *daemonstate.WorkItem) (string, error) {
+func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem) (string, error) {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return "", fmt.Errorf("session not found")
@@ -683,7 +691,7 @@ func (d *Daemon) branchHasChanges(ctx context.Context, sess *config.Session) (bo
 }
 
 // pushChanges pushes changes for a work item's session.
-func (d *Daemon) pushChanges(ctx context.Context, item *daemonstate.WorkItem) error {
+func (d *Daemon) pushChanges(ctx context.Context, item daemonstate.WorkItem) error {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found")
@@ -705,7 +713,7 @@ func (d *Daemon) pushChanges(ctx context.Context, item *daemonstate.WorkItem) er
 }
 
 // mergePR merges the PR for a work item.
-func (d *Daemon) mergePR(ctx context.Context, item *daemonstate.WorkItem) error {
+func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found")
@@ -738,7 +746,7 @@ func (d *Daemon) mergePR(ctx context.Context, item *daemonstate.WorkItem) error 
 }
 
 // commentOnIssue posts a comment on the GitHub issue for a work item.
-func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.comment_issue skipped: not a github issue",
 			"workItem", item.ID, "source", item.IssueRef.Source)
@@ -786,7 +794,7 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item *daemonstate.WorkItem,
 // If the session has no WorkTree (reconstructed after restart), a new worktree is
 // created for the existing branch so the container has a directory to mount.
 // Returns the (possibly new) session.
-func (d *Daemon) refreshStaleSession(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session) *config.Session {
+func (d *Daemon) refreshStaleSession(ctx context.Context, item daemonstate.WorkItem, sess *config.Session) *config.Session {
 	d.mu.Lock()
 	_, hasWorker := d.workers[item.ID]
 	d.mu.Unlock()
@@ -907,7 +915,7 @@ func (d *Daemon) configureRunner(runner claude.RunnerInterface, sess *config.Ses
 // createWorkerWithPrompt creates a session worker with an optional custom system prompt
 // but does not start it. The caller is responsible for calling w.Start(ctx).
 // ctx is used to cancel the notification goroutine on shutdown.
-func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
+func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
 	d.configureRunner(runner, sess, customPrompt)
 	w := worker.NewSessionWorker(d, sess, runner, initialMsg)
@@ -932,7 +940,7 @@ func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item *daemonstate.W
 }
 
 // startWorkerWithPrompt creates and starts a session worker with an optional custom system prompt.
-func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) {
+func (d *Daemon) startWorkerWithPrompt(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) {
 	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, customPrompt)
 	w.Start(ctx)
 }
@@ -1023,7 +1031,7 @@ func (d *Daemon) findRepoPath(ctx context.Context) string {
 }
 
 // issueFromWorkItem converts a WorkItem's issue ref to an issues.Issue.
-func issueFromWorkItem(item *daemonstate.WorkItem) issues.Issue {
+func issueFromWorkItem(item daemonstate.WorkItem) issues.Issue {
 	return issues.Issue{
 		ID:     item.IssueRef.ID,
 		Title:  item.IssueRef.Title,
@@ -1033,7 +1041,7 @@ func issueFromWorkItem(item *daemonstate.WorkItem) issues.Issue {
 }
 
 // commentOnPR posts a comment on the PR for a work item.
-func (d *Daemon) commentOnPR(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found for work item %s", item.ID)
@@ -1065,7 +1073,7 @@ func (d *Daemon) commentOnPR(ctx context.Context, item *daemonstate.WorkItem, pa
 // if it doesn't, the call is a no-op (with a warning). Returns an error if the
 // provider is not registered, does not implement ProviderActions, the body is
 // empty, or the API call fails.
-func (d *Daemon) commentViaProvider(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper, expectedSource issues.Source) error {
+func (d *Daemon) commentViaProvider(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper, expectedSource issues.Source) error {
 	if issues.Source(item.IssueRef.Source) != expectedSource {
 		d.logger.Warn("comment action skipped: source mismatch",
 			"workItem", item.ID, "source", item.IssueRef.Source, "expected", expectedSource)
@@ -1102,7 +1110,7 @@ func (d *Daemon) commentViaProvider(ctx context.Context, item *daemonstate.WorkI
 }
 
 // addLabel adds a label to the issue for a work item.
-func (d *Daemon) addLabel(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) addLabel(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.add_label skipped: not a github issue",
 			"workItem", item.ID, "source", item.IssueRef.Source)
@@ -1131,7 +1139,7 @@ func (d *Daemon) addLabel(ctx context.Context, item *daemonstate.WorkItem, param
 }
 
 // removeLabel removes a label from the issue for a work item.
-func (d *Daemon) removeLabel(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) removeLabel(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.remove_label skipped: not a github issue",
 			"workItem", item.ID, "source", item.IssueRef.Source)
@@ -1160,7 +1168,7 @@ func (d *Daemon) removeLabel(ctx context.Context, item *daemonstate.WorkItem, pa
 }
 
 // closeIssue closes the GitHub issue for a work item.
-func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) error {
+func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.close_issue skipped: not a github issue",
 			"workItem", item.ID, "source", item.IssueRef.Source)
@@ -1188,7 +1196,7 @@ func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) err
 // but does NOT close the issue. This is used when an existing PR already addresses
 // the issue, or when the coding session made no changes. All operations are
 // best-effort — failures are logged but do not block the workflow from advancing.
-func (d *Daemon) unqueueIssue(ctx context.Context, item *daemonstate.WorkItem, reason string) {
+func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, reason string) {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
 	repoPath := d.resolveRepoPath(ctx, item)
@@ -1220,7 +1228,7 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item *daemonstate.WorkItem, r
 // closeIssueGracefully removes the queue label and closes the issue with an
 // explanatory comment. All operations are best-effort — failures are logged but
 // do not block the workflow from advancing.
-func (d *Daemon) closeIssueGracefully(ctx context.Context, item *daemonstate.WorkItem) {
+func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.WorkItem) {
 	if item.IssueRef.Source != "github" {
 		return
 	}
@@ -1282,7 +1290,7 @@ func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
 }
 
 // requestReview requests a review on the PR for a work item.
-func (d *Daemon) requestReview(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found for work item %s", item.ID)
@@ -1306,7 +1314,7 @@ func (d *Daemon) requestReview(ctx context.Context, item *daemonstate.WorkItem, 
 }
 
 // resolveRepoPath resolves the repo path for a work item, preferring the session's path.
-func (d *Daemon) resolveRepoPath(ctx context.Context, item *daemonstate.WorkItem) string {
+func (d *Daemon) resolveRepoPath(ctx context.Context, item daemonstate.WorkItem) string {
 	if item.SessionID != "" {
 		if sess := d.config.GetSession(item.SessionID); sess != nil {
 			return sess.RepoPath
@@ -1333,8 +1341,8 @@ type fixCIAction struct {
 // Execute fetches CI failure logs and resumes the coding session to fix CI.
 func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -1372,7 +1380,7 @@ func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) w
 }
 
 // startFixCI resumes the coding session with CI failure context.
-func (d *Daemon) startFixCI(ctx context.Context, item *daemonstate.WorkItem, sess *config.Session, round int, ciLogs string) error {
+func (d *Daemon) startFixCI(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, round int, ciLogs string) error {
 	// Refresh stale session (same reason as addressFeedback)
 	sess = d.refreshStaleSession(ctx, item, sess)
 
@@ -1392,8 +1400,10 @@ func (d *Daemon) startFixCI(ctx context.Context, item *daemonstate.WorkItem, ses
 			// handleAsyncComplete uses it as the formatter safety net after
 			// this round completes.
 			formatMessage := p.String("format_message", "Apply auto-formatting")
-			item.StepData["_format_command"] = formatCommand
-			item.StepData["_format_message"] = formatMessage
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				it.StepData["_format_command"] = formatCommand
+				it.StepData["_format_message"] = formatMessage
+			})
 			d.saveState()
 		}
 	}
@@ -1499,8 +1509,8 @@ type rebaseAction struct {
 // Execute rebases the work item's branch onto the base branch.
 func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -1711,8 +1721,8 @@ type formatAction struct {
 // Execute runs a formatter command in the session's worktree and commits any resulting changes.
 func (a *formatAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -1725,7 +1735,7 @@ func (a *formatAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 
 // runFormatter runs the specified formatter command in the session's worktree
 // and commits any resulting changes.
-func (d *Daemon) runFormatter(ctx context.Context, item *daemonstate.WorkItem, params *workflow.ParamHelper) error {
+func (d *Daemon) runFormatter(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return fmt.Errorf("session not found for work item %s", item.ID)
