@@ -22,7 +22,7 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	}
 
 	// Verify expected states exist
-	expectedStates := []string{"coding", "open_pr", "await_ci", "check_ci_result", "fix_ci", "push_ci_fix", "await_review", "merge", "done", "failed"}
+	expectedStates := []string{"coding", "open_pr", "await_ci", "check_ci_result", "rebase", "fix_ci", "push_ci_fix", "await_review", "merge", "done", "failed"}
 	for _, name := range expectedStates {
 		if _, ok := cfg.States[name]; !ok {
 			t.Errorf("expected state %q to exist", name)
@@ -67,8 +67,37 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	if checkCI.Type != StateTypeChoice {
 		t.Errorf("check_ci_result type: expected choice, got %s", checkCI.Type)
 	}
-	if len(checkCI.Choices) != 2 {
-		t.Errorf("check_ci_result choices: expected 2, got %d", len(checkCI.Choices))
+	if len(checkCI.Choices) != 3 {
+		t.Errorf("check_ci_result choices: expected 3, got %d", len(checkCI.Choices))
+	}
+	// First choice should be conflicting→rebase
+	if len(checkCI.Choices) >= 1 {
+		first := checkCI.Choices[0]
+		if first.Variable != "conflicting" {
+			t.Errorf("first choice variable: expected conflicting, got %s", first.Variable)
+		}
+		if first.Next != "rebase" {
+			t.Errorf("first choice next: expected rebase, got %s", first.Next)
+		}
+	}
+
+	// rebase state
+	rebase := cfg.States["rebase"]
+	if rebase.Type != StateTypeTask {
+		t.Errorf("rebase type: expected task, got %s", rebase.Type)
+	}
+	if rebase.Action != "git.rebase" {
+		t.Errorf("rebase action: expected git.rebase, got %s", rebase.Action)
+	}
+	if rebase.Next != "await_ci" {
+		t.Errorf("rebase next: expected await_ci, got %s", rebase.Next)
+	}
+	if rebase.Error != "failed" {
+		t.Errorf("rebase error: expected failed, got %s", rebase.Error)
+	}
+	rbp := NewParamHelper(rebase.Params)
+	if rbp.Int("max_rebase_rounds", 0) != 3 {
+		t.Error("rebase max_rebase_rounds: expected 3")
 	}
 
 	// fix_ci params

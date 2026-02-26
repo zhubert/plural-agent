@@ -920,3 +920,142 @@ func TestCheckCIComplete_CIFailing_FixPolicy(t *testing.T) {
 		t.Error("expected ci_passed=false in data")
 	}
 }
+
+func TestCheckCIComplete_Conflicting(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is CONFLICTING
+	mergeableJSON, _ := json.Marshal(struct {
+		Mergeable string `json:"mergeable"`
+	}{Mergeable: "CONFLICTING"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: mergeableJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"on_failure": "fix"})
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when PR is conflicting")
+	}
+	if data == nil || data["conflicting"] != true {
+		t.Error("expected conflicting=true in data")
+	}
+}
+
+func TestCheckCIComplete_MergeableCheckFails_FallsThroughToCI(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mergeable check fails (gh pr view returns error)
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: errGHFailed,
+	})
+
+	// CI is passing
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "SUCCESS"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should fall through to CI check and fire with ci_passed
+	if !fired {
+		t.Error("expected fired=true when CI passes (merge check fell through)")
+	}
+	if data == nil || data["ci_passed"] != true {
+		t.Error("expected ci_passed=true in data")
+	}
+}
+
+func TestCheckCIComplete_MergeableUnknown_FallsThroughToCI(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mergeable returns UNKNOWN
+	mergeableJSON, _ := json.Marshal(struct {
+		Mergeable string `json:"mergeable"`
+	}{Mergeable: "UNKNOWN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: mergeableJSON,
+	})
+
+	// CI is pending
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "PENDING"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := d.workItemView(d.state.GetWorkItem("item-1"))
+
+	fired, _, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// UNKNOWN mergeable falls through, CI pending means not fired
+	if fired {
+		t.Error("expected fired=false when CI pending (merge status unknown)")
+	}
+}
