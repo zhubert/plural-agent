@@ -12,13 +12,17 @@ import (
 
 func TestWorkItemProperties(t *testing.T) {
 	t.Run("ConsumesSlot", func(t *testing.T) {
+		// These phases consume a slot (coding/fix-ci work in progress)
 		slotItems := []*WorkItem{
 			{Phase: "async_pending"},
-			{Phase: "addressing_feedback"},
+			{Phase: "async_pending", CurrentStep: "coding"},
+			{Phase: "addressing_feedback", CurrentStep: "fix_ci"},
+			// addressing_feedback in non-await_review steps consumes a slot
+			{Phase: "addressing_feedback", CurrentStep: ""},
 		}
 		for _, item := range slotItems {
 			if !item.ConsumesSlot() {
-				t.Errorf("expected phase %q to consume slot", item.Phase)
+				t.Errorf("expected phase %q (step %q) to consume slot", item.Phase, item.CurrentStep)
 			}
 		}
 
@@ -26,10 +30,15 @@ func TestWorkItemProperties(t *testing.T) {
 			{Phase: "idle"},
 			{Phase: "pushing"},
 			{Phase: ""},
+			// await_review items never consume a slot — they are "set aside"
+			// and must not block new coding work, even while addressing feedback.
+			{Phase: "idle", CurrentStep: "await_review"},
+			{Phase: "addressing_feedback", CurrentStep: "await_review"},
+			{Phase: "pushing", CurrentStep: "await_review"},
 		}
 		for _, item := range nonSlotItems {
 			if item.ConsumesSlot() {
-				t.Errorf("expected phase %q to NOT consume slot", item.Phase)
+				t.Errorf("expected phase %q (step %q) to NOT consume slot", item.Phase, item.CurrentStep)
 			}
 		}
 	})
@@ -194,7 +203,7 @@ func TestDaemonState_ActiveSlotCount(t *testing.T) {
 		t.Errorf("expected 1 active slot, got %d", state.ActiveSlotCount())
 	}
 
-	// addressing_feedback also consumes a slot
+	// addressing_feedback (for a non-review step) also consumes a slot
 	state.GetWorkItem("b").Phase = "addressing_feedback"
 	if state.ActiveSlotCount() != 2 {
 		t.Errorf("expected 2 active slots, got %d", state.ActiveSlotCount())
@@ -204,6 +213,13 @@ func TestDaemonState_ActiveSlotCount(t *testing.T) {
 	state.GetWorkItem("a").Phase = "idle"
 	if state.ActiveSlotCount() != 1 {
 		t.Errorf("expected 1 active slot, got %d", state.ActiveSlotCount())
+	}
+
+	// addressing_feedback in await_review step does NOT consume a slot —
+	// items awaiting review are set aside and must not block new coding work.
+	state.GetWorkItem("b").CurrentStep = "await_review"
+	if state.ActiveSlotCount() != 0 {
+		t.Errorf("expected 0 active slots (await_review addressing_feedback should not consume slot), got %d", state.ActiveSlotCount())
 	}
 }
 
