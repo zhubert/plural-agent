@@ -178,6 +178,7 @@ func TestReadLockStatus_StaleLock(t *testing.T) {
 	if err := os.WriteFile(fp, []byte("999999999"), 0o644); err != nil {
 		t.Fatalf("failed to write stale lock: %v", err)
 	}
+	defer os.Remove(fp)
 
 	pid, running := ReadLockStatus(repoPath)
 	if pid != 999999999 {
@@ -199,6 +200,7 @@ func TestReadLockStatus_CorruptLock(t *testing.T) {
 	if err := os.WriteFile(fp, []byte("not-a-pid"), 0o644); err != nil {
 		t.Fatalf("failed to write corrupt lock: %v", err)
 	}
+	defer os.Remove(fp)
 
 	pid, running := ReadLockStatus(repoPath)
 	if pid != 0 {
