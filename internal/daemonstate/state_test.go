@@ -160,6 +160,58 @@ func TestDaemonState_MarkWorkItemTerminal(t *testing.T) {
 	}
 }
 
+func TestDaemonState_GetAllWorkItems(t *testing.T) {
+	t.Run("empty state returns empty slice", func(t *testing.T) {
+		state := NewDaemonState("/test/repo")
+		items := state.GetAllWorkItems()
+		if len(items) != 0 {
+			t.Errorf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("returns all items regardless of state", func(t *testing.T) {
+		state := NewDaemonState("/test/repo")
+		state.AddWorkItem(&WorkItem{ID: "q1", IssueRef: config.IssueRef{Source: "github", ID: "1"}})
+		state.AddWorkItem(&WorkItem{ID: "q2", IssueRef: config.IssueRef{Source: "github", ID: "2"}})
+		state.AddWorkItem(&WorkItem{ID: "q3", IssueRef: config.IssueRef{Source: "github", ID: "3"}})
+
+		// Mark one terminal and one active so we have all three states.
+		state.MarkWorkItemTerminal("q1", true)
+		state.AdvanceWorkItem("q2", "coding", "async_pending")
+
+		items := state.GetAllWorkItems()
+		if len(items) != 3 {
+			t.Errorf("expected 3 items, got %d", len(items))
+		}
+
+		seen := make(map[string]bool)
+		for _, item := range items {
+			seen[item.ID] = true
+		}
+		for _, id := range []string{"q1", "q2", "q3"} {
+			if !seen[id] {
+				t.Errorf("expected item %s in result", id)
+			}
+		}
+	})
+
+	t.Run("returns independent slice from internal map", func(t *testing.T) {
+		state := NewDaemonState("/test/repo")
+		state.AddWorkItem(&WorkItem{ID: "a", IssueRef: config.IssueRef{Source: "github", ID: "1"}})
+
+		items := state.GetAllWorkItems()
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
+		}
+
+		// Adding a new item after the snapshot should not affect the returned slice.
+		state.AddWorkItem(&WorkItem{ID: "b", IssueRef: config.IssueRef{Source: "github", ID: "2"}})
+		if len(items) != 1 {
+			t.Errorf("snapshot grew unexpectedly to %d items", len(items))
+		}
+	})
+}
+
 func TestDaemonState_GetWorkItemsByState(t *testing.T) {
 	state := NewDaemonState("/test/repo")
 
