@@ -86,11 +86,11 @@ func (d *Daemon) recoverFromState(ctx context.Context) {
 		switch item.Phase {
 		case "async_pending":
 			// Worker was running but daemon restarted — no worker exists
-			d.recoverAsyncPending(ctx, item, log)
+			d.recoverAsyncPending(ctx, &item, log)
 
 		case "addressing_feedback", "pushing":
 			// Worker or push was in-flight — check actual PR state to decide next step
-			d.recoverWaitPhase(ctx, item, log)
+			d.recoverWaitPhase(ctx, &item, log)
 
 		case "retry_pending":
 			// Was waiting to retry — reset to idle so it retries on next tick
