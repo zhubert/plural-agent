@@ -261,6 +261,21 @@ func (s *DaemonState) GetWorkItemsByState(state WorkItemState) []*WorkItem {
 	return items
 }
 
+// GetAllWorkItems returns a snapshot of all work items regardless of state.
+// Callers receive a slice of pointers; the slice itself is safe to iterate
+// without holding the lock, but individual WorkItem fields must not be
+// modified outside of the provided mutation helpers (UpdateWorkItem, etc.).
+func (s *DaemonState) GetAllWorkItems() []*WorkItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]*WorkItem, 0, len(s.WorkItems))
+	for _, item := range s.WorkItems {
+		items = append(items, item)
+	}
+	return items
+}
+
 // GetActiveWorkItems returns all non-terminal, non-queued work items.
 func (s *DaemonState) GetActiveWorkItems() []*WorkItem {
 	s.mu.RLock()

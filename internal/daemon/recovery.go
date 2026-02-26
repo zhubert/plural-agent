@@ -19,7 +19,7 @@ import (
 func (d *Daemon) reconstructSessions() {
 	log := d.logger.With("component", "recovery")
 
-	for _, item := range d.state.WorkItems {
+	for _, item := range d.state.GetAllWorkItems() {
 		if item.IsTerminal() {
 			continue
 		}
@@ -61,17 +61,22 @@ func (d *Daemon) reconstructSessions() {
 
 // recoverFromState reconciles daemon state with reality after a restart.
 func (d *Daemon) recoverFromState(ctx context.Context) {
-	if d.state == nil || len(d.state.WorkItems) == 0 {
+	if d.state == nil {
 		return
 	}
 
 	// Reconstruct sessions before recovery so GetSession() works for all items.
 	d.reconstructSessions()
 
-	log := d.logger.With("component", "recovery")
-	log.Info("recovering from previous state", "workItems", len(d.state.WorkItems))
+	items := d.state.GetAllWorkItems()
+	if len(items) == 0 {
+		return
+	}
 
-	for _, item := range d.state.WorkItems {
+	log := d.logger.With("component", "recovery")
+	log.Info("recovering from previous state", "workItems", len(items))
+
+	for _, item := range items {
 		if item.IsTerminal() {
 			continue
 		}
