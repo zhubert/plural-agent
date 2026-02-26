@@ -2079,3 +2079,122 @@ func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.Wor
 	d.logger.Info("slack notification sent", "workItem", item.ID, "channel", payload.Channel)
 	return nil
 }
+
+// webhookPostAction implements the webhook.post action.
+type webhookPostAction struct {
+	daemon *Daemon
+}
+
+// Execute POSTs to a configurable URL with a templated JSON body.
+func (a *webhookPostAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	statusCode, err := d.postWebhook(ctx, item, ac.Params)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("webhook.post failed: %v", err)}
+	}
+
+	return workflow.ActionResult{
+		Success: true,
+		Data:    map[string]any{"response_status": statusCode},
+	}
+}
+
+// webhookTemplateData holds work item fields available for webhook body templates.
+type webhookTemplateData struct {
+	IssueID     string
+	IssueTitle  string
+	IssueURL    string
+	IssueSource string
+	PRURL       string
+	Branch      string
+	State       string
+	WorkItemID  string
+}
+
+// interpolateWebhookBody renders a body template string with work item data.
+// Templates use Go text/template syntax, e.g. {{.IssueID}}, {{.PRURL}}.
+func interpolateWebhookBody(bodyTemplate string, data webhookTemplateData) (string, error) {
+	t, err := template.New("webhook").Parse(bodyTemplate)
+	if err != nil {
+		return "", fmt.Errorf("invalid body template: %w", err)
+	}
+	var buf strings.Builder
+	if err := t.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("body template execution failed: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// postWebhook POSTs to a webhook URL with an interpolated JSON body.
+// Params:
+//   - url (required): destination URL
+//   - body (required): JSON body template (Go text/template syntax)
+//   - headers (optional): map[string]string of extra request headers
+//   - timeout (optional, default 30s): request timeout duration
+//   - expected_status (optional, default 200): HTTP status code considered success
+func (d *Daemon) postWebhook(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) (int, error) {
+	urlStr := params.String("url", "")
+	if urlStr == "" {
+		return 0, fmt.Errorf("url parameter is required")
+	}
+
+	bodyTemplate := params.String("body", "")
+	if bodyTemplate == "" {
+		return 0, fmt.Errorf("body parameter is required")
+	}
+
+	timeout := params.Duration("timeout", 30*time.Second)
+	expectedStatus := params.Int("expected_status", 200)
+
+	data := webhookTemplateData{
+		IssueID:     item.IssueRef.ID,
+		IssueTitle:  item.IssueRef.Title,
+		IssueURL:    item.IssueRef.URL,
+		IssueSource: item.IssueRef.Source,
+		PRURL:       item.PRURL,
+		Branch:      item.Branch,
+		State:       string(item.State),
+		WorkItemID:  item.ID,
+	}
+
+	body, err := interpolateWebhookBody(bodyTemplate, data)
+	if err != nil {
+		return 0, err
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, urlStr, bytes.NewBufferString(body))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	if raw := params.Raw("headers"); raw != nil {
+		if hdrs, ok := raw.(map[string]any); ok {
+			for k, v := range hdrs {
+				if vs, ok := v.(string); ok {
+					req.Header.Set(k, vs)
+				}
+			}
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("webhook POST failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != expectedStatus {
+		return resp.StatusCode, fmt.Errorf("unexpected status %d (expected %d)", resp.StatusCode, expectedStatus)
+	}
+
+	return resp.StatusCode, nil
+}
