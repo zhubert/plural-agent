@@ -160,6 +160,9 @@ func (d *Daemon) fetchIssuesForProvider(ctx context.Context, repoPath string, wf
 }
 
 // startQueuedItems starts coding on queued work items that have available slots.
+// Before starting any new work, it first checks whether any set-aside await_review
+// workflows are ready to continue — finishing existing work takes priority over
+// starting new work.
 func (d *Daemon) startQueuedItems(ctx context.Context) {
 	if d.configSavePaused {
 		d.logger.Warn("config save failures exceed threshold, skipping start of queued items to prevent state drift")
@@ -168,6 +171,17 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 
 	maxConcurrent := d.getMaxConcurrent()
 	queued := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
+
+	if len(queued) == 0 {
+		return
+	}
+
+	// Give priority to set-aside workflows that are ready to continue.
+	// processWaitItems checks await_review items for fired events (review
+	// approved, PR merged, etc.) and advances them immediately, bypassing
+	// the regular review-poll interval. Any slots consumed by resumed
+	// workflows reduce the budget available for new queued items below.
+	d.processWaitItems(ctx)
 
 	for _, item := range queued {
 		if d.activeSlotCount() >= maxConcurrent {
