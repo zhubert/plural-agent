@@ -2,7 +2,7 @@
 
 **Autonomous headless daemon for Claude Code** — label an issue, ship a PR.
 
-Erg polls for work from GitHub, Asana, or Linear, spins up containerized Claude Code sessions, and manages the full lifecycle: coding, PR creation, review feedback, CI, and merge. The workflow is a configurable state machine — customize the pipeline per-repo or use sensible defaults.
+**Docs: [zhubert.com/erg](https://zhubert.com/erg/)** — setup, workflow configuration, CLI reference, and more.
 
 ## Install
 
@@ -12,47 +12,13 @@ brew install zhubert/tap/erg
 
 Or [build from source](#build-from-source).
 
-## Requirements
-
-- [Claude Code CLI](https://claude.ai/code) installed and authenticated
-- Git
-- GitHub CLI (`gh`)
-- A container runtime: [Docker Desktop](https://docs.docker.com/get-docker/) or [Colima](https://github.com/abiosoft/colima)
-
 ## Quick Start
 
 ```bash
 erg start --repo owner/repo
 ```
 
-This forks into the background, prints the PID and log path, and exits. Label a GitHub issue `queued` and erg picks it up automatically.
-
-```bash
-erg start -f --repo owner/repo   # Stay in foreground with live status display
-erg status                        # One-shot daemon status summary
-erg status --tail                 # Live split-screen view per active session
-erg stop                          # Graceful shutdown
-```
-
-For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
-
-## Workflow Configuration
-
-Drop a `.erg/workflow.yaml` in your repo to customize the pipeline — polling source, merge strategy, concurrency, timeouts, and state machine transitions. Run `erg workflow init` to generate a starting config or see the [full docs](https://zhubert.com/erg/) for all options.
-
-## How It Works
-
-1. Agent polls for issues from your configured provider
-2. Creates a containerized Claude Code session on a new branch
-3. Claude works the issue autonomously
-4. A PR is created when coding is complete
-5. Agent addresses review feedback, waits for CI, and merges
-
-For complex issues, Claude can delegate subtasks to child sessions via MCP tools. The supervisor waits for all children before creating a PR.
-
-## Documentation
-
-Full documentation — workflow configuration, state types, error handling, hooks, CLI reference — is at **[zhubert.com/erg](https://zhubert.com/erg/)**.
+Label a GitHub issue `queued` and erg picks it up — coding, PR, review feedback, CI, and merge are handled automatically. See the [docs](https://zhubert.com/erg/) for full configuration options including Asana and Linear as work sources.
 
 ## Build from Source
 
