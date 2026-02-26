@@ -113,13 +113,24 @@ func languageInstallBlock(l DetectedLang) string {
 			v, goArch())
 	case LangRuby:
 		return fmt.Sprintf(""+
-			"RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev \\\n"+
+			"RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev linux-headers \\\n"+
 			"    && curl -fsSL https://github.com/postmodern/ruby-install/releases/download/v0.9.3/ruby-install-0.9.3.tar.gz | tar -xz \\\n"+
 			"    && cd ruby-install-0.9.3 && make install && cd .. && rm -rf ruby-install-0.9.3 \\\n"+
 			"    && ruby-install --system ruby %s\n",
 			v)
 	case LangPython:
-		return "RUN apk add --no-cache python3 python3-dev py3-pip\n"
+		// Use pyenv to install the specific Python version requested.
+		// Alpine only ships one system python3 with no version pinning support.
+		return fmt.Sprintf(""+
+			"RUN apk add --no-cache libffi-dev openssl-dev bzip2-dev xz-dev readline-dev sqlite-dev \\\n"+
+			"    && curl -fsSL https://pyenv.run | bash \\\n"+
+			"    && export PYENV_ROOT=\"/root/.pyenv\" \\\n"+
+			"    && export PATH=\"$PYENV_ROOT/bin:$PATH\" \\\n"+
+			"    && pyenv install %s \\\n"+
+			"    && pyenv global %s\n"+
+			"ENV PYENV_ROOT=\"/root/.pyenv\"\n"+
+			"ENV PATH=\"/root/.pyenv/shims:/root/.pyenv/bin:${PATH}\"\n",
+			v, v)
 	case LangRust:
 		return fmt.Sprintf(""+
 			"RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain %s\n"+
@@ -127,11 +138,14 @@ func languageInstallBlock(l DetectedLang) string {
 			v)
 	case LangJava:
 		return fmt.Sprintf(""+
-			"RUN apk add --no-cache openjdk%s\n",
+			"RUN apk add --no-cache openjdk%s-jdk\n",
 			v)
 	case LangPHP:
+		// Alpine uses versioned PHP package names (e.g., php83, php83-cli).
+		// Default to PHP 8.3; php83-phar and php83-openssl are required by Composer.
 		return "" +
-			"RUN apk add --no-cache php php-cli php-mbstring php-xml \\\n" +
+			"RUN apk add --no-cache php83 php83-cli php83-mbstring php83-xml php83-phar php83-openssl \\\n" +
+			"    && ln -s /usr/bin/php83 /usr/bin/php \\\n" +
 			"    && curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n"
 	case LangNode:
 		// Handled in base layer
