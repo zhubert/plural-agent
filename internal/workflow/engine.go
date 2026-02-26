@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 )
 
@@ -300,14 +301,47 @@ func lookupVariable(key string, data map[string]any) (any, bool) {
 	return val, ok
 }
 
-// valuesEqual compares two values for equality, handling type coercion
-// between numeric types (int vs float64 from JSON unmarshaling).
+// valuesEqual compares two values for equality, handling numeric type coercion
+// between int and float64 (common when values come from JSON unmarshaling).
 func valuesEqual(a, b any) bool {
-	// Direct equality
-	if fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b) {
-		return true
+	af, aIsNum := toFloat64(a)
+	bf, bIsNum := toFloat64(b)
+	if aIsNum && bIsNum {
+		return af == bf
 	}
-	return false
+	return reflect.DeepEqual(a, b)
+}
+
+// toFloat64 converts numeric types to float64, returning false if v is not numeric.
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case float32:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 // processPassState injects data into step data and immediately transitions to the next state.
