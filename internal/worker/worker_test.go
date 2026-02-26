@@ -685,3 +685,98 @@ func TestSessionWorker_DoneChan_BlocksUntilDone(t *testing.T) {
 		// expected: channel is open while worker has not finished
 	}
 }
+
+// TestSessionWorker_Turns_ConcurrentAccess verifies that Turns() can be read
+// concurrently while the worker goroutine is incrementing it without a data
+// race.  Run with -race to exercise the race detector.
+func TestSessionWorker_Turns_ConcurrentAccess(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.maxTurns = 1000
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	// Queue enough responses for several turns so the worker stays alive long
+	// enough for the concurrent reader goroutine to race.
+	for i := 0; i < 10; i++ {
+		runner.QueueResponse(
+			claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "thinking"},
+			claude.ResponseChunk{Done: true},
+		)
+	}
+
+	w := NewSessionWorker(h, sess, runner, "Do something")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w.Start(ctx)
+
+	// Read Turns() concurrently while the worker goroutine may be writing it.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_ = w.Turns()
+			select {
+			case <-w.DoneChan():
+				return
+			default:
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not complete in time")
+	}
+}
+
+// TestSessionWorker_ExitError_ConcurrentAccess verifies that ExitError() can
+// be read concurrently with the worker goroutine writing it without a data
+// race.  Run with -race to exercise the race detector.
+func TestSessionWorker_ExitError_ConcurrentAccess(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.QueueResponse(
+		claude.ResponseChunk{Error: fmt.Errorf("injected error")},
+	)
+
+	w := NewSessionWorker(h, sess, runner, "Do something")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w.Start(ctx)
+
+	// Poll ExitError() from a separate goroutine while the worker goroutine
+	// may simultaneously be writing exitErr.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_ = w.ExitError()
+			select {
+			case <-w.DoneChan():
+				return
+			default:
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not complete in time")
+	}
+
+	if w.ExitError() == nil {
+		t.Fatal("expected ExitError to be set")
+	}
+}
