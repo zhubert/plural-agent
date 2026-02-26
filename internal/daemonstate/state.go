@@ -357,6 +357,15 @@ func (s *DaemonState) SetErrorMessage(id, msg string) {
 	}
 }
 
+// SetLastPollAt updates LastPollAt under the write lock.
+// This must be used instead of direct field assignment to avoid a data race
+// with concurrent readers that call Save() under RLock.
+func (s *DaemonState) SetLastPollAt(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastPollAt = t
+}
+
 // AddSpend accumulates token and cost data from a completed Claude response.
 // Thread-safe; may be called concurrently from multiple worker goroutines.
 func (s *DaemonState) AddSpend(costUSD float64, outputTokens, inputTokens int) {
