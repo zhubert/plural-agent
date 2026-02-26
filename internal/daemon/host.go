@@ -60,8 +60,8 @@ func (d *Daemon) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
 	}
 }
 
-// workItemView creates a read-only view of a work item for the engine.
-func (d *Daemon) workItemView(item *daemonstate.WorkItem) *workflow.WorkItemView {
+// workItemView creates a read-only view of a work item snapshot for the engine.
+func (d *Daemon) workItemView(item daemonstate.WorkItem) *workflow.WorkItemView {
 	// Use the session's actual repo path rather than d.repoFilter,
 	// which may be empty or a pattern (e.g., "owner/repo") in multi-repo daemons.
 	repoPath := d.repoFilter

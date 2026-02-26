@@ -244,7 +244,7 @@ func TestDaemon_RecoverAsyncPending_SetsStateToCoding(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	// recoverAsyncPending should set State to WorkItemActive so the item
 	// is visible to GetActiveWorkItems() for CI/review polling.
 	if item.State == daemonstate.WorkItemQueued {
@@ -316,7 +316,7 @@ func TestDaemon_RecoverAsyncPending_SkipsRecentlyUpdatedItems(t *testing.T) {
 	// UpdatedAt was just set by AdvanceWorkItem — well within the grace period
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-fresh")
+	item, _ := d.state.GetWorkItem("item-fresh")
 	// The item should remain in async_pending — recovery should skip it
 	if item.Phase != "async_pending" {
 		t.Errorf("expected phase to remain async_pending, got %s", item.Phase)
@@ -361,7 +361,7 @@ func TestDaemon_RecoverAsyncPending_RecoversStaleItems(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-stale")
+	item, _ := d.state.GetWorkItem("item-stale")
 	// Stale item with no PR should be re-queued
 	if item.State != daemonstate.WorkItemQueued {
 		t.Errorf("expected state to be queued, got %s", item.State)
@@ -429,7 +429,7 @@ func TestDaemon_RecoverAsyncPending_CustomWorkflow(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-custom")
+	item, _ := d.state.GetWorkItem("item-custom")
 	if item.CurrentStep != "check_ci" {
 		t.Errorf("expected CurrentStep check_ci (custom CI wait state), got %s", item.CurrentStep)
 	}
@@ -495,7 +495,7 @@ func TestDaemon_RecoverAsyncPending_CustomWorkflow_PastCI(t *testing.T) {
 
 	d.recoverFromState(context.Background())
 
-	item := d.state.GetWorkItem("item-past-ci")
+	item, _ := d.state.GetWorkItem("item-past-ci")
 	if item.CurrentStep != "wait_for_approval" {
 		t.Errorf("expected CurrentStep wait_for_approval (last wait state before auto_merge), got %s", item.CurrentStep)
 	}
