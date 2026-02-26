@@ -1153,14 +1153,3 @@ func formatArray(arr []any) string {
 	return fmt.Sprintf("(%d items)", len(arr))
 }
 
-// truncateString truncates a string to maxLen, adding ellipsis if needed.
-// A maxLen of 0 means no limit.
-func truncateString(s string, maxLen int) string {
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}

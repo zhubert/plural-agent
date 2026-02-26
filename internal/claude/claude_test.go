@@ -1379,15 +1379,14 @@ func TestFormatToolIcon(t *testing.T) {
 		{"Task", "Delegating"},
 		{"WebFetch", "Fetching"},
 		{"WebSearch", "Searching"},
-		// Note: TodoWrite is handled specially via ChunkTypeTodoUpdate, not through formatToolIcon
-		{"TodoWrite", "Using"}, // Falls through to default since not in switch
-		{"UnknownTool", "Using"},
+		{"TodoWrite", "Updating todos"},
+		{"UnknownTool", "Using UnknownTool"},
 	}
 
 	for _, tt := range tests {
-		result := formatToolIcon(tt.toolName)
+		result := FormatToolIcon(tt.toolName)
 		if result != tt.expected {
-			t.Errorf("formatToolIcon(%q) = %q, want %q", tt.toolName, result, tt.expected)
+			t.Errorf("FormatToolIcon(%q) = %q, want %q", tt.toolName, result, tt.expected)
 		}
 	}
 }

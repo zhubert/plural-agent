@@ -913,7 +913,7 @@ func (r *Runner) handleProcessLine(line string) {
 				r.streaming.Response.WriteString("\n")
 			}
 			r.streaming.Response.WriteString("● ")
-			r.streaming.Response.WriteString(formatToolIcon(chunk.ToolName))
+			r.streaming.Response.WriteString(FormatToolIcon(chunk.ToolName))
 			r.streaming.Response.WriteString("(")
 			r.streaming.Response.WriteString(chunk.ToolName)
 			if chunk.ToolInput != "" {

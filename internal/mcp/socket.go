@@ -389,11 +389,41 @@ func (s *SocketServer) handleConnection(conn net.Conn) {
 
 		switch msg.Type {
 		case MessageTypePermission:
-			s.handlePermissionMessage(conn, msg.PermReq)
+			handleChannelMessage(s.log, conn, msg.PermReq,
+				s.requestCh, s.responseCh,
+				PermissionResponseTimeout,
+				PermissionResponse{Allowed: false, Message: "Host tools not available"},
+				func(id any) PermissionResponse {
+					return PermissionResponse{ID: id, Allowed: false, Message: "Timeout"}
+				},
+				func(r *PermissionRequest) any { return r.ID },
+				MessageTypePermission,
+				func(m *SocketMessage, r *PermissionResponse) { m.PermResp = r },
+				"permission")
 		case MessageTypeQuestion:
-			s.handleQuestionMessage(conn, msg.QuestReq)
+			handleChannelMessage(s.log, conn, msg.QuestReq,
+				s.questionCh, s.answerCh,
+				PermissionResponseTimeout,
+				QuestionResponse{Answers: map[string]string{}},
+				func(id any) QuestionResponse {
+					return QuestionResponse{ID: id, Answers: map[string]string{}}
+				},
+				func(r *QuestionRequest) any { return r.ID },
+				MessageTypeQuestion,
+				func(m *SocketMessage, r *QuestionResponse) { m.QuestResp = r },
+				"question")
 		case MessageTypePlanApproval:
-			s.handlePlanApprovalMessage(conn, msg.PlanReq)
+			handleChannelMessage(s.log, conn, msg.PlanReq,
+				s.planReqCh, s.planRespCh,
+				PermissionResponseTimeout,
+				PlanApprovalResponse{Approved: false},
+				func(id any) PlanApprovalResponse {
+					return PlanApprovalResponse{ID: id, Approved: false}
+				},
+				func(r *PlanApprovalRequest) any { return r.ID },
+				MessageTypePlanApproval,
+				func(m *SocketMessage, r *PlanApprovalResponse) { m.PlanResp = r },
+				"plan approval")
 		case MessageTypeCreateChild:
 			handleChannelMessage(s.log, conn, msg.CreateChildReq,
 				s.createChildReq, s.createChildResp,
@@ -469,179 +499,6 @@ func (s *SocketServer) handleConnection(conn net.Conn) {
 		default:
 			s.log.Warn("unknown message type", "type", msg.Type)
 		}
-	}
-}
-
-func (s *SocketServer) handlePermissionMessage(conn net.Conn, req *PermissionRequest) {
-	if req == nil {
-		s.log.Warn("nil permission request, sending deny response")
-		// Send a deny response to prevent client from hanging
-		s.sendPermissionResponse(conn, PermissionResponse{
-			Allowed: false,
-			Message: "Invalid permission request",
-		})
-		return
-	}
-
-	s.log.Info("received permission request", "tool", req.Tool)
-
-	// Send to TUI (non-blocking with timeout)
-	select {
-	case s.requestCh <- *req:
-		// Request sent successfully
-	case <-time.After(SocketReadTimeout):
-		s.log.Warn("timeout sending permission request to TUI")
-		s.sendPermissionResponse(conn, PermissionResponse{
-			ID:      req.ID,
-			Allowed: false,
-			Message: "Timeout waiting for TUI",
-		})
-		return
-	}
-
-	// Wait for response with timeout
-	select {
-	case resp := <-s.responseCh:
-		s.sendPermissionResponse(conn, resp)
-		s.log.Info("sent permission response", "allowed", resp.Allowed)
-
-	case <-time.After(PermissionResponseTimeout):
-		s.log.Warn("timeout waiting for permission response")
-		s.sendPermissionResponse(conn, PermissionResponse{
-			ID:      req.ID,
-			Allowed: false,
-			Message: "Permission request timed out",
-		})
-	}
-}
-
-func (s *SocketServer) handleQuestionMessage(conn net.Conn, req *QuestionRequest) {
-	if req == nil {
-		s.log.Warn("nil question request, sending empty response")
-		// Send an empty response to prevent client from hanging
-		s.sendQuestionResponse(conn, QuestionResponse{
-			Answers: map[string]string{},
-		})
-		return
-	}
-
-	s.log.Info("received question request", "questionCount", len(req.Questions))
-
-	// Send to TUI (non-blocking with timeout)
-	select {
-	case s.questionCh <- *req:
-		// Request sent successfully
-	case <-time.After(SocketReadTimeout):
-		s.log.Warn("timeout sending question request to TUI")
-		s.sendQuestionResponse(conn, QuestionResponse{
-			ID:      req.ID,
-			Answers: map[string]string{},
-		})
-		return
-	}
-
-	// Wait for response with timeout
-	select {
-	case resp := <-s.answerCh:
-		s.sendQuestionResponse(conn, resp)
-		s.log.Info("sent question response", "answerCount", len(resp.Answers))
-
-	case <-time.After(PermissionResponseTimeout):
-		s.log.Warn("timeout waiting for question response")
-		s.sendQuestionResponse(conn, QuestionResponse{
-			ID:      req.ID,
-			Answers: map[string]string{},
-		})
-	}
-}
-
-func (s *SocketServer) sendPermissionResponse(conn net.Conn, resp PermissionResponse) {
-	msg := SocketMessage{
-		Type:     MessageTypePermission,
-		PermResp: &resp,
-	}
-	respJSON, err := json.Marshal(msg)
-	if err != nil {
-		s.log.Error("failed to marshal permission response", "error", err)
-		return
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(SocketWriteTimeout))
-	if _, err := conn.Write(append(respJSON, '\n')); err != nil {
-		s.log.Error("write error", "error", err)
-	}
-}
-
-func (s *SocketServer) sendQuestionResponse(conn net.Conn, resp QuestionResponse) {
-	msg := SocketMessage{
-		Type:      MessageTypeQuestion,
-		QuestResp: &resp,
-	}
-	respJSON, err := json.Marshal(msg)
-	if err != nil {
-		s.log.Error("failed to marshal question response", "error", err)
-		return
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(SocketWriteTimeout))
-	if _, err := conn.Write(append(respJSON, '\n')); err != nil {
-		s.log.Error("write error", "error", err)
-	}
-}
-
-func (s *SocketServer) handlePlanApprovalMessage(conn net.Conn, req *PlanApprovalRequest) {
-	if req == nil {
-		s.log.Warn("nil plan approval request, sending reject response")
-		s.sendPlanApprovalResponse(conn, PlanApprovalResponse{
-			Approved: false,
-		})
-		return
-	}
-
-	s.log.Info("received plan approval request", "planLength", len(req.Plan))
-
-	// Send to TUI (non-blocking with timeout)
-	select {
-	case s.planReqCh <- *req:
-		// Request sent successfully
-	case <-time.After(SocketReadTimeout):
-		s.log.Warn("timeout sending plan approval request to TUI")
-		s.sendPlanApprovalResponse(conn, PlanApprovalResponse{
-			ID:       req.ID,
-			Approved: false,
-		})
-		return
-	}
-
-	// Wait for response with timeout
-	select {
-	case resp := <-s.planRespCh:
-		s.sendPlanApprovalResponse(conn, resp)
-		s.log.Info("sent plan approval response", "approved", resp.Approved)
-
-	case <-time.After(PermissionResponseTimeout):
-		s.log.Warn("timeout waiting for plan approval response")
-		s.sendPlanApprovalResponse(conn, PlanApprovalResponse{
-			ID:       req.ID,
-			Approved: false,
-		})
-	}
-}
-
-func (s *SocketServer) sendPlanApprovalResponse(conn net.Conn, resp PlanApprovalResponse) {
-	msg := SocketMessage{
-		Type:     MessageTypePlanApproval,
-		PlanResp: &resp,
-	}
-	respJSON, err := json.Marshal(msg)
-	if err != nil {
-		s.log.Error("failed to marshal plan approval response", "error", err)
-		return
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(SocketWriteTimeout))
-	if _, err := conn.Write(append(respJSON, '\n')); err != nil {
-		s.log.Error("write error", "error", err)
 	}
 }
 

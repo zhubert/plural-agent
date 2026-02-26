@@ -244,49 +244,6 @@ func TestHumanizeKey(t *testing.T) {
 	}
 }
 
-func TestTruncateString(t *testing.T) {
-	tests := []struct {
-		name     string
-		s        string
-		maxLen   int
-		expected string
-	}{
-		{
-			name:     "Short string unchanged",
-			s:        "hello",
-			maxLen:   10,
-			expected: "hello",
-		},
-		{
-			name:     "Exact length unchanged",
-			s:        "hello",
-			maxLen:   5,
-			expected: "hello",
-		},
-		{
-			name:     "Long string truncated with ellipsis",
-			s:        "hello world",
-			maxLen:   8,
-			expected: "hello...",
-		},
-		{
-			name:     "Very short maxLen",
-			s:        "hello",
-			maxLen:   2,
-			expected: "he",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateString(tt.s, tt.maxLen)
-			if got != tt.expected {
-				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestFormatNestedObject(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -591,26 +548,6 @@ func TestHumanizeKey_UnmappedMultiWord(t *testing.T) {
 		got := humanizeKey(tt.key)
 		if got != tt.expected {
 			t.Errorf("humanizeKey(%q) = %q, want %q", tt.key, got, tt.expected)
-		}
-	}
-}
-
-func TestTruncateString_EdgeCases(t *testing.T) {
-	tests := []struct {
-		s        string
-		maxLen   int
-		expected string
-	}{
-		{"", 10, ""},
-		{"a", 0, "a"},     // Zero maxLen means no limit
-		{"ab", 1, "a"},    // Very short truncation
-		{"abc", 3, "abc"}, // Exact length
-	}
-
-	for _, tt := range tests {
-		got := truncateString(tt.s, tt.maxLen)
-		if got != tt.expected {
-			t.Errorf("truncateString(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.expected)
 		}
 	}
 }

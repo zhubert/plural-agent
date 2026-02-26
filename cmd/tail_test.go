@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhubert/erg/internal/claude"
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/paths"
 )
 
-// ---- tailToolVerb ----
+// ---- claude.FormatToolIcon ----
 
-func TestTailToolVerb_KnownTools(t *testing.T) {
+func TestFormatToolIcon_KnownTools(t *testing.T) {
 	cases := []struct {
 		tool string
 		want string
@@ -33,15 +34,15 @@ func TestTailToolVerb_KnownTools(t *testing.T) {
 		{"TodoWrite", "Updating todos"},
 	}
 	for _, c := range cases {
-		got := tailToolVerb(c.tool)
+		got := claude.FormatToolIcon(c.tool)
 		if got != c.want {
-			t.Errorf("tailToolVerb(%q) = %q, want %q", c.tool, got, c.want)
+			t.Errorf("claude.FormatToolIcon(%q) = %q, want %q", c.tool, got, c.want)
 		}
 	}
 }
 
-func TestTailToolVerb_Unknown(t *testing.T) {
-	got := tailToolVerb("MyCustomTool")
+func TestFormatToolIcon_Unknown(t *testing.T) {
+	got := claude.FormatToolIcon("MyCustomTool")
 	if !strings.HasPrefix(got, "Using") {
 		t.Errorf("expected 'Using ...' for unknown tool, got %q", got)
 	}
