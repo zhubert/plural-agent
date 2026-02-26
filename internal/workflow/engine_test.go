@@ -1149,6 +1149,12 @@ func TestValuesEqual(t *testing.T) {
 		{"int match", 42, 42, true},
 		{"int vs float64", 42, float64(42), true},
 		{"int mismatch", 42, 43, false},
+		{"map equal", map[string]any{"a": 1}, map[string]any{"a": 1}, true},
+		{"map not equal", map[string]any{"a": 1}, map[string]any{"a": 2}, false},
+		{"bool vs string true", true, "true", false},
+		{"int vs string", 42, "42", false},
+		{"nil vs nil", nil, nil, true},
+		{"nil vs string", nil, "nil", false},
 	}
 
 	for _, tt := range tests {
