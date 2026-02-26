@@ -170,7 +170,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Save writes the config to disk
+// Save writes the config to disk atomically (write temp file, then rename).
 func (c *Config) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -189,7 +189,16 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	return os.WriteFile(c.filePath, data, 0644)
+	// Atomic write: temp file + rename
+	tmpFile := c.filePath + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp config file: %w", err)
+	}
+	if err := os.Rename(tmpFile, c.filePath); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename config file: %w", err)
+	}
+	return nil
 }
 
 // SetFilePath sets the config file path (for testing).
