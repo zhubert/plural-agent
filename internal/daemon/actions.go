@@ -109,7 +109,9 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 		if errors.Is(err, errNoChanges) {
 			// Coding session made no changes — unqueue the issue (remove label +
 			// comment) but leave it open for humans to investigate.
-			d.unqueueIssue(ctx, item, "The coding session made no changes. Removing from the queue — re-add the 'queued' label if this still needs work.")
+			repoPath := d.resolveRepoPath(ctx, item)
+			label := d.resolveQueueLabel(repoPath)
+			d.unqueueIssue(ctx, item, fmt.Sprintf("The coding session made no changes. Removing from the queue — re-add the '%s' label if this still needs work.", label))
 			return workflow.ActionResult{Success: true, OverrideNext: "done"}
 		}
 		return workflow.ActionResult{Error: fmt.Errorf("PR creation failed: %v", err)}
@@ -1175,7 +1177,7 @@ func (d *Daemon) closeIssue(ctx context.Context, item *daemonstate.WorkItem) err
 	return nil
 }
 
-// unqueueIssue removes the "queued" label and leaves a comment explaining why,
+// unqueueIssue removes the queue label and leaves a comment explaining why,
 // but does NOT close the issue. This is used when an existing PR already addresses
 // the issue, or when the coding session made no changes. All operations are
 // best-effort — failures are logged but do not block the workflow from advancing.
@@ -1188,6 +1190,8 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item *daemonstate.WorkItem, r
 		return
 	}
 
+	label := d.resolveQueueLabel(repoPath)
+
 	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -1195,8 +1199,8 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item *daemonstate.WorkItem, r
 	src := issues.Source(item.IssueRef.Source)
 	p := d.issueRegistry.GetProvider(src)
 	if pa, ok := p.(issues.ProviderActions); ok {
-		if err := pa.RemoveLabel(opCtx, repoPath, item.IssueRef.ID, "queued"); err != nil {
-			log.Debug("failed to remove queued label during unqueue", "error", err)
+		if err := pa.RemoveLabel(opCtx, repoPath, item.IssueRef.ID, label); err != nil {
+			log.Debug("failed to remove queue label during unqueue", "error", err, "label", label)
 		}
 		if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, reason); err != nil {
 			log.Debug("failed to comment during unqueue", "error", err)
@@ -1206,7 +1210,7 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item *daemonstate.WorkItem, r
 	}
 }
 
-// closeIssueGracefully removes the "queued" label and closes the issue with an
+// closeIssueGracefully removes the queue label and closes the issue with an
 // explanatory comment. All operations are best-effort — failures are logged but
 // do not block the workflow from advancing.
 func (d *Daemon) closeIssueGracefully(ctx context.Context, item *daemonstate.WorkItem) {
@@ -1226,12 +1230,14 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item *daemonstate.Wor
 		return
 	}
 
+	label := d.resolveQueueLabel(repoPath)
+
 	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Remove queued label (best-effort)
-	if err := d.gitService.RemoveIssueLabel(opCtx, repoPath, issueNum, "queued"); err != nil {
-		log.Debug("failed to remove queued label during graceful close", "error", err)
+	// Remove queue label (best-effort)
+	if err := d.gitService.RemoveIssueLabel(opCtx, repoPath, issueNum, label); err != nil {
+		log.Debug("failed to remove queue label during graceful close", "error", err, "label", label)
 	}
 
 	// Comment explaining why we're closing
@@ -1300,6 +1306,16 @@ func (d *Daemon) resolveRepoPath(ctx context.Context, item *daemonstate.WorkItem
 		}
 	}
 	return d.findRepoPath(ctx)
+}
+
+// resolveQueueLabel returns the configured filter label for the given repo,
+// falling back to the default "queued" label.
+func (d *Daemon) resolveQueueLabel(repoPath string) string {
+	wfCfg := d.getWorkflowConfig(repoPath)
+	if wfCfg != nil && wfCfg.Source.Filter.Label != "" {
+		return wfCfg.Source.Filter.Label
+	}
+	return autonomousFilterLabel
 }
 
 // fixCIAction implements the ai.fix_ci action.

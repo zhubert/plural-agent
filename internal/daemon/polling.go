@@ -247,9 +247,10 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 
 	// Use the first open/merged PR number in the comment.
 	pr := linkedPRs[0]
+	label := d.resolveQueueLabel(repoPath)
 	comment := fmt.Sprintf(
-		"An existing PR (#%d) appears to address this issue. Removing from the queue — re-add the 'queued' label if this still needs work.",
-		pr.Number,
+		"An existing PR (#%d) appears to address this issue. Removing from the queue — re-add the '%s' label if this still needs work.",
+		pr.Number, label,
 	)
 
 	log.Info("existing PR found for issue, unqueueing without spawning session",

@@ -117,11 +117,11 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
 	}, "0.2.11")
-	if !strings.Contains(df, "python3") {
-		t.Error("expected python3 install in Dockerfile")
+	if !strings.Contains(df, "pyenv install 3.11") {
+		t.Error("expected pyenv install 3.11 in Dockerfile")
 	}
-	if !strings.Contains(df, "apk") {
-		t.Error("expected apk package manager in Dockerfile")
+	if !strings.Contains(df, "pyenv global 3.11") {
+		t.Error("expected pyenv global 3.11 in Dockerfile")
 	}
 }
 
@@ -141,8 +141,8 @@ func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangJava, Version: "21"},
 	}, "0.2.11")
-	if !strings.Contains(df, "openjdk21") {
-		t.Error("expected OpenJDK 21 install in Dockerfile")
+	if !strings.Contains(df, "openjdk21-jdk") {
+		t.Error("expected OpenJDK 21 JDK install in Dockerfile")
 	}
 }
 
@@ -150,8 +150,14 @@ func TestGenerateDockerfile_PHP(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPHP},
 	}, "0.2.11")
-	if !strings.Contains(df, "php-cli") {
-		t.Error("expected PHP CLI install in Dockerfile")
+	if !strings.Contains(df, "php83-cli") {
+		t.Error("expected php83-cli install in Dockerfile")
+	}
+	if !strings.Contains(df, "php83-phar") {
+		t.Error("expected php83-phar install in Dockerfile")
+	}
+	if !strings.Contains(df, "ln -s /usr/bin/php83 /usr/bin/php") {
+		t.Error("expected php symlink in Dockerfile")
 	}
 	if !strings.Contains(df, "composer") {
 		t.Error("expected Composer install in Dockerfile")

@@ -429,8 +429,9 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 
 	// Remove the tag from the task.
 	removeURL := fmt.Sprintf("%s/tasks/%s/removeTag", p.apiBase, issueID)
-	body := fmt.Sprintf(`{"data":{"tag":%q}}`, tagGID)
-	removeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, removeURL, strings.NewReader(body))
+	tagJSON, _ := json.Marshal(tagGID)
+	removeBody := fmt.Sprintf(`{"data":{"tag":%s}}`, tagJSON)
+	removeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, removeURL, strings.NewReader(removeBody))
 	if err != nil {
 		return fmt.Errorf("failed to create remove tag request: %w", err)
 	}
@@ -460,7 +461,8 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 	}
 
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
-	reqBody := fmt.Sprintf(`{"data":{"text":%q}}`, body)
+	textJSON, _ := json.Marshal(body)
+	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, storiesURL, strings.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
