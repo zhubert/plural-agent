@@ -833,6 +833,9 @@ func TestCopyClaudeSessionForFork_NoSessionFileCopyFallback(t *testing.T) {
 }
 
 func TestCopyClaudeSessionForFork_CleansUpOnFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: running as root, file permission restrictions are not enforced")
+	}
 	// Test that partial destination file is cleaned up when copy fails
 	// We test this by making the destination directory read-only after creating it,
 	// which will cause os.Create to fail
@@ -968,6 +971,9 @@ func TestSessionManager_SaveMessages_Success(t *testing.T) {
 }
 
 func TestSessionManager_SaveMessages_Error(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: running as root, file permission restrictions are not enforced")
+	}
 	// Set HOME to a read-only path to trigger a write error
 	tempDir := t.TempDir()
 	readOnlyDir := filepath.Join(tempDir, "readonly")
@@ -1030,6 +1036,9 @@ func TestSessionManager_SaveRunnerMessages_Success(t *testing.T) {
 }
 
 func TestSessionManager_SaveRunnerMessages_Error(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: running as root, file permission restrictions are not enforced")
+	}
 	// Set HOME to a read-only path to trigger a write error
 	tempDir := t.TempDir()
 	readOnlyDir := filepath.Join(tempDir, "readonly")
