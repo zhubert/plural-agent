@@ -4902,8 +4902,10 @@ func TestWebhookPostAction_Execute_Success(t *testing.T) {
 }
 
 func TestWebhookPostAction_Execute_UnexpectedStatus(t *testing.T) {
+	// Server returns 422 with an error body; action expects 200.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"invalid payload"}`))
 	}))
 	defer srv.Close()
 
@@ -4928,6 +4930,13 @@ func TestWebhookPostAction_Execute_UnexpectedStatus(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected non-nil error for unexpected status code")
+	}
+	// Verify the response body is captured in the error for debugging.
+	if !strings.Contains(result.Error.Error(), "invalid payload") {
+		t.Errorf("expected error to contain response body, got: %v", result.Error)
+	}
+	if !strings.Contains(result.Error.Error(), "422") {
+		t.Errorf("expected error to contain status code 422, got: %v", result.Error)
 	}
 }
 

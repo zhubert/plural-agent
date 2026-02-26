@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	osexec "os/exec"
 	"os"
@@ -2080,6 +2081,16 @@ func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.Wor
 	return nil
 }
 
+// webhookHTTPClient is the shared HTTP client used by webhook.post actions.
+// A custom transport with explicit connection pooling is used for production robustness.
+var webhookHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 // webhookPostAction implements the webhook.post action.
 type webhookPostAction struct {
 	daemon *Daemon
@@ -2186,14 +2197,15 @@ func (d *Daemon) postWebhook(ctx context.Context, item daemonstate.WorkItem, par
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookHTTPClient.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("webhook POST failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != expectedStatus {
-		return resp.StatusCode, fmt.Errorf("unexpected status %d (expected %d)", resp.StatusCode, expectedStatus)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return resp.StatusCode, fmt.Errorf("unexpected status %d (expected %d): %s", resp.StatusCode, expectedStatus, strings.TrimSpace(string(respBody)))
 	}
 
 	return resp.StatusCode, nil
