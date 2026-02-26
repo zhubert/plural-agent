@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -600,16 +601,33 @@ func TestDaemonState_Spend(t *testing.T) {
 func TestDaemonState_SetLastPollAt(t *testing.T) {
 	s := NewDaemonState("/test/repo")
 
-	if !s.LastPollAt.IsZero() {
+	if !s.GetLastPollAt().IsZero() {
 		t.Error("expected LastPollAt to be zero initially")
 	}
 
 	now := time.Now().Truncate(time.Second)
 	s.SetLastPollAt(now)
 
-	if !s.LastPollAt.Equal(now) {
-		t.Errorf("expected LastPollAt %v, got %v", now, s.LastPollAt)
+	if !s.GetLastPollAt().Equal(now) {
+		t.Errorf("expected LastPollAt %v, got %v", now, s.GetLastPollAt())
 	}
+
+	// Verify thread-safety: concurrent writers and readers must not race.
+	// Run with -race to catch violations.
+	const goroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			s.SetLastPollAt(time.Now())
+		}()
+		go func() {
+			defer wg.Done()
+			_ = s.GetLastPollAt()
+		}()
+	}
+	wg.Wait()
 }
 
 func TestNewDaemonState(t *testing.T) {

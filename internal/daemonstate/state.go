@@ -348,6 +348,13 @@ func (s *DaemonState) SetLastPollAt(t time.Time) {
 	s.LastPollAt = t
 }
 
+// GetLastPollAt returns LastPollAt under the read lock.
+func (s *DaemonState) GetLastPollAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastPollAt
+}
+
 // AddSpend accumulates token and cost data from a completed Claude response.
 // Thread-safe; may be called concurrently from multiple worker goroutines.
 func (s *DaemonState) AddSpend(costUSD float64, outputTokens, inputTokens int) {
