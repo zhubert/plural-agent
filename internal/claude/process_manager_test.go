@@ -567,6 +567,124 @@ func TestProcessManager_MarkSessionStarted_ThreadSafe(t *testing.T) {
 	}
 }
 
+// TestReadLine_NormalRead verifies that readLine returns a line successfully when data is available.
+func TestReadLine_NormalRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pm := &ProcessManager{
+		ctx: ctx,
+		log: pmTestLogger(),
+	}
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+	reader := bufio.NewReader(pr)
+
+	go func() {
+		pw.Write([]byte("hello world\n"))
+	}()
+
+	line, err := pm.readLine(reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if line != "hello world\n" {
+		t.Errorf("got %q, want %q", line, "hello world\n")
+	}
+}
+
+// TestReadLine_ContextCancelled verifies that readLine returns immediately with
+// context.Canceled when the context is cancelled before data arrives.
+func TestReadLine_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pm := &ProcessManager{
+		ctx: ctx,
+		log: pmTestLogger(),
+	}
+
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	reader := bufio.NewReader(pr)
+
+	// Cancel before any data arrives
+	cancel()
+
+	_, err := pm.readLine(reader)
+	if err != context.Canceled {
+		t.Errorf("got error %v, want context.Canceled", err)
+	}
+
+	// Close the pipe so the blocked goroutine can exit
+	pr.Close()
+}
+
+// TestReadLine_ContextCancelledThenPipeWrite verifies the goroutine spawned by readLine
+// has a bounded lifetime: after context cancellation causes readLine to return early,
+// writing to the pipe unblocks the goroutine so it can exit cleanly. The buffered
+// channel (size 1) ensures the goroutine's send never blocks, preventing a leak.
+func TestReadLine_ContextCancelledThenPipeWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pm := &ProcessManager{
+		ctx: ctx,
+		log: pmTestLogger(),
+	}
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	reader := bufio.NewReader(pr)
+
+	// Cancel context so readLine returns early
+	cancel()
+
+	_, err := pm.readLine(reader)
+	if err != context.Canceled {
+		t.Errorf("got error %v, want context.Canceled", err)
+	}
+
+	// After readLine returns, writing to the pipe unblocks the internal goroutine.
+	// If the buffered channel were size 0, the goroutine would deadlock here.
+	done := make(chan struct{})
+	go func() {
+		pw.Write([]byte("data\n"))
+		pw.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Goroutine exited cleanly
+	case <-time.After(2 * time.Second):
+		t.Error("goroutine did not exit after pipe was written and closed")
+	}
+}
+
+// TestReadLine_EOF verifies that readLine propagates EOF from the underlying reader.
+func TestReadLine_EOF(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pm := &ProcessManager{
+		ctx: ctx,
+		log: pmTestLogger(),
+	}
+
+	pr, pw := io.Pipe()
+	reader := bufio.NewReader(pr)
+
+	// Close the write end immediately to produce EOF
+	pw.Close()
+	pr.Close()
+
+	_, err := pm.readLine(reader)
+	if err == nil {
+		t.Error("expected error on closed pipe, got nil")
+	}
+}
+
 // Helper to check if args slice contains a specific flag
 func containsArg(args []string, flag string) bool {
 	return slices.Contains(args, flag)
