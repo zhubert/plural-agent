@@ -1489,3 +1489,109 @@ func TestEngine_ProcessStep_TaskSync_NoOverride(t *testing.T) {
 		t.Errorf("expected normal Next 'open_pr', got %q", result.NewStep)
 	}
 }
+
+// defaultWorkflowEngine returns an engine backed by the default workflow config.
+func defaultWorkflowEngine() *Engine {
+	return NewEngine(DefaultWorkflowConfig(), NewActionRegistry(), nil, testLogger())
+}
+
+func TestEngine_FindRecoveryWaitStep_DefaultWorkflow(t *testing.T) {
+	engine := defaultWorkflowEngine()
+
+	tests := []struct {
+		currentStep  string
+		wantStep     string
+		description  string
+	}{
+		{"coding", "await_ci", "start of workflow — forward-search finds await_ci"},
+		{"open_pr", "await_ci", "before first wait state — forward-search finds await_ci"},
+		{"await_ci", "await_ci", "current step is a wait state — return it"},
+		{"check_ci_result", "await_ci", "after first wait state — preceding wait is await_ci"},
+		{"rebase", "await_ci", "CI fix loop — preceding wait is await_ci"},
+		{"fix_ci", "await_ci", "CI fix loop — preceding wait is await_ci"},
+		{"push_ci_fix", "await_ci", "CI fix loop — preceding wait is await_ci"},
+		{"await_review", "await_review", "current step is a wait state — return it"},
+		{"merge", "await_review", "after second wait state — preceding wait is await_review"},
+		{"done", "await_review", "terminal succeed — preceding wait is await_review"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.currentStep, func(t *testing.T) {
+			got := engine.FindRecoveryWaitStep(tc.currentStep)
+			if got != tc.wantStep {
+				t.Errorf("%s: FindRecoveryWaitStep(%q) = %q, want %q",
+					tc.description, tc.currentStep, got, tc.wantStep)
+			}
+		})
+	}
+}
+
+func TestEngine_FindRecoveryWaitStep_CustomWorkflow(t *testing.T) {
+	// Custom workflow with non-default step names.
+	cfg := &Config{
+		Start: "implement",
+		States: map[string]*State{
+			"implement":       {Type: StateTypeTask, Action: "ai.code", Next: "create_pr"},
+			"create_pr":       {Type: StateTypeTask, Action: "github.create_pr", Next: "check_ci"},
+			"check_ci":        {Type: StateTypeWait, Event: "ci.complete", Next: "wait_for_approval"},
+			"wait_for_approval": {Type: StateTypeWait, Event: "pr.reviewed", Next: "auto_merge"},
+			"auto_merge":      {Type: StateTypeTask, Action: "github.merge", Next: "finished"},
+			"finished":        {Type: StateTypeSucceed},
+			"error":           {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+
+	tests := []struct {
+		currentStep string
+		wantStep    string
+	}{
+		{"implement", "check_ci"},
+		{"create_pr", "check_ci"},
+		{"check_ci", "check_ci"},
+		{"wait_for_approval", "wait_for_approval"},
+		{"auto_merge", "wait_for_approval"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.currentStep, func(t *testing.T) {
+			got := engine.FindRecoveryWaitStep(tc.currentStep)
+			if got != tc.wantStep {
+				t.Errorf("FindRecoveryWaitStep(%q) = %q, want %q", tc.currentStep, got, tc.wantStep)
+			}
+		})
+	}
+}
+
+func TestEngine_FindRecoveryWaitStep_UnknownStep(t *testing.T) {
+	engine := defaultWorkflowEngine()
+	got := engine.FindRecoveryWaitStep("nonexistent_step")
+	// An unknown step is not reachable from start, so no preceding wait is found.
+	// The forward-search also finds nothing since the step doesn't exist.
+	if got != "" {
+		t.Errorf("FindRecoveryWaitStep(unknown) = %q, want empty string", got)
+	}
+}
+
+func TestEngine_FindRecoveryWaitStep_NoWaitStates(t *testing.T) {
+	cfg := &Config{
+		Start: "start",
+		States: map[string]*State{
+			"start": {Type: StateTypeTask, Action: "ai.code", Next: "finish"},
+			"finish": {Type: StateTypeSucceed},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	got := engine.FindRecoveryWaitStep("start")
+	if got != "" {
+		t.Errorf("FindRecoveryWaitStep(no wait states) = %q, want empty string", got)
+	}
+}
+
+func TestEngine_FindRecoveryWaitStep_NilConfig(t *testing.T) {
+	engine := &Engine{config: nil}
+	got := engine.FindRecoveryWaitStep("any")
+	if got != "" {
+		t.Errorf("FindRecoveryWaitStep(nil config) = %q, want empty string", got)
+	}
+}

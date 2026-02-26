@@ -232,12 +232,20 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 				it.UpdatedAt = now
 			})
 		} else {
-			// Determine recovery target based on current step.
-			// Since await_ci now comes before await_review, we need to
-			// recover to the right wait state.
-			recoveryStep := "await_ci"
-			if item.CurrentStep == "await_review" || item.CurrentStep == "merge" {
-				recoveryStep = "await_review" // was past CI, resume at review
+			// Determine recovery target using the workflow engine so that custom
+			// workflows with non-default step names are handled correctly.
+			engine := d.getEngine(sess.RepoPath)
+			recoveryStep := engine.FindRecoveryWaitStep(item.CurrentStep)
+			if recoveryStep == "" {
+				// No wait state found — re-queue to restart from the beginning.
+				log.Info("no wait state found for recovery, re-queuing")
+				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+					it.State = daemonstate.WorkItemQueued
+					it.CurrentStep = ""
+					it.Phase = "idle"
+					it.UpdatedAt = time.Now()
+				})
+				return
 			}
 			log.Info("PR exists, advancing to wait state", "recoveryStep", recoveryStep)
 			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
