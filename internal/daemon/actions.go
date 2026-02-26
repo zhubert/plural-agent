@@ -1584,8 +1584,8 @@ type resolveConflictsAction struct {
 // Execute merges the base branch and starts Claude to resolve any conflicts.
 func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
-	item := d.state.GetWorkItem(ac.WorkItemID)
-	if item == nil {
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
@@ -1643,7 +1643,7 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 	}
 
 	// Conflicts exist — start Claude to resolve them
-	if err := d.startResolveConflicts(ctx, item, sess, rounds+1, conflictedFiles); err != nil {
+	if err := d.startResolveConflicts(ctx, &item, sess, rounds+1, conflictedFiles); err != nil {
 		return workflow.ActionResult{Error: err}
 	}
 
@@ -1672,7 +1672,7 @@ func (d *Daemon) startResolveConflicts(ctx context.Context, item *daemonstate.Wo
 		resolvedPrompt = DefaultCodingSystemPrompt
 	}
 
-	d.startWorkerWithPrompt(ctx, item, sess, prompt, resolvedPrompt)
+	d.startWorkerWithPrompt(ctx, *item, sess, prompt, resolvedPrompt)
 	d.logger.Info("started conflict resolution session", "workItem", item.ID, "round", round, "conflictedFiles", len(conflictedFiles))
 	return nil
 }
