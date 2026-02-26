@@ -153,13 +153,7 @@ func (sm *SessionManager) HasActiveStreaming() bool {
 
 // GetSession returns the session config for a given session ID.
 func (sm *SessionManager) GetSession(sessionID string) *config.Session {
-	sessions := sm.config.GetSessions()
-	for i := range sessions {
-		if sessions[i].ID == sessionID {
-			return &sessions[i]
-		}
-	}
-	return nil
+	return sm.config.GetSession(sessionID)
 }
 
 // Select prepares a session for activation, creating or reusing a runner,

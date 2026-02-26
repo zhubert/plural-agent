@@ -118,11 +118,6 @@ func DefaultWorkflowConfig() *Config {
 	}
 }
 
-// DefaultConfig returns the default config. Alias for DefaultWorkflowConfig.
-func DefaultConfig() *Config {
-	return DefaultWorkflowConfig()
-}
-
 // Merge overlays partial onto defaults. States present in partial replace the
 // corresponding default state entirely. States in defaults but not in partial
 // are preserved. Top-level fields (Workflow, Start) use partial if non-empty.

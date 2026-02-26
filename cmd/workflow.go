@@ -69,7 +69,7 @@ func runWorkflowValidate(cmd *cobra.Command, args []string) error {
 
 	if cfg == nil {
 		fmt.Fprintln(os.Stderr, "No .erg/workflow.yaml found, using defaults.")
-		cfg = workflow.DefaultConfig()
+		cfg = workflow.DefaultWorkflowConfig()
 	}
 
 	errs := workflow.Validate(cfg)

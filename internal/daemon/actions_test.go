@@ -264,7 +264,7 @@ func TestCommentIssueAction_Execute_GhError(t *testing.T) {
 func TestDaemon_CodingParamsExtractsLimits(t *testing.T) {
 	// Verify that max_turns and max_duration params on the coding state
 	// are correctly read by the ParamHelper, matching the startCoding logic.
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	wfCfg.States["coding"].Params["max_turns"] = 10
 	wfCfg.States["coding"].Params["max_duration"] = "5m"
 
@@ -301,7 +301,7 @@ func TestDaemon_CodingParamsDefaultsWhenAbsent(t *testing.T) {
 
 func TestDefaultWorkflowConfig_SupervisorFalse(t *testing.T) {
 	// The default workflow config should have supervisor: false for coding state
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	codingState := wfCfg.States["coding"]
 	if codingState == nil {
 		t.Fatal("expected coding state in default workflow config")

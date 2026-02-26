@@ -35,7 +35,7 @@ func TestFetchIssuesForProvider_GitHub(t *testing.T) {
 
 	d := testDaemonWithExec(cfg, mockExec)
 
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	wfCfg.Source.Provider = "github"
 
 	issues, err := d.fetchIssuesForProvider(context.Background(), "/test/repo", wfCfg)
@@ -75,7 +75,7 @@ func TestFetchIssuesForProvider_GitHub_CustomLabel(t *testing.T) {
 
 	d := testDaemonWithExec(cfg, mockExec)
 
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	wfCfg.Source.Provider = "github"
 	wfCfg.Source.Filter.Label = "custom-label"
 
@@ -95,7 +95,7 @@ func TestFetchIssuesForProvider_UnknownProvider(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	wfCfg.Source.Provider = "unknown_provider"
 
 	_, err := d.fetchIssuesForProvider(context.Background(), "/test/repo", wfCfg)

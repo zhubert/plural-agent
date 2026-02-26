@@ -822,7 +822,7 @@ func (d *Daemon) getWorkflowConfig(repoPath string) *workflow.Config {
 	if cfg, ok := d.workflowConfigs[repoPath]; ok {
 		return cfg
 	}
-	return workflow.DefaultConfig()
+	return workflow.DefaultWorkflowConfig()
 }
 
 // getEngine returns the workflow engine for a repo, or creates one with defaults.
@@ -831,7 +831,7 @@ func (d *Daemon) getEngine(repoPath string) *workflow.Engine {
 		return engine
 	}
 	// Create a default engine on the fly
-	cfg := workflow.DefaultConfig()
+	cfg := workflow.DefaultWorkflowConfig()
 	registry := d.buildActionRegistry()
 	checker := NewEventChecker(d)
 	return workflow.NewEngine(cfg, registry, checker, d.logger)

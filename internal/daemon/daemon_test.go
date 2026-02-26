@@ -1684,7 +1684,7 @@ func TestProcessWaitItems_PreservesPhaseSetByEventHandler(t *testing.T) {
 		itemID:   "item-phase",
 		newPhase: "addressing_feedback",
 	}
-	wfCfg := workflow.DefaultConfig()
+	wfCfg := workflow.DefaultWorkflowConfig()
 	registry := d.buildActionRegistry()
 	engine := workflow.NewEngine(wfCfg, registry, checker, d.logger)
 	d.engines = map[string]*workflow.Engine{"/test/repo": engine}

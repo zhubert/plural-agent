@@ -76,7 +76,7 @@ func LoadAndMerge(repoPath string) (*Config, error) {
 		return nil, err
 	}
 
-	defaults := DefaultConfig()
+	defaults := DefaultWorkflowConfig()
 	if cfg == nil {
 		return defaults, nil
 	}
