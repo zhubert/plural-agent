@@ -1727,9 +1727,17 @@ func TestDaemon_WorkerDone_CreateWorkerNotifies(t *testing.T) {
 	d.workers[item.ID] = w
 	d.mu.Unlock()
 
+	ctx := context.Background()
 	go func() {
-		w.Wait()
-		d.notifyWorkerDone()
+		select {
+		case <-w.DoneChan():
+			select {
+			case <-ctx.Done():
+			default:
+				d.notifyWorkerDone()
+			}
+		case <-ctx.Done():
+		}
 	}()
 
 	// The worker is already done, so the goroutine should fire quickly
@@ -1738,6 +1746,51 @@ func TestDaemon_WorkerDone_CreateWorkerNotifies(t *testing.T) {
 		// success — notification received
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("expected workerDone signal after worker completed")
+	}
+}
+
+func TestDaemon_WorkerDone_CtxCancelledSuppressesNotify(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-cancel")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-cancel",
+		IssueRef:  config.IssueRef{Source: "github", ID: "100"},
+		SessionID: "sess-cancel",
+		Branch:    "feature-cancel",
+	}
+	d.state.AddWorkItem(item)
+
+	w := worker.NewDoneWorker()
+	d.mu.Lock()
+	d.workers[item.ID] = w
+	d.mu.Unlock()
+
+	// Cancel the context before the goroutine runs.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	go func() {
+		select {
+		case <-w.DoneChan():
+			select {
+			case <-ctx.Done():
+			default:
+				d.notifyWorkerDone()
+			}
+		case <-ctx.Done():
+		}
+	}()
+
+	// With ctx already cancelled, notifyWorkerDone must not be called.
+	select {
+	case <-d.workerDone:
+		t.Fatal("notifyWorkerDone should not be called when context is cancelled")
+	case <-time.After(50 * time.Millisecond):
+		// success — no spurious notification
 	}
 }
 
