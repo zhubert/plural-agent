@@ -256,20 +256,6 @@ func (s *DaemonState) GetWorkItemsByState(state WorkItemState) []*WorkItem {
 	return items
 }
 
-// GetWorkItemsByStep returns all work items at a given step.
-func (s *DaemonState) GetWorkItemsByStep(step string) []*WorkItem {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var items []*WorkItem
-	for _, item := range s.WorkItems {
-		if item.CurrentStep == step && !item.IsTerminal() {
-			items = append(items, item)
-		}
-	}
-	return items
-}
-
 // GetActiveWorkItems returns all non-terminal, non-queued work items.
 func (s *DaemonState) GetActiveWorkItems() []*WorkItem {
 	s.mu.RLock()

@@ -135,24 +135,6 @@ Diff:
 	return commitMsg, nil
 }
 
-// CommitConflictResolution stages all changes and commits with the given message.
-// This is used after resolving merge conflicts to complete the merge.
-func (s *GitService) CommitConflictResolution(ctx context.Context, repoPath, message string) error {
-	logger.WithComponent("git").Info("committing conflict resolution", "repoPath", repoPath)
-
-	// Stage all changes
-	if output, err := s.executor.CombinedOutput(ctx, repoPath, "git", "add", "-A"); err != nil {
-		return fmt.Errorf("git add failed: %s - %w", string(output), err)
-	}
-
-	// Commit
-	if output, err := s.executor.CombinedOutput(ctx, repoPath, "git", "commit", "-m", message); err != nil {
-		return fmt.Errorf("git commit failed: %s - %w", string(output), err)
-	}
-
-	return nil
-}
-
 // EnsureCommitted checks for uncommitted changes and commits them if present.
 // If commitMsg is empty, it generates a commit message using Claude (with fallback).
 // Returns true if the operation succeeded (either committed or no changes needed),

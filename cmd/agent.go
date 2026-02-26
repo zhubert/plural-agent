@@ -179,19 +179,6 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// waitForDaemonLock polls the lock file until the expected PID appears or timeout.
-func waitForDaemonLock(repo string, expectedPID int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		pid, running := daemonstate.ReadLockStatus(repo)
-		if pid == expectedPID && running {
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return fmt.Errorf("daemon did not start within %s (expected PID %d)", timeout, expectedPID)
-}
-
 // buildDaemonArgs constructs the args slice for the re-exec'd child process.
 func buildDaemonArgs(repo string, once bool) []string {
 	args := []string{"--_daemon", "--repo", repo}

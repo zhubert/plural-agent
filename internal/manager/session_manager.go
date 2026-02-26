@@ -139,18 +139,6 @@ func (sm *SessionManager) GetRunners() map[string]claude.RunnerInterface {
 	return copy
 }
 
-// HasActiveStreaming returns true if any session is currently streaming.
-func (sm *SessionManager) HasActiveStreaming() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	for _, runner := range sm.runners {
-		if runner.IsStreaming() {
-			return true
-		}
-	}
-	return false
-}
-
 // GetSession returns the session config for a given session ID.
 func (sm *SessionManager) GetSession(sessionID string) *config.Session {
 	return sm.config.GetSession(sessionID)
@@ -427,31 +415,6 @@ func (sm *SessionManager) ConfigureRunnerDefaults(runner claude.RunnerInterface,
 		runner.SetDisableStreamingChunks(true)
 		log.Debug("autonomous session, streaming chunks disabled for reduced logging")
 	}
-}
-
-// SaveMessages saves the current messages from a runner to disk.
-func (sm *SessionManager) SaveMessages(sessionID string) error {
-	sm.mu.RLock()
-	runner, exists := sm.runners[sessionID]
-	sm.mu.RUnlock()
-	if !exists || runner == nil {
-		return nil
-	}
-
-	msgs := runner.GetMessages()
-	var configMsgs []config.Message
-	for _, msg := range msgs {
-		configMsgs = append(configMsgs, config.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	if err := config.SaveSessionMessages(sessionID, configMsgs, config.MaxSessionMessageLines); err != nil {
-		logger.WithSession(sessionID).Error("failed to save session messages", "error", err)
-		return err
-	}
-	return nil
 }
 
 // SaveRunnerMessages saves messages for a specific runner (used when runner reference is already available).

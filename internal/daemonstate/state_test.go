@@ -173,29 +173,6 @@ func TestDaemonState_GetWorkItemsByState(t *testing.T) {
 	}
 }
 
-func TestDaemonState_GetWorkItemsByStep(t *testing.T) {
-	state := NewDaemonState("/test/repo")
-
-	state.AddWorkItem(&WorkItem{ID: "i1", IssueRef: config.IssueRef{Source: "github", ID: "1"}})
-	state.AdvanceWorkItem("i1", "coding", "async_pending")
-
-	state.AddWorkItem(&WorkItem{ID: "i2", IssueRef: config.IssueRef{Source: "github", ID: "2"}})
-	state.AdvanceWorkItem("i2", "coding", "async_pending")
-
-	state.AddWorkItem(&WorkItem{ID: "i3", IssueRef: config.IssueRef{Source: "github", ID: "3"}})
-	state.AdvanceWorkItem("i3", "await_review", "idle")
-
-	coding := state.GetWorkItemsByStep("coding")
-	if len(coding) != 2 {
-		t.Errorf("expected 2 coding items, got %d", len(coding))
-	}
-
-	review := state.GetWorkItemsByStep("await_review")
-	if len(review) != 1 {
-		t.Errorf("expected 1 await_review item, got %d", len(review))
-	}
-}
-
 func TestDaemonState_ActiveSlotCount(t *testing.T) {
 	state := NewDaemonState("/test/repo")
 
