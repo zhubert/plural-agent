@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/logger"
@@ -358,6 +359,79 @@ func (s *GitService) FetchPRReviewComments(ctx context.Context, repoPath, branch
 		}
 	}
 
+	return comments, nil
+}
+
+// IssueComment represents a single comment on a GitHub issue.
+type IssueComment struct {
+	Author    string    // GitHub username
+	Body      string    // Comment text
+	CreatedAt time.Time // When the comment was posted
+}
+
+// CheckIssueHasLabel reports whether the given issue currently has the specified label.
+// Uses `gh issue view --json labels` to fetch the issue's label list.
+func (s *GitService) CheckIssueHasLabel(ctx context.Context, repoPath string, issueNumber int, label string) (bool, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "issue", "view",
+		fmt.Sprintf("%d", issueNumber),
+		"--json", "labels",
+	)
+	if err != nil {
+		return false, fmt.Errorf("gh issue view --json labels failed: %w", err)
+	}
+
+	var result struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return false, fmt.Errorf("failed to parse issue labels: %w", err)
+	}
+
+	for _, l := range result.Labels {
+		if l.Name == label {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// GetIssueComments fetches all comments on a GitHub issue using the gh CLI.
+// Uses `gh issue view --json comments` to retrieve the full comment list.
+func (s *GitService) GetIssueComments(ctx context.Context, repoPath string, issueNumber int) ([]IssueComment, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "issue", "view",
+		fmt.Sprintf("%d", issueNumber),
+		"--json", "comments",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view --json comments failed: %w", err)
+	}
+
+	var result struct {
+		Comments []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body      string    `json:"body"`
+			CreatedAt time.Time `json:"createdAt"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse issue comments: %w", err)
+	}
+
+	comments := make([]IssueComment, 0, len(result.Comments))
+	for _, c := range result.Comments {
+		if c.Body == "" {
+			continue
+		}
+		comments = append(comments, IssueComment{
+			Author:    c.Author.Login,
+			Body:      c.Body,
+			CreatedAt: c.CreatedAt,
+		})
+	}
 	return comments, nil
 }
 

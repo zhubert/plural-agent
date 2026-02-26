@@ -3,10 +3,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/exec"
@@ -1081,5 +1083,469 @@ func TestCheckCIComplete_MergeableUnknown_FallsThroughToCI(t *testing.T) {
 	// UNKNOWN mergeable falls through, CI pending means not fired
 	if fired {
 		t.Error("expected fired=false when CI pending (merge status unknown)")
+	}
+}
+
+// --- gate.approved event tests ---
+
+func TestCheckGateApproved_LabelAdded_Fires(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	labelsJSON, _ := json.Marshal(struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}{Labels: []struct {
+		Name string `json:"name"`
+	}{{Name: "approved"}}})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: labelsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when label is present")
+	}
+	if data == nil || data["gate_approved"] != true {
+		t.Error("expected gate_approved=true in data")
+	}
+	if data["gate_trigger"] != "label_added" {
+		t.Errorf("expected gate_trigger=label_added, got %v", data["gate_trigger"])
+	}
+}
+
+func TestCheckGateApproved_LabelAdded_LabelAbsent(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	labelsJSON, _ := json.Marshal(struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}{Labels: []struct {
+		Name string `json:"name"`
+	}{{Name: "bug"}}})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: labelsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when label is absent")
+	}
+}
+
+func TestCheckGateApproved_CommentMatch_Fires(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Comment posted 5 minutes after step was entered — should fire.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"reviewer"},"body":"/approve please proceed","createdAt":"2020-01-01T10:05:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	// AddWorkItem overrides StepEnteredAt with time.Now(); override it here to a fixed past
+	// time so the 2020-01-01T10:05:00Z comment is clearly after the step entry.
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when matching comment found")
+	}
+	if data == nil || data["gate_approved"] != true {
+		t.Error("expected gate_approved=true in data")
+	}
+	if data["gate_comment_author"] != "reviewer" {
+		t.Errorf("expected gate_comment_author=reviewer, got %v", data["gate_comment_author"])
+	}
+}
+
+func TestCheckGateApproved_CommentMatch_OldCommentIgnored(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Comment posted 5 minutes BEFORE step was entered — should be ignored.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"oldreviewer"},"body":"/approve old comment","createdAt":"2020-01-01T09:55:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	// Set StepEnteredAt to 2020-01-01T10:00:00Z so the 09:55 comment is clearly before it.
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when matching comment is older than step entry")
+	}
+}
+
+func TestCheckGateApproved_CommentMatch_NoMatch(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"user"},"body":"just a regular comment","createdAt":"2020-01-01T10:00:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when no comment matches pattern")
+	}
+}
+
+func TestCheckGateApproved_NonGitHubIssue(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-abc"},
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for non-github issue")
+	}
+}
+
+func TestCheckGateApproved_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	view := &workflow.WorkItemView{ID: "nonexistent", RepoPath: "/test/repo"}
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for missing work item")
+	}
+}
+
+func TestCheckGateApproved_InvalidIssueNumber(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "not-a-number"},
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for invalid issue number")
+	}
+}
+
+func TestCheckGateApproved_CLIError_LabelCheck(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("gh: not found"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	// CLI error should be swallowed; returns false (not fired), no error.
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false on CLI error")
+	}
+}
+
+func TestCheckGateApproved_InvalidPattern(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	// Invalid regex pattern
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `[invalid`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for invalid regex pattern")
+	}
+}
+
+func TestCheckGateApproved_UnknownTrigger(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "webhook"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for unknown trigger type")
+	}
+}
+
+func TestCheckGateApproved_DefaultTrigger_IsLabelAdded(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Label "approved" is present
+	labelsJSON, _ := json.Marshal(struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}{Labels: []struct {
+		Name string `json:"name"`
+	}{{Name: "approved"}}})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: labelsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	// No trigger param — should default to label_added with "approved" label
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true with default trigger and approved label present")
+	}
+	if data["gate_label"] != "approved" {
+		t.Errorf("expected gate_label=approved, got %v", data["gate_label"])
+	}
+}
+
+func TestCheckGateApproved_CommentMatch_MissingPattern(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := NewEventChecker(d)
+	// comment_match trigger with no pattern — should not fire
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when comment_pattern is missing")
 	}
 }

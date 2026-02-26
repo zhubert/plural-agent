@@ -1653,3 +1653,180 @@ func TestMergeBaseIntoBranch_NonConflictFailure(t *testing.T) {
 		t.Errorf("expected nil files on error, got: %v", files)
 	}
 }
+
+// --- CheckIssueHasLabel tests ---
+
+func TestCheckIssueHasLabel_LabelPresent(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"}, pexec.MockResponse{
+		Stdout: []byte(`{"labels":[{"name":"approved"},{"name":"bug"}]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	has, err := svc.CheckIssueHasLabel(context.Background(), "/repo", 42, "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Error("expected label to be found")
+	}
+}
+
+func TestCheckIssueHasLabel_LabelAbsent(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"}, pexec.MockResponse{
+		Stdout: []byte(`{"labels":[{"name":"bug"}]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	has, err := svc.CheckIssueHasLabel(context.Background(), "/repo", 42, "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Error("expected label to be absent")
+	}
+}
+
+func TestCheckIssueHasLabel_NoLabels(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "1", "--json", "labels"}, pexec.MockResponse{
+		Stdout: []byte(`{"labels":[]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	has, err := svc.CheckIssueHasLabel(context.Background(), "/repo", 1, "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Error("expected no label found on empty list")
+	}
+}
+
+func TestCheckIssueHasLabel_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"}, pexec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	has, err := svc.CheckIssueHasLabel(context.Background(), "/repo", 42, "approved")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if has {
+		t.Error("expected false on error")
+	}
+}
+
+func TestCheckIssueHasLabel_InvalidJSON(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"}, pexec.MockResponse{
+		Stdout: []byte(`not json`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.CheckIssueHasLabel(context.Background(), "/repo", 42, "approved")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// --- GetIssueComments tests ---
+
+func TestGetIssueComments_MultipleComments(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
+		Stdout: []byte(`{"comments":[
+			{"author":{"login":"alice"},"body":"/approve","createdAt":"2024-01-02T10:00:00Z"},
+			{"author":{"login":"bob"},"body":"looks good","createdAt":"2024-01-02T11:00:00Z"}
+		]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.GetIssueComments(context.Background(), "/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].Author != "alice" {
+		t.Errorf("expected alice, got %s", comments[0].Author)
+	}
+	if comments[0].Body != "/approve" {
+		t.Errorf("expected /approve, got %s", comments[0].Body)
+	}
+	if comments[1].Author != "bob" {
+		t.Errorf("expected bob, got %s", comments[1].Author)
+	}
+}
+
+func TestGetIssueComments_EmptyComments(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "5", "--json", "comments"}, pexec.MockResponse{
+		Stdout: []byte(`{"comments":[]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.GetIssueComments(context.Background(), "/repo", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments, got %d", len(comments))
+	}
+}
+
+func TestGetIssueComments_EmptyBodiesExcluded(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "7", "--json", "comments"}, pexec.MockResponse{
+		Stdout: []byte(`{"comments":[
+			{"author":{"login":"bot"},"body":"","createdAt":"2024-01-01T00:00:00Z"},
+			{"author":{"login":"user"},"body":"real comment","createdAt":"2024-01-01T01:00:00Z"}
+		]}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.GetIssueComments(context.Background(), "/repo", 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Empty body comment should be excluded
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment (empty body excluded), got %d", len(comments))
+	}
+	if comments[0].Author != "user" {
+		t.Errorf("expected user, got %s", comments[0].Author)
+	}
+}
+
+func TestGetIssueComments_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.GetIssueComments(context.Background(), "/repo", 42)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if comments != nil {
+		t.Error("expected nil comments on error")
+	}
+}
+
+func TestGetIssueComments_InvalidJSON(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
+		Stdout: []byte(`not json`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.GetIssueComments(context.Background(), "/repo", 42)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
