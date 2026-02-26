@@ -53,45 +53,41 @@ func (s *GitService) GetPRState(ctx context.Context, repoPath, branch string) (P
 	}
 }
 
-// GetBatchPRStates returns the PR states for multiple branches in a single gh CLI call.
-// It uses `gh pr list --state all` to fetch all PRs for the repo, then matches by branch name.
+// GetBatchPRStates returns the PR states for multiple branches.
+// It uses `gh pr list --head <branch>` to filter by each branch individually,
+// which correctly handles repos with any number of total PRs.
 // Branches without a matching PR are omitted from the result map.
 func (s *GitService) GetBatchPRStates(ctx context.Context, repoPath string, branches []string) (map[string]PRState, error) {
-	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "list",
-		"--state", "all",
-		"--json", "state,headRefName",
-		"--limit", "200",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("gh pr list failed: %w", err)
-	}
-
-	var prs []struct {
-		State       string `json:"state"`
-		HeadRefName string `json:"headRefName"`
-	}
-	if err := json.Unmarshal(output, &prs); err != nil {
-		return nil, fmt.Errorf("failed to parse PR list: %w", err)
-	}
-
-	// Build a lookup set for the branches we care about
-	branchSet := make(map[string]struct{}, len(branches))
-	for _, b := range branches {
-		branchSet[b] = struct{}{}
-	}
-
-	// Match PRs to requested branches
 	result := make(map[string]PRState, len(branches))
-	for _, pr := range prs {
-		if _, ok := branchSet[pr.HeadRefName]; !ok {
-			continue
+	for _, branch := range branches {
+		output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "list",
+			"--state", "all",
+			"--json", "state,headRefName",
+			"--head", branch,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("gh pr list failed: %w", err)
 		}
-		switch PRState(pr.State) {
-		case PRStateOpen, PRStateMerged, PRStateClosed:
-			result[pr.HeadRefName] = PRState(pr.State)
-		default:
-			// Treat unrecognized states (e.g., DRAFT) as OPEN
-			result[pr.HeadRefName] = PRStateOpen
+
+		var prs []struct {
+			State       string `json:"state"`
+			HeadRefName string `json:"headRefName"`
+		}
+		if err := json.Unmarshal(output, &prs); err != nil {
+			return nil, fmt.Errorf("failed to parse PR list: %w", err)
+		}
+
+		for _, pr := range prs {
+			if pr.HeadRefName != branch {
+				continue
+			}
+			switch PRState(pr.State) {
+			case PRStateOpen, PRStateMerged, PRStateClosed:
+				result[branch] = PRState(pr.State)
+			default:
+				// Treat unrecognized states (e.g., DRAFT) as OPEN
+				result[branch] = PRStateOpen
+			}
 		}
 	}
 
@@ -210,65 +206,61 @@ type PRBatchResult struct {
 }
 
 // GetBatchPRStatesWithComments returns PR states and comment counts for multiple branches.
-// Uses a single `gh pr list` call per repo. The comment count is len(comments) + len(reviews),
+// Uses `gh pr list --head <branch>` per branch to filter exactly, correctly handling
+// repos with any number of total PRs. The comment count is len(comments) + len(reviews),
 // which captures top-level PR comments and review submissions.
 func (s *GitService) GetBatchPRStatesWithComments(ctx context.Context, repoPath string, branches []string) (map[string]PRBatchResult, error) {
-	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "list",
-		"--state", "all",
-		"--json", "state,headRefName,comments,reviews",
-		"--limit", "200",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("gh pr list failed: %w", err)
-	}
-
-	var prs []struct {
-		State       string            `json:"state"`
-		HeadRefName string            `json:"headRefName"`
-		Comments    []json.RawMessage `json:"comments"`
-		Reviews     []json.RawMessage `json:"reviews"`
-	}
-	if err := json.Unmarshal(output, &prs); err != nil {
-		return nil, fmt.Errorf("failed to parse PR list: %w", err)
-	}
-
-	// Build a lookup set for the branches we care about
-	branchSet := make(map[string]struct{}, len(branches))
-	for _, b := range branches {
-		branchSet[b] = struct{}{}
-	}
-
-	// Match PRs to requested branches
 	result := make(map[string]PRBatchResult, len(branches))
-	for _, pr := range prs {
-		if _, ok := branchSet[pr.HeadRefName]; !ok {
-			continue
-		}
-		var state PRState
-		switch PRState(pr.State) {
-		case PRStateOpen, PRStateMerged, PRStateClosed:
-			state = PRState(pr.State)
-		default:
-			state = PRStateOpen
+	for _, branch := range branches {
+		output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "list",
+			"--state", "all",
+			"--json", "state,headRefName,comments,reviews",
+			"--head", branch,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("gh pr list failed: %w", err)
 		}
 
-		// Count reviews, excluding APPROVED and DISMISSED reviews
-		// (approval reviews don't contain actionable feedback)
-		actionableReviewCount := 0
-		for _, rawReview := range pr.Reviews {
-			var review struct {
-				State string `json:"state"`
+		var prs []struct {
+			State       string            `json:"state"`
+			HeadRefName string            `json:"headRefName"`
+			Comments    []json.RawMessage `json:"comments"`
+			Reviews     []json.RawMessage `json:"reviews"`
+		}
+		if err := json.Unmarshal(output, &prs); err != nil {
+			return nil, fmt.Errorf("failed to parse PR list: %w", err)
+		}
+
+		for _, pr := range prs {
+			if pr.HeadRefName != branch {
+				continue
 			}
-			if err := json.Unmarshal(rawReview, &review); err == nil {
-				if review.State != "APPROVED" && review.State != "DISMISSED" {
-					actionableReviewCount++
+			var state PRState
+			switch PRState(pr.State) {
+			case PRStateOpen, PRStateMerged, PRStateClosed:
+				state = PRState(pr.State)
+			default:
+				state = PRStateOpen
+			}
+
+			// Count reviews, excluding APPROVED and DISMISSED reviews
+			// (approval reviews don't contain actionable feedback)
+			actionableReviewCount := 0
+			for _, rawReview := range pr.Reviews {
+				var review struct {
+					State string `json:"state"`
+				}
+				if err := json.Unmarshal(rawReview, &review); err == nil {
+					if review.State != "APPROVED" && review.State != "DISMISSED" {
+						actionableReviewCount++
+					}
 				}
 			}
-		}
 
-		result[pr.HeadRefName] = PRBatchResult{
-			State:        state,
-			CommentCount: len(pr.Comments) + actionableReviewCount,
+			result[branch] = PRBatchResult{
+				State:        state,
+				CommentCount: len(pr.Comments) + actionableReviewCount,
+			}
 		}
 	}
 

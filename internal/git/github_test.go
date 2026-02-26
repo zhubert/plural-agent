@@ -107,13 +107,14 @@ func TestGetPRState_DraftTreatedAsOpen(t *testing.T) {
 
 func TestGetBatchPRStates_MultipleStates(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
-		Stdout: []byte(`[
-			{"state":"OPEN","headRefName":"branch-a"},
-			{"state":"MERGED","headRefName":"branch-b"},
-			{"state":"CLOSED","headRefName":"branch-c"},
-			{"state":"OPEN","headRefName":"unrelated-branch"}
-		]`),
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-a"}, pexec.MockResponse{
+		Stdout: []byte(`[{"state":"OPEN","headRefName":"branch-a"}]`),
+	})
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-b"}, pexec.MockResponse{
+		Stdout: []byte(`[{"state":"MERGED","headRefName":"branch-b"}]`),
+	})
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-c"}, pexec.MockResponse{
+		Stdout: []byte(`[{"state":"CLOSED","headRefName":"branch-c"}]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -137,7 +138,7 @@ func TestGetBatchPRStates_MultipleStates(t *testing.T) {
 
 func TestGetBatchPRStates_DraftTreatedAsOpen(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "draft-branch"}, pexec.MockResponse{
 		Stdout: []byte(`[{"state":"DRAFT","headRefName":"draft-branch"}]`),
 	})
 
@@ -153,8 +154,9 @@ func TestGetBatchPRStates_DraftTreatedAsOpen(t *testing.T) {
 
 func TestGetBatchPRStates_MissingBranch(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
-		Stdout: []byte(`[{"state":"OPEN","headRefName":"other-branch"}]`),
+	// With --head filtering, gh returns no results for a branch with no PR
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "my-branch"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -169,7 +171,7 @@ func TestGetBatchPRStates_MissingBranch(t *testing.T) {
 
 func TestGetBatchPRStates_CLIError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-a"}, pexec.MockResponse{
 		Err: fmt.Errorf("not a git repository"),
 	})
 
@@ -185,7 +187,7 @@ func TestGetBatchPRStates_CLIError(t *testing.T) {
 
 func TestGetBatchPRStates_InvalidJSON(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`not valid json`),
 	})
 
@@ -201,7 +203,7 @@ func TestGetBatchPRStates_InvalidJSON(t *testing.T) {
 
 func TestGetBatchPRStates_EmptyList(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`[]`),
 	})
 
@@ -525,21 +527,11 @@ func TestFetchPRReviewComments_ReviewBodyOnly(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_Success(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
-		Stdout: []byte(`[
-			{
-				"state": "OPEN",
-				"headRefName": "branch-a",
-				"comments": [{"body": "comment1"}, {"body": "comment2"}],
-				"reviews": [{"body": "review1", "state": "CHANGES_REQUESTED"}]
-			},
-			{
-				"state": "MERGED",
-				"headRefName": "branch-b",
-				"comments": [],
-				"reviews": []
-			}
-		]`),
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
+		Stdout: []byte(`[{"state": "OPEN", "headRefName": "branch-a", "comments": [{"body": "comment1"}, {"body": "comment2"}], "reviews": [{"body": "review1", "state": "CHANGES_REQUESTED"}]}]`),
+	})
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-b"}, pexec.MockResponse{
+		Stdout: []byte(`[{"state": "MERGED", "headRefName": "branch-b", "comments": [], "reviews": []}]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -570,7 +562,7 @@ func TestGetBatchPRStatesWithComments_Success(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_NoComments(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`[{"state": "OPEN", "headRefName": "branch-a", "comments": [], "reviews": []}]`),
 	})
 
@@ -586,7 +578,7 @@ func TestGetBatchPRStatesWithComments_NoComments(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_CLIError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
 		Err: fmt.Errorf("not a git repository"),
 	})
 
@@ -602,7 +594,7 @@ func TestGetBatchPRStatesWithComments_CLIError(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_InvalidJSON(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`not valid json`),
 	})
 
@@ -618,8 +610,9 @@ func TestGetBatchPRStatesWithComments_InvalidJSON(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_MissingBranch(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
-		Stdout: []byte(`[{"state": "OPEN", "headRefName": "other-branch", "comments": [{"body": "c"}], "reviews": []}]`),
+	// With --head filtering, gh returns no results for a branch with no PR
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "my-branch"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -634,7 +627,7 @@ func TestGetBatchPRStatesWithComments_MissingBranch(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_ApprovedReviewsExcludedFromCount(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`[
 			{
 				"state": "OPEN",
@@ -664,7 +657,7 @@ func TestGetBatchPRStatesWithComments_ApprovedReviewsExcludedFromCount(t *testin
 
 func TestGetBatchPRStatesWithComments_AllApprovedReviewsExcluded(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "branch-a"}, pexec.MockResponse{
 		Stdout: []byte(`[
 			{
 				"state": "OPEN",
@@ -692,7 +685,7 @@ func TestGetBatchPRStatesWithComments_AllApprovedReviewsExcluded(t *testing.T) {
 
 func TestGetBatchPRStatesWithComments_DraftTreatedAsOpen(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--limit", "200"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName,comments,reviews", "--head", "draft-branch"}, pexec.MockResponse{
 		Stdout: []byte(`[{"state": "DRAFT", "headRefName": "draft-branch", "comments": [{"body": "c"}], "reviews": []}]`),
 	})
 
