@@ -341,7 +341,7 @@ func newWorkItem(id, title, step, phase, sessionID string) *daemonstate.WorkItem
 
 func TestRenderTailView_NoItems(t *testing.T) {
 	var buf bytes.Buffer
-	renderTailView(&buf, nil, 24, 80)
+	renderTailView(&buf, nil, 24, 80, nil)
 	out := buf.String()
 	if !strings.Contains(out, "No active") {
 		t.Errorf("expected 'No active' message, got %q", out)
@@ -351,7 +351,7 @@ func TestRenderTailView_NoItems(t *testing.T) {
 func TestRenderTailView_SingleItem(t *testing.T) {
 	item := newWorkItem("42", "Fix login bug", "coding", "async_pending", "")
 	var buf bytes.Buffer
-	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80)
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, nil)
 	out := buf.String()
 
 	// Header should contain the issue
@@ -373,7 +373,7 @@ func TestRenderTailView_MultipleItems_HasSeparators(t *testing.T) {
 		newWorkItem("2", "Second issue", "await_review", "idle", ""),
 	}
 	var buf bytes.Buffer
-	renderTailView(&buf, items, 24, 80)
+	renderTailView(&buf, items, 24, 80, nil)
 	out := buf.String()
 
 	// Should have column separators
@@ -392,7 +392,7 @@ func TestRenderTailView_MultipleItems_HasSeparators(t *testing.T) {
 func TestRenderTailView_HasHorizontalSeparator(t *testing.T) {
 	item := newWorkItem("5", "Test issue", "coding", "idle", "")
 	var buf bytes.Buffer
-	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80)
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, nil)
 	out := buf.String()
 
 	if !strings.Contains(out, "─") {
@@ -407,7 +407,7 @@ func TestRenderTailView_NoSessionID_ShowsWaiting(t *testing.T) {
 	item := newWorkItem("7", "Queued item", "coding", "idle", "")
 	item.SessionID = "" // ensure no session ID
 	var buf bytes.Buffer
-	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80)
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, nil)
 	out := buf.String()
 
 	if !strings.Contains(out, "waiting for session") {
@@ -426,7 +426,7 @@ func TestRenderTailView_LineWidths_ConsistentPerRow(t *testing.T) {
 		newWorkItem("3", "Gamma", "step_three", "idle", ""),
 	}
 	var buf bytes.Buffer
-	renderTailView(&buf, items, 10, termCols)
+	renderTailView(&buf, items, 10, termCols, nil)
 	out := buf.String()
 
 	// Column width = (termCols - (n-1)) / n (integer division)
@@ -466,7 +466,7 @@ func TestRenderTailView_WithStreamLog(t *testing.T) {
 
 	item := newWorkItem("10", "Add feature", "coding", "async_pending", "active-session")
 	var buf bytes.Buffer
-	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80)
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, nil)
 	out := buf.String()
 
 	if !strings.Contains(out, "Implementing the feature now.") {
@@ -552,7 +552,7 @@ func TestDrawTailFrame_NoStateFile(t *testing.T) {
 	setupAgentCleanTest(t)
 
 	out := captureStdout(t, func() {
-		_ = drawTailFrame("/nonexistent/test/repo")
+		_ = drawTailFrame("/nonexistent/test/repo", nil)
 	})
 
 	// When state file doesn't exist, LoadDaemonState returns a new empty state —
@@ -576,7 +576,7 @@ func TestDrawTailFrame_NoActiveItems(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = drawTailFrame(repo)
+		_ = drawTailFrame(repo, nil)
 	})
 
 	if !strings.Contains(out, "No active work items") {
@@ -616,7 +616,7 @@ func TestDrawTailFrame_WithActiveItem(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = drawTailFrame(repo)
+		_ = drawTailFrame(repo, nil)
 	})
 
 	if !strings.Contains(out, "#55") {
@@ -624,5 +624,119 @@ func TestDrawTailFrame_WithActiveItem(t *testing.T) {
 	}
 	if !strings.Contains(out, "coding") {
 		t.Errorf("expected step 'coding' in output, got: %q", out)
+	}
+}
+
+// ---- log cache (flicker prevention) ----
+
+// TestRenderTailView_CacheFallback_MissingFile verifies that when a stream log
+// file doesn't exist but the cache has content for the same work item, the cached
+// lines are shown instead of "(no log yet)".
+func TestRenderTailView_CacheFallback_MissingFile(t *testing.T) {
+	// Use a temp dir with no stream log files.
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	paths.Reset()
+	defer paths.Reset()
+
+	item := newWorkItem("item-cache-1", "Cache test", "coding", "async_pending", "nonexistent-session")
+
+	// Pre-populate cache with known content.
+	logCache := map[string][]string{
+		"item-cache-1": {"Cached line from previous session"},
+	}
+
+	var buf bytes.Buffer
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, logCache)
+	out := buf.String()
+
+	if strings.Contains(out, "no log yet") {
+		t.Errorf("expected cached content, not '(no log yet)', got: %q", out)
+	}
+	if !strings.Contains(out, "Cached line from previous session") {
+		t.Errorf("expected cached log line in output, got: %q", out)
+	}
+}
+
+// TestRenderTailView_CacheFallback_EmptyLog verifies that when the stream log
+// exists but has no assistant messages, cached lines are shown instead of
+// "(no output yet)".
+func TestRenderTailView_CacheFallback_EmptyLog(t *testing.T) {
+	// Write a stream log with only non-assistant content (will produce empty lines).
+	cleanup := writeStreamLog(t, "empty-session", []map[string]any{
+		{"type": "system", "subtype": "init"},
+	})
+	defer cleanup()
+
+	item := newWorkItem("item-cache-2", "Cache empty test", "coding", "async_pending", "empty-session")
+
+	// Pre-populate cache with content from a prior turn.
+	logCache := map[string][]string{
+		"item-cache-2": {"Prior turn output"},
+	}
+
+	var buf bytes.Buffer
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, logCache)
+	out := buf.String()
+
+	if strings.Contains(out, "no output yet") {
+		t.Errorf("expected cached content, not '(no output yet)', got: %q", out)
+	}
+	if !strings.Contains(out, "Prior turn output") {
+		t.Errorf("expected cached log line in output, got: %q", out)
+	}
+}
+
+// TestRenderTailView_CacheUpdated verifies that fresh log content overwrites
+// the cache entry for the work item.
+func TestRenderTailView_CacheUpdated(t *testing.T) {
+	cleanup := writeStreamLog(t, "live-session", []map[string]any{
+		{
+			"type": "assistant",
+			"message": map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": "Fresh log line"},
+				},
+			},
+		},
+	})
+	defer cleanup()
+
+	item := newWorkItem("item-cache-3", "Cache update test", "coding", "async_pending", "live-session")
+
+	logCache := make(map[string][]string)
+
+	var buf bytes.Buffer
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, logCache)
+
+	// Cache should now contain the fresh lines.
+	if cached, ok := logCache["item-cache-3"]; !ok || len(cached) == 0 {
+		t.Errorf("expected cache to be populated after successful read, got: %v", logCache)
+	}
+	if logCache["item-cache-3"][0] != "Fresh log line" {
+		t.Errorf("expected 'Fresh log line' in cache, got: %v", logCache["item-cache-3"])
+	}
+}
+
+// TestRenderTailView_NilCache_NoCrash verifies that passing nil for logCache
+// does not panic and falls through to the default "(no log yet)" message.
+func TestRenderTailView_NilCache_NoCrash(t *testing.T) {
+	// Use a temp dir with no stream log files.
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	paths.Reset()
+	defer paths.Reset()
+
+	item := newWorkItem("item-nil-cache", "Nil cache test", "coding", "async_pending", "missing-session")
+
+	var buf bytes.Buffer
+	// Must not panic even with nil cache.
+	renderTailView(&buf, []*daemonstate.WorkItem{item}, 24, 80, nil)
+	out := buf.String()
+
+	if !strings.Contains(out, "no log yet") {
+		t.Errorf("expected '(no log yet)' with nil cache and missing log, got: %q", out)
 	}
 }

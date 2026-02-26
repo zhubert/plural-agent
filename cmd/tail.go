@@ -206,7 +206,10 @@ func fitLine(s string, width int) string {
 
 // renderTailView renders the split-screen tail view to w.
 // items are the active work items to display; termRows/termCols are terminal dimensions.
-func renderTailView(w io.Writer, items []*daemonstate.WorkItem, termRows, termCols int) {
+// logCache is an optional map (work item ID → last known log lines) used to avoid
+// flickering during session transitions — when the current session's log is missing or
+// empty, cached lines from a previous read are shown instead.
+func renderTailView(w io.Writer, items []*daemonstate.WorkItem, termRows, termCols int, logCache map[string][]string) {
 	n := len(items)
 	if n == 0 {
 		fmt.Fprintln(w, "No active sessions to tail.")
@@ -247,6 +250,22 @@ func renderTailView(w io.Writer, items []*daemonstate.WorkItem, termRows, termCo
 		cols[i].subheader = fmt.Sprintf("%s / %s", step, phase)
 
 		logLines, err := readStreamLogLines(item.SessionID)
+		if err == nil && len(logLines) > 0 {
+			// Fresh log content — update the cache so we can fall back to it later.
+			if logCache != nil {
+				logCache[item.ID] = logLines
+			}
+		} else if logCache != nil {
+			// No fresh content (log missing or has no assistant messages yet).
+			// Fall back to the last known good lines to avoid flickering during
+			// session transitions (e.g., when a new session ID is assigned but
+			// the stream log file hasn't been written yet).
+			if cached, ok := logCache[item.ID]; ok && len(cached) > 0 {
+				logLines = cached
+				err = nil
+			}
+		}
+
 		if err != nil {
 			if item.SessionID == "" {
 				cols[i].lines = []string{"(waiting for session)"}
@@ -327,8 +346,13 @@ func runTailView(repo string) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	// logCache retains the most recent log lines for each work item so that
+	// frames don't flicker to "(no log yet)" during brief gaps when a new
+	// session is initializing or the session ID has just been rotated.
+	logCache := make(map[string][]string)
+
 	// Draw immediately on first run
-	if err := drawTailFrame(repo); err != nil {
+	if err := drawTailFrame(repo, logCache); err != nil {
 		return err
 	}
 
@@ -338,7 +362,7 @@ func runTailView(repo string) error {
 			clearScreen()
 			return nil
 		case <-ticker.C:
-			if err := drawTailFrame(repo); err != nil {
+			if err := drawTailFrame(repo, logCache); err != nil {
 				return err
 			}
 		}
@@ -346,7 +370,9 @@ func runTailView(repo string) error {
 }
 
 // drawTailFrame loads state and renders one frame of the tail view.
-func drawTailFrame(repo string) error {
+// logCache is updated in-place with the latest log lines for each active work item,
+// enabling flicker-free display across session transitions (see renderTailView).
+func drawTailFrame(repo string, logCache map[string][]string) error {
 	state, err := daemonstate.LoadDaemonState(repo)
 	if err != nil {
 		writeFrameFlickerFree(fmt.Sprintf("Error loading state: %v\n", err))
@@ -373,7 +399,7 @@ func drawTailFrame(repo string) error {
 		fmt.Fprintln(&buf, "No active work items.")
 		fmt.Fprintf(&buf, "\n  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
 	} else {
-		renderTailView(&buf, items, rows-2, cols)
+		renderTailView(&buf, items, rows-2, cols, logCache)
 		fmt.Fprintf(&buf, "  Updated: %s  (every 1s, Ctrl+C to quit)\n", time.Now().Format("15:04:05"))
 	}
 	writeFrameFlickerFree(buf.String())

@@ -313,8 +313,12 @@ func runForeground(_ *cobra.Command, _ []string) error {
 	fmt.Print("\033[?25l")
 	defer fmt.Print("\033[?25h\n")
 
+	// logCache retains the most recent log lines per work item to avoid
+	// flickering during session transitions (see renderTailView).
+	logCache := make(map[string][]string)
+
 	// Draw immediately on first run
-	_ = drawTailFrame(agentRepo)
+	_ = drawTailFrame(agentRepo, logCache)
 
 	for {
 		select {
@@ -324,7 +328,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 			clearScreen()
 			return nil
 		case <-ticker.C:
-			_ = drawTailFrame(agentRepo)
+			_ = drawTailFrame(agentRepo, logCache)
 		}
 	}
 }
