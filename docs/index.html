@@ -1085,11 +1085,18 @@
             <a href="#overview" class="sidebar-link active">Overview</a>
             <a href="#how-it-works" class="sidebar-link">How it works</a>
             <a href="#install" class="sidebar-link">Installation</a>
+            <a href="#quickstart-github" class="sidebar-sublink">GitHub</a>
+            <a href="#quickstart-asana" class="sidebar-sublink">Asana</a>
+            <a href="#quickstart-linear" class="sidebar-sublink">Linear</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
             <a href="#workflow" class="sidebar-link">Configuration</a>
             <a href="#states" class="sidebar-link">State types</a>
+            <a href="#state-task" class="sidebar-sublink">task</a>
+            <a href="#state-wait" class="sidebar-sublink">wait</a>
+            <a href="#state-choice" class="sidebar-sublink">choice</a>
+            <a href="#state-pass" class="sidebar-sublink">pass</a>
             <a href="#error-handling" class="sidebar-link">Error handling</a>
             <a href="#hooks" class="sidebar-link">Hooks</a>
           </li>
@@ -1130,9 +1137,9 @@
           <h1>erg<span style="color: var(--accent)">.</span></h1>
           <p class="hero-tagline">label an issue. ship a PR.</p>
           <p>
-            Autonomous headless daemon for Claude Code. Polls for issues, writes
-            code in containerized sessions, opens PRs, addresses review
-            comments, and merges &mdash; no human in the loop.
+            Autonomous headless daemon for Claude Code. Polls GitHub, Asana, or
+            Linear for issues, starts containerized Claude sessions, and drives
+            the full PR lifecycle &mdash; as automated as your workflow allows.
           </p>
           <div class="hero-cta">
             <a href="#install" class="btn btn-primary">install</a>
@@ -1197,49 +1204,58 @@
         <!-- How it works -->
         <h2 id="how-it-works">How it works</h2>
         <p>
-          The daemon runs a continuous loop: poll for labeled issues, spin up
-          containerized Claude sessions, and manage the full PR lifecycle.
+          At its core, erg is a <strong>state machine engine paired with AI
+          coding</strong>. Each issue becomes a work item that advances through
+          a configurable flowchart of states — from AI-generated code to a
+          merged PR. You define exactly how much automation applies: require
+          human review, auto-merge after CI, loop back for fixes, or notify
+          external systems at any step.
         </p>
         <ol class="steps-list">
           <li>
             <div class="step-body">
-              <h4>Label an issue</h4>
-              <p>Add the <code>queued</code> label to a GitHub issue.</p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Agent picks up</h4>
+              <h4>Tag or label an issue</h4>
               <p>
-                The daemon polls and starts a containerized Claude Code session
-                on a fresh branch.
+                Mark a task in GitHub, Asana, or Linear with the configured
+                trigger label (e.g. <code>queued</code>).
               </p>
             </div>
           </li>
           <li>
             <div class="step-body">
-              <h4>Claude codes</h4>
+              <h4>Daemon picks it up</h4>
               <p>
-                Autonomous coding with full tool access inside the container
-                sandbox.
+                erg creates a branch and starts a containerized Claude Code
+                session with full tool access to the codebase.
               </p>
             </div>
           </li>
           <li>
             <div class="step-body">
-              <h4>PR opened</h4>
+              <h4>Claude writes code</h4>
               <p>
-                A pull request is created with a closing reference to the
-                original issue.
+                Claude reads the issue, implements the changes, runs tests,
+                and commits to the branch.
               </p>
             </div>
           </li>
           <li>
             <div class="step-body">
-              <h4>Review + merge</h4>
+              <h4>State machine advances</h4>
               <p>
-                The agent addresses review feedback, waits for CI, and
-                auto-merges on approval.
+                The workflow engine moves the item through your configured
+                states: open a PR, wait for CI, request review, auto-fix
+                failures, merge.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Your rules, your automation</h4>
+              <p>
+                Every transition, timeout, retry, and notification is defined
+                in <code>.erg/workflow.yaml</code>. The built-in default
+                handles most projects out of the box.
               </p>
             </div>
           </li>
@@ -1268,37 +1284,113 @@
           </button>
         </div>
 
-        <h3>Quick start</h3>
-        <p>After installation, start the daemon pointed at your repo:</p>
+        <h3 id="quickstart-github">Quick start: GitHub</h3>
+        <p>
+          GitHub issues are the simplest starting point. erg uses the
+          <code>gh</code> CLI for all GitHub operations, so install and
+          authenticate it first.
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>gh auth login</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'gh auth login')">copy</button>
+        </div>
+        <p>
+          Scaffold a default workflow config in your repo, then start the
+          daemon:
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>erg workflow init --repo /path/to/repo</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'erg workflow init --repo /path/to/repo')">copy</button>
+        </div>
         <div class="install-block">
           <span class="prompt-char">$</span>
           <code>erg start --repo owner/repo</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'erg start --repo owner/repo')"
-          >
-            copy
-          </button>
+          <button class="copy-btn" onclick="copyCmd(this, 'erg start --repo owner/repo')">copy</button>
         </div>
         <p>
-          This forks into the background, prints the daemon PID and log path,
-          and returns your terminal. Use <code>erg start -f</code> to stay in
-          the foreground with a live status display, <code>erg status</code> for
-          a one-shot summary, or <code>erg status --tail</code> for a live
-          split-screen view of active session logs. Use <code>erg stop</code> to
-          gracefully shut down the daemon.
+          Label a GitHub issue <code>queued</code> and erg will pick it up on
+          the next poll cycle. Use <code>erg status</code> to check progress or
+          <code>erg stop</code> to shut down the daemon.
         </p>
+
+        <h3 id="quickstart-asana">Quick start: Asana</h3>
         <p>
-          Label a GitHub issue with <code>queued</code> and the agent will pick
-          it up on the next poll cycle.
+          To poll Asana tasks, create a Personal Access Token at
+          <a href="https://app.asana.com/0/my-apps">app.asana.com/0/my-apps</a>
+          and export it:
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>export ASANA_PAT=your_personal_access_token</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'export ASANA_PAT=your_personal_access_token')">copy</button>
+        </div>
+        <p>
+          Scaffold a workflow, then edit <code>.erg/workflow.yaml</code> to set
+          the Asana provider and your project GID (found in the Asana project
+          URL: <code>app.asana.com/0/&lt;PROJECT_GID&gt;/...</code>):
+        </p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">.erg/workflow.yaml (source block)</span>
+          </div>
+          <pre><span class="ck">source:</span>
+  <span class="ck">provider:</span> <span class="cv">asana</span>
+  <span class="ck">filter:</span>
+    <span class="ck">project:</span> <span class="cv">YOUR_ASANA_PROJECT_GID</span>
+    <span class="ck">label:</span> <span class="cv">queued</span>    <span class="cc"># Asana tag name (case-insensitive)</span></pre>
+        </div>
+        <p>
+          Start the daemon and tag an Asana task with <code>queued</code>. erg
+          will poll the project and pick it up automatically.
+        </p>
+
+        <h3 id="quickstart-linear">Quick start: Linear</h3>
+        <p>
+          To poll Linear issues, create a Personal API key at
+          <strong>Linear → Settings → API → Personal API keys</strong>
+          and export it:
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>export LINEAR_API_KEY=your_api_key</code>
+          <button class="copy-btn" onclick="copyCmd(this, 'export LINEAR_API_KEY=your_api_key')">copy</button>
+        </div>
+        <p>
+          Find your team ID at <strong>Linear → Settings → Teams → &lt;Your
+          Team&gt; → Team ID</strong>, then configure the workflow:
+        </p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">.erg/workflow.yaml (source block)</span>
+          </div>
+          <pre><span class="ck">source:</span>
+  <span class="ck">provider:</span> <span class="cv">linear</span>
+  <span class="ck">filter:</span>
+    <span class="ck">team:</span> <span class="cv">YOUR_LINEAR_TEAM_ID</span>
+    <span class="ck">label:</span> <span class="cv">queued</span>    <span class="cc"># Linear label (case-insensitive)</span></pre>
+        </div>
+        <p>
+          Start the daemon and label a Linear issue <code>queued</code>. erg
+          will poll the team and begin processing it.
         </p>
 
         <!-- Workflow configuration -->
         <h2 id="workflow">Workflow configuration</h2>
         <p>
-          Drop a <code>.erg/workflow.yaml</code> in your repo to define states,
-          actions, events, and transitions. Or skip it and let the defaults
-          handle everything.
+          A workflow is a directed flowchart that routes each issue from the
+          first commit to a merged PR. You define <em>states</em> (nodes),
+          the actions or events that drive each state, and the transitions
+          between them. Run <code>erg workflow init</code> inside your repo to
+          scaffold a starting point, or omit the file entirely to use the
+          built-in defaults.
+        </p>
+        <p>
+          The <code>settings</code> block controls daemon-level behaviour:
+          concurrency limits, branch naming, merge strategy, and session
+          constraints. The <code>source</code> block selects the issue provider
+          and filter. The <code>states</code> block is the flowchart itself.
         </p>
 
         <h3>Pipeline overview</h3>
@@ -1442,6 +1534,107 @@
           </tbody>
         </table>
 
+        <h3 id="state-task">task</h3>
+        <p>
+          A <code>task</code> state executes a registered action and then
+          transitions to <code>next</code> on success or <code>error</code> on
+          failure. Every action that calls an external API (GitHub, Asana,
+          Linear, git remotes) should define a <code>retry</code> block.
+          Network failures are transient — without retry, a momentary outage
+          permanently fails the work item.
+        </p>
+        <div class="code-block">
+          <div class="code-header"><span class="code-filename">retry example</span></div>
+          <pre><span class="ck">open_pr:</span>
+  <span class="ck">type:</span> <span class="cs">task</span>
+  <span class="ck">action:</span> <span class="ca">github.create_pr</span>
+  <span class="ck">retry:</span>
+    - <span class="ck">max_attempts:</span> <span class="cv">3</span>
+      <span class="ck">interval:</span> <span class="cv">15s</span>
+      <span class="ck">backoff_rate:</span> <span class="cv">2.0</span>   <span class="cc"># waits 15s, 30s, 60s</span>
+  <span class="ck">next:</span> <span class="cv">await_review</span>
+  <span class="ck">error:</span> <span class="cv">failed</span></pre>
+        </div>
+        <p>
+          Use <code>catch</code> to route specific error types to recovery
+          states instead of the generic <code>error</code> edge. Use
+          <code>before</code> hooks to run setup scripts (blocking) and
+          <code>after</code> hooks for teardown (fire-and-forget).
+        </p>
+
+        <h3 id="state-wait">wait</h3>
+        <p>
+          A <code>wait</code> state polls for an external event on each daemon
+          tick. It does not advance until the event fires. Always set a
+          <code>timeout</code> to prevent indefinite waits &mdash; use
+          <code>timeout_next</code> to route the timeout to a dedicated state
+          (e.g. post a comment) rather than the generic <code>error</code> edge.
+        </p>
+        <div class="code-block">
+          <div class="code-header"><span class="code-filename">wait example</span></div>
+          <pre><span class="ck">await_review:</span>
+  <span class="ck">type:</span> <span class="cs">wait</span>
+  <span class="ck">event:</span> <span class="ca">pr.reviewed</span>
+  <span class="ck">timeout:</span> <span class="cv">72h</span>
+  <span class="ck">timeout_next:</span> <span class="cv">nudge_reviewers</span>
+  <span class="ck">params:</span>
+    <span class="ck">auto_address:</span> <span class="cv">true</span>          <span class="cc"># Claude addresses feedback while waiting</span>
+    <span class="ck">max_feedback_rounds:</span> <span class="cv">3</span>
+  <span class="ck">next:</span> <span class="cv">merge</span>
+  <span class="ck">error:</span> <span class="cv">failed</span></pre>
+        </div>
+        <p>
+          The <code>pr.mergeable</code> event is a shorthand that combines
+          <code>pr.reviewed</code> and <code>ci.complete</code> into a single
+          wait state. Use it for simple pipelines where you want both conditions
+          satisfied before proceeding.
+        </p>
+
+        <h3 id="state-choice">choice</h3>
+        <p>
+          A <code>choice</code> state reads values from the accumulated step
+          data and branches to different states based on rules. Each rule
+          specifies a <code>variable</code>, an <code>equals</code> value, and
+          a <code>next</code> state. The <code>default</code> route fires when
+          no rule matches.
+        </p>
+        <div class="code-block">
+          <div class="code-header"><span class="code-filename">choice example</span></div>
+          <pre><span class="ck">check_ci:</span>
+  <span class="ck">type:</span> <span class="cs">choice</span>
+  <span class="ck">choices:</span>
+    - <span class="ck">variable:</span> <span class="cv">ci_passed</span>
+      <span class="ck">equals:</span> <span class="cv">true</span>
+      <span class="ck">next:</span> <span class="cv">request_reviewer</span>
+    - <span class="ck">variable:</span> <span class="cv">ci_failed</span>
+      <span class="ck">equals:</span> <span class="cv">true</span>
+      <span class="ck">next:</span> <span class="cv">fix_ci</span>
+  <span class="ck">default:</span> <span class="cv">failed</span></pre>
+        </div>
+        <p>
+          Choice states are the branching points of your flowchart. Combine
+          them with <code>pass</code> states to make decisions on injected
+          configuration flags, or with CI/review wait states to route on
+          outcomes.
+        </p>
+
+        <h3 id="state-pass">pass</h3>
+        <p>
+          A <code>pass</code> state injects static data into the workflow
+          context and immediately transitions to <code>next</code>. Use it at
+          the start of a workflow to set configuration flags that downstream
+          <code>choice</code> states can inspect.
+        </p>
+        <div class="code-block">
+          <div class="code-header"><span class="code-filename">pass example</span></div>
+          <pre><span class="ck">configure:</span>
+  <span class="ck">type:</span> <span class="cs">pass</span>
+  <span class="ck">data:</span>
+    <span class="ck">close_issue_on_merge:</span> <span class="cv">true</span>
+    <span class="ck">max_ci_fix_rounds:</span> <span class="cv">3</span>
+  <span class="ck">next:</span> <span class="cv">coding</span></pre>
+        </div>
+
         <!-- Error handling -->
         <h3 id="error-handling">Error handling</h3>
         <div class="info-grid">
@@ -1493,6 +1686,10 @@
 
         <!-- CLI reference -->
         <h2 id="cli">CLI commands</h2>
+        <p>
+          The most commonly used commands are listed below. Run any command with
+          <code>-h</code> to see all available flags.
+        </p>
         <table class="cli-table">
           <thead>
             <tr>
@@ -1503,59 +1700,39 @@
           <tbody>
             <tr>
               <td><code>erg start --repo owner/repo</code></td>
-              <td>Fork/detach daemon for a repository (prints PID and exits)</td>
+              <td>Start daemon in the background (prints PID and exits)</td>
             </tr>
             <tr>
               <td><code>erg start -f --repo owner/repo</code></td>
-              <td>Run in foreground with live status display</td>
-            </tr>
-            <tr>
-              <td><code>erg start --once --repo owner/repo</code></td>
-              <td>Process one tick and exit (implies <code>-f</code>)</td>
+              <td>Start in foreground with live status display</td>
             </tr>
             <tr>
               <td><code>erg stop</code></td>
-              <td>Send SIGTERM to the running daemon for graceful shutdown</td>
+              <td>Gracefully shut down the running daemon</td>
             </tr>
             <tr>
               <td><code>erg status</code></td>
-              <td>One-shot daemon status summary (PID, uptime, counts, spend)</td>
+              <td>Show daemon status (PID, uptime, active sessions)</td>
             </tr>
             <tr>
               <td><code>erg status --tail</code></td>
-              <td>Live split-screen log view — one column per active session, refreshes every second</td>
+              <td>Live split-screen log view — one column per active session</td>
             </tr>
             <tr>
-              <td><code>erg status --repo owner/repo</code></td>
-              <td>Check status for a specific repository</td>
+              <td><code>erg workflow init</code></td>
+              <td>Scaffold a <code>.erg/workflow.yaml</code> in the current repo</td>
             </tr>
             <tr>
-              <td><code>erg --debug</code></td>
-              <td>Enable debug logging (on by default)</td>
+              <td><code>erg workflow validate</code></td>
+              <td>Validate the workflow config for errors</td>
             </tr>
             <tr>
-              <td><code>erg -q</code></td>
-              <td>Quiet mode (info level only)</td>
+              <td><code>erg workflow visualize</code></td>
+              <td>Emit a Mermaid diagram of the current workflow</td>
             </tr>
             <tr>
               <td><code>erg clean</code></td>
               <td>Clear daemon state and lock files</td>
-            </tr>
-            <tr>
-              <td><code>erg clean -y</code></td>
-              <td>Clear without confirmation prompt</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow init</code></td>
-              <td>Scaffold a new workflow config</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow validate</code></td>
-              <td>Check workflow config for errors</td>
-            </tr>
-            <tr>
-              <td><code>erg workflow visualize</code></td>
-              <td>Emit a Mermaid diagram of the workflow</td>
             </tr>
           </tbody>
         </table>
