@@ -2367,3 +2367,54 @@ func TestDockerRecovery_ResumesDockerPendingItems(t *testing.T) {
 		t.Errorf("expected empty error message after Docker recovery, got %q", item.ErrorMessage)
 	}
 }
+
+// TestDockerDownAndRecovery_FullCycle exercises the full tick() cycle:
+// Docker goes down so items stay in docker_pending, then Docker recovers
+// and the item is reset to idle/active via the next tick.
+func TestDockerDownAndRecovery_FullCycle(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+	d.loadWorkflowConfigs()
+
+	dockerUp := true
+	d.dockerHealthCheck = func() error {
+		if dockerUp {
+			return nil
+		}
+		return fmt.Errorf("Cannot connect to the Docker daemon")
+	}
+
+	// Add a work item in docker_pending state (simulating post-failure).
+	// AddWorkItem resets State/Phase, so we use UpdateWorkItem afterward.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		CurrentStep: "coding",
+		StepData:    map[string]any{},
+	})
+	d.state.UpdateWorkItem("item-1", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+		it.Phase = "docker_pending"
+		it.ErrorMessage = "Docker unavailable: Cannot connect to the Docker daemon"
+	})
+
+	// Tick with Docker down — item should stay in docker_pending
+	dockerUp = false
+	d.tick(context.Background())
+	item := d.state.GetWorkItem("item-1")
+	if item.Phase != "docker_pending" {
+		t.Errorf("expected docker_pending phase during outage, got %s", item.Phase)
+	}
+
+	// Tick with Docker recovered — item should be reset to idle
+	dockerUp = true
+	d.tick(context.Background())
+	item = d.state.GetWorkItem("item-1")
+	if item.Phase != "idle" {
+		t.Errorf("expected idle phase after recovery, got %s", item.Phase)
+	}
+	if item.State != daemonstate.WorkItemActive {
+		t.Errorf("expected active state after recovery, got %s", item.State)
+	}
+}
