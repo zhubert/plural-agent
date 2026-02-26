@@ -22,17 +22,23 @@ Or [build from source](#build-from-source).
 ## Quick Start
 
 ```bash
-erg --repo owner/repo
+erg start --repo owner/repo
 ```
 
 This forks into the background, prints the PID and log path, and exits. Label a GitHub issue `queued` and erg picks it up automatically.
 
 ```bash
-erg -f --repo owner/repo   # Stay in foreground with live status display
-erg status                  # One-shot daemon status summary
+erg start -f --repo owner/repo   # Stay in foreground with live status display
+erg status                        # One-shot daemon status summary
+erg status --tail                 # Live split-screen view per active session
+erg stop                          # Graceful shutdown
 ```
 
 For Asana or Linear, configure the [workflow source](https://zhubert.com/erg/).
+
+## Workflow Configuration
+
+Drop a `.erg/workflow.yaml` in your repo to customize the pipeline — polling source, merge strategy, concurrency, timeouts, and state machine transitions. See `examples/` for ready-made configs or the [full docs](https://zhubert.com/erg/) for all options.
 
 ## How It Works
 
