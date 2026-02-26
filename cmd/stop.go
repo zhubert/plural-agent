@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -12,6 +15,9 @@ import (
 )
 
 var stopRepo string
+
+// findDaemonPIDsFunc is injectable for testing.
+var findDaemonPIDsFunc = findDaemonPIDs
 
 var stopCmd = &cobra.Command{
 	Use:   "stop",
@@ -43,27 +49,62 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 
 	pid, running := daemonstate.ReadLockStatus(repo)
-	if pid == 0 {
+
+	// Happy path: lock file has a valid, running PID
+	if pid != 0 && running {
+		return signalDaemon(pid)
+	}
+
+	// Stale lock: PID exists but process is dead
+	if pid != 0 && !running {
+		fmt.Printf("Lock file has stale PID %d (process dead), cleaning up\n", pid)
+		daemonstate.ClearLockForRepo(repo)
+	}
+
+	// Fallback: scan for daemon processes matching this repo
+	pids := findDaemonPIDsFunc(repo)
+	if len(pids) == 0 {
 		fmt.Println("Daemon is not running")
 		return nil
 	}
 
-	if !running {
-		fmt.Printf("Daemon process (PID %d) is no longer alive\n", pid)
-		fmt.Println("Use 'erg clean' to remove stale lock files")
-		return nil
+	fmt.Printf("Found %d orphaned daemon process(es) via process scan\n", len(pids))
+	for _, p := range pids {
+		if err := signalDaemon(p); err != nil {
+			fmt.Printf("  Warning: failed to signal PID %d: %v\n", p, err)
+		}
 	}
 
+	// Clean up any stale lock files
+	daemonstate.ClearLockForRepo(repo)
+	return nil
+}
+
+// signalDaemon sends SIGTERM to the given PID and prints confirmation.
+func signalDaemon(pid int) error {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("could not find process %d: %w", pid, err)
 	}
-
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("failed to send SIGTERM to daemon (PID %d): %w", pid, err)
+		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
+	}
+	fmt.Printf("Sent SIGTERM to daemon (PID %d)\n", pid)
+	return nil
+}
+
+// findDaemonPIDs uses pgrep to find daemon processes for the given repo.
+func findDaemonPIDs(repo string) []int {
+	out, err := exec.Command("pgrep", "-f", fmt.Sprintf("--_daemon --repo %s", repo)).Output()
+	if err != nil {
+		return nil
 	}
 
-	fmt.Printf("Sent SIGTERM to daemon (PID %d)\n", pid)
-	fmt.Println("Use 'erg status' to verify shutdown")
-	return nil
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if p, err := strconv.Atoi(strings.TrimSpace(line)); err == nil && p != os.Getpid() {
+			pids = append(pids, p)
+		}
+	}
+	return pids
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -32,10 +33,15 @@ func TestStopCmdRegisteredOnRoot(t *testing.T) {
 // returns no error when no lock file exists for the repo.
 func TestRunStop_NoDaemonRunning(t *testing.T) {
 	origRepo := stopRepo
-	defer func() { stopRepo = origRepo }()
+	origFindPIDs := findDaemonPIDsFunc
+	defer func() {
+		stopRepo = origRepo
+		findDaemonPIDsFunc = origFindPIDs
+	}()
 
 	// Use a path that will never have a lock file
 	stopRepo = filepath.Join(t.TempDir(), "no-daemon-repo")
+	findDaemonPIDsFunc = func(repo string) []int { return nil }
 
 	out := captureStdoutStop(t, func() {
 		if err := runStop(&cobra.Command{}, nil); err != nil {
@@ -52,9 +58,14 @@ func TestRunStop_NoDaemonRunning(t *testing.T) {
 // --repo path that has no running daemon.
 func TestRunStop_ExplicitRepoNoDaemon(t *testing.T) {
 	origRepo := stopRepo
-	defer func() { stopRepo = origRepo }()
+	origFindPIDs := findDaemonPIDsFunc
+	defer func() {
+		stopRepo = origRepo
+		findDaemonPIDsFunc = origFindPIDs
+	}()
 
 	stopRepo = "/nonexistent/path/to/repo/with/no/daemon"
+	findDaemonPIDsFunc = func(repo string) []int { return nil }
 
 	out := captureStdoutStop(t, func() {
 		if err := runStop(&cobra.Command{}, nil); err != nil {
@@ -64,6 +75,63 @@ func TestRunStop_ExplicitRepoNoDaemon(t *testing.T) {
 
 	if out == "" {
 		t.Error("expected 'Daemon is not running' output")
+	}
+}
+
+func TestRunStop_StaleProcess_FallsBackToPgrep(t *testing.T) {
+	origRepo := stopRepo
+	origFindPIDs := findDaemonPIDsFunc
+	defer func() {
+		stopRepo = origRepo
+		findDaemonPIDsFunc = origFindPIDs
+	}()
+
+	// Use a path with no lock file
+	stopRepo = filepath.Join(t.TempDir(), "orphan-repo")
+
+	// Mock pgrep to return no PIDs (no orphans found)
+	findDaemonPIDsFunc = func(repo string) []int {
+		return []int{}
+	}
+
+	out := captureStdoutStop(t, func() {
+		err := runStop(&cobra.Command{}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "not running") {
+		t.Errorf("expected 'not running' output, got: %s", out)
+	}
+}
+
+func TestRunStop_OrphanedProcessFound(t *testing.T) {
+	origRepo := stopRepo
+	origFindPIDs := findDaemonPIDsFunc
+	defer func() {
+		stopRepo = origRepo
+		findDaemonPIDsFunc = origFindPIDs
+	}()
+
+	stopRepo = filepath.Join(t.TempDir(), "orphan-repo-2")
+
+	// Mock pgrep to find an orphaned process with a PID that doesn't exist.
+	// signalDaemon will return an error but runStop handles it gracefully
+	// with a warning message.
+	findDaemonPIDsFunc = func(repo string) []int {
+		return []int{999999999}
+	}
+
+	out := captureStdoutStop(t, func() {
+		err := runStop(&cobra.Command{}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "orphaned daemon process") {
+		t.Errorf("expected orphaned process message, got: %s", out)
 	}
 }
 
