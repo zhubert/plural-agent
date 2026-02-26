@@ -3740,7 +3740,7 @@ func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	}
 
 	// Verify rounds incremented
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	rounds := getConflictRounds(item.StepData)
 	if rounds != 1 {
 		t.Errorf("expected conflict_rounds=1, got %d", rounds)
@@ -3801,7 +3801,7 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	}
 
 	// Verify rounds incremented
-	item := d.state.GetWorkItem("item-1")
+	item, _ := d.state.GetWorkItem("item-1")
 	rounds := getConflictRounds(item.StepData)
 	if rounds != 1 {
 		t.Errorf("expected conflict_rounds=1, got %d", rounds)
