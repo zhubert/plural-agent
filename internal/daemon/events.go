@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/zhubert/erg/internal/git"
@@ -27,6 +29,8 @@ func (c *EventChecker) CheckEvent(ctx context.Context, event string, params *wor
 		return c.checkCIComplete(ctx, params, item)
 	case "pr.mergeable":
 		return c.checkPRMergeable(ctx, params, item)
+	case "gate.approved":
+		return c.checkGateApproved(ctx, params, item)
 	default:
 		return false, nil, nil
 	}
@@ -266,4 +270,104 @@ func (c *EventChecker) checkPRMergeable(ctx context.Context, params *workflow.Pa
 		"review_approved": true,
 		"ci_passed":       true,
 	}, nil
+}
+
+// checkGateApproved implements the gate.approved event.
+// It pauses the workflow until a human provides an explicit approval signal
+// on the GitHub issue. Two trigger modes are supported:
+//
+//   - label_added (default): fires when the configured label is present on the issue.
+//   - comment_match: fires when a comment matching the configured regex pattern is
+//     posted after the gate step was entered.
+//
+// Params:
+//
+//	trigger         - "label_added" (default) or "comment_match"
+//	label           - label name to check for (trigger=label_added)
+//	comment_pattern - regex pattern to match against comment bodies (trigger=comment_match)
+func (c *EventChecker) checkGateApproved(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+	d := c.daemon
+	log := d.logger.With("workItem", item.ID, "event", "gate.approved")
+
+	// Resolve issue number from the work item's IssueRef.
+	workItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		log.Warn("work item not found")
+		return false, nil, nil
+	}
+	if workItem.IssueRef.Source != "github" {
+		log.Debug("gate.approved only supports github issues", "source", workItem.IssueRef.Source)
+		return false, nil, nil
+	}
+	issueNumber, err := strconv.Atoi(workItem.IssueRef.ID)
+	if err != nil {
+		log.Warn("invalid issue number", "id", workItem.IssueRef.ID, "error", err)
+		return false, nil, nil
+	}
+
+	repoPath := item.RepoPath
+	if repoPath == "" {
+		log.Warn("no repo path for work item")
+		return false, nil, nil
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	trigger := params.String("trigger", "label_added")
+
+	switch trigger {
+	case "label_added":
+		label := params.String("label", "approved")
+		log.Debug("checking for label", "label", label, "issueNumber", issueNumber)
+
+		hasLabel, err := d.gitService.CheckIssueHasLabel(pollCtx, repoPath, issueNumber, label)
+		if err != nil {
+			log.Debug("failed to check issue label", "error", err)
+			return false, nil, nil
+		}
+		if hasLabel {
+			log.Info("gate label found on issue", "label", label)
+			return true, map[string]any{"gate_approved": true, "gate_trigger": "label_added", "gate_label": label}, nil
+		}
+		log.Debug("gate label not yet present", "label", label)
+		return false, nil, nil
+
+	case "comment_match":
+		pattern := params.String("comment_pattern", "")
+		if pattern == "" {
+			log.Warn("comment_match trigger requires comment_pattern param")
+			return false, nil, nil
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			log.Warn("invalid comment_pattern regex", "pattern", pattern, "error", err)
+			return false, nil, nil
+		}
+
+		log.Debug("checking for matching comment", "pattern", pattern, "issueNumber", issueNumber, "since", item.StepEnteredAt)
+
+		comments, err := d.gitService.GetIssueComments(pollCtx, repoPath, issueNumber)
+		if err != nil {
+			log.Debug("failed to fetch issue comments", "error", err)
+			return false, nil, nil
+		}
+
+		for _, comment := range comments {
+			// Only consider comments posted after the gate step was entered.
+			if !item.StepEnteredAt.IsZero() && !comment.CreatedAt.After(item.StepEnteredAt) {
+				continue
+			}
+			if re.MatchString(comment.Body) {
+				log.Info("gate comment pattern matched", "pattern", pattern, "author", comment.Author)
+				return true, map[string]any{"gate_approved": true, "gate_trigger": "comment_match", "gate_comment_author": comment.Author}, nil
+			}
+		}
+		log.Debug("no matching comment found")
+		return false, nil, nil
+
+	default:
+		log.Warn("unknown gate trigger", "trigger", trigger)
+		return false, nil, nil
+	}
 }
