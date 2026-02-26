@@ -69,6 +69,8 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	fmt.Println("Starting to erg...")
+
 	// Create services
 	sessSvc := session.NewSessionService()
 
@@ -109,6 +111,10 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
+
+		if !container.ImageExists(ctx, detected, version) {
+			fmt.Println("Building container image (this may take a few minutes)...")
+		}
 
 		image, err := container.EnsureImage(ctx, detected, version, buildLogger)
 		if err != nil {
