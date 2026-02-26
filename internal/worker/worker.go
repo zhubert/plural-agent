@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhubert/erg/internal/claude"
@@ -21,7 +22,7 @@ type SessionWorker struct {
 	session    *config.Session
 	runner     claude.RunnerInterface
 	initialMsg string
-	turns      int
+	turns      atomic.Int32 // written from run() goroutine; read externally — use atomics
 	startTime  time.Time
 
 	ctx    context.Context
@@ -29,8 +30,8 @@ type SessionWorker struct {
 	done   chan struct{}
 	once   sync.Once
 
-	exitErr         error // Set when the worker exits due to an error
-	apiErrorInStream bool  // Set when an API error is detected in streamed content
+	exitErr          atomic.Pointer[error] // written from run() goroutine; read externally — use atomics
+	apiErrorInStream bool                  // Set when an API error is detected in streamed content
 
 	// Per-session limit overrides (zero = use host defaults)
 	overrideMaxTurns    int
@@ -64,16 +65,16 @@ func NewDoneWorker() *SessionWorker {
 // Used by tests in other packages that need a completed-with-error worker.
 func NewDoneWorkerWithError(err error) *SessionWorker {
 	w := &SessionWorker{
-		done:    make(chan struct{}),
-		exitErr: err,
+		done: make(chan struct{}),
 	}
+	w.exitErr.Store(&err)
 	close(w.done)
 	return w
 }
 
 // Turns returns the number of completed turns.
 func (w *SessionWorker) Turns() int {
-	return w.turns
+	return int(w.turns.Load())
 }
 
 // SessionID returns the worker's session ID.
@@ -88,7 +89,7 @@ func (w *SessionWorker) InitialMsg() string {
 
 // SetTurns sets the number of completed turns (for testing).
 func (w *SessionWorker) SetTurns(n int) {
-	w.turns = n
+	w.turns.Store(int32(n))
 }
 
 // SetStartTime sets the worker start time (for testing).
@@ -115,7 +116,10 @@ func (w *SessionWorker) HasActiveChildren() bool {
 
 // ExitError returns the error that caused the worker to exit, or nil if it completed normally.
 func (w *SessionWorker) ExitError() error {
-	return w.exitErr
+	if p := w.exitErr.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // Start begins the worker's goroutine.
@@ -167,21 +171,22 @@ func (w *SessionWorker) run() {
 	for {
 		if err := w.processOneResponse(responseChan); err != nil {
 			log.Info("worker stopping", "reason", err.Error())
-			w.exitErr = err
+			w.exitErr.Store(&err)
 			return
 		}
 
 		// Check if the response contained an API error (e.g., 500 errors
 		// emitted as streamed text rather than as chunk.Error)
 		if w.apiErrorInStream {
-			w.exitErr = fmt.Errorf("API error detected in response stream")
+			apiErr := fmt.Errorf("API error detected in response stream")
+			w.exitErr.Store(&apiErr)
 			log.Warn("worker stopping due to API error in stream")
 			return
 		}
 
 		// Check limits
 		if w.checkLimits() {
-			log.Warn("autonomous limit reached", "turns", w.turns)
+			log.Warn("autonomous limit reached", "turns", w.turns.Load())
 			return
 		}
 
@@ -227,7 +232,7 @@ func (w *SessionWorker) processOneResponse(responseChan <-chan claude.ResponseCh
 		case chunk, ok := <-responseChan:
 			if !ok {
 				// Channel closed = done
-				w.turns++
+				w.turns.Add(1)
 				w.handleDone()
 				return nil
 			}
@@ -238,7 +243,7 @@ func (w *SessionWorker) processOneResponse(responseChan <-chan claude.ResponseCh
 			}
 
 			if chunk.Done {
-				w.turns++
+				w.turns.Add(1)
 				w.handleDone()
 				return nil
 			}
@@ -461,10 +466,11 @@ func (w *SessionWorker) checkLimits() bool {
 		maxDuration = w.overrideMaxDuration
 	}
 
-	if w.turns >= maxTurns {
+	currentTurns := int(w.turns.Load())
+	if currentTurns >= maxTurns {
 		w.host.Logger().Warn("turn limit reached",
 			"sessionID", w.sessionID,
-			"turns", w.turns,
+			"turns", currentTurns,
 			"max", maxTurns,
 		)
 		return true
