@@ -704,6 +704,32 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 	return workflow.ActionResult{Success: true, Async: true}
 }
 
+// createReleaseAction implements the github.create_release action.
+type createReleaseAction struct {
+	daemon *Daemon
+}
+
+// Execute creates a GitHub release for the work item. This is a synchronous action.
+// Required params: tag. Optional: title, notes, draft, prerelease, target.
+func (a *createReleaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	releaseURL, err := d.createRelease(ctx, item, ac.Params)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("github.create_release failed: %w", err)}
+	}
+
+	d.logger.Info("github release created", "workItem", item.ID, "url", releaseURL)
+	return workflow.ActionResult{
+		Success: true,
+		Data:    map[string]any{"release_url": releaseURL},
+	}
+}
+
 // slackNotifyAction implements the slack.notify action.
 type slackNotifyAction struct {
 	daemon *Daemon

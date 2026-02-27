@@ -2222,6 +2222,80 @@ func TestGetIssueComments_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCreateRelease_Success_GenerateNotes(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "create", "v1.2.3", "--generate-notes"}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.2.3\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	url, err := svc.CreateRelease(context.Background(), "/repo", "v1.2.3", "", "", false, false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/owner/repo/releases/tag/v1.2.3" {
+		t.Errorf("unexpected release URL: %s", url)
+	}
+}
+
+func TestCreateRelease_Success_CustomNotes(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "create", "v2.0.0", "--title", "Version 2", "--notes", "Breaking changes."}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/releases/tag/v2.0.0\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	url, err := svc.CreateRelease(context.Background(), "/repo", "v2.0.0", "Version 2", "Breaking changes.", false, false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/owner/repo/releases/tag/v2.0.0" {
+		t.Errorf("unexpected release URL: %s", url)
+	}
+}
+
+func TestCreateRelease_Success_DraftPrerelease(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "create", "v1.0.0-beta.1", "--generate-notes", "--draft", "--prerelease", "--target", "dev"}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.0.0-beta.1\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	url, err := svc.CreateRelease(context.Background(), "/repo", "v1.0.0-beta.1", "", "", true, true, "dev")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/owner/repo/releases/tag/v1.0.0-beta.1" {
+		t.Errorf("unexpected release URL: %s", url)
+	}
+}
+
+func TestCreateRelease_EmptyTag(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	svc := NewGitServiceWithExecutor(mock)
+
+	_, err := svc.CreateRelease(context.Background(), "/repo", "", "", "", false, false, "")
+	if err == nil {
+		t.Fatal("expected error for empty tag")
+	}
+}
+
+func TestCreateRelease_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "create", "v1.0.0", "--generate-notes"}, pexec.MockResponse{
+		Err: fmt.Errorf("gh: tag already exists"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.CreateRelease(context.Background(), "/repo", "v1.0.0", "", "", false, false, "")
+	if err == nil {
+		t.Fatal("expected error when gh CLI fails")
+	}
+	if !strings.Contains(err.Error(), "gh release create failed") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 func TestUpdatePRBody_Success(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddPrefixMatch("gh", []string{"pr", "edit", "feature-branch", "--body"}, pexec.MockResponse{})

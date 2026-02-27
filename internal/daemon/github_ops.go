@@ -550,6 +550,37 @@ func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, p
 	return nil
 }
 
+// createRelease creates a GitHub release for a work item.
+// Params:
+//   - tag (required): release tag name, e.g. "v1.2.3"
+//   - title (optional): release title; defaults to the tag name if empty
+//   - notes (optional): release notes body; if empty, GitHub auto-generates notes
+//   - draft (optional, default false): save as a draft release
+//   - prerelease (optional, default false): mark as a pre-release
+//   - target (optional): branch or SHA to tag; defaults to the repo's default branch
+func (d *Daemon) createRelease(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) (string, error) {
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return "", fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	tag := params.String("tag", "")
+	if tag == "" {
+		return "", fmt.Errorf("tag parameter is required")
+	}
+
+	title := params.String("title", "")
+	notes := params.String("notes", "")
+	draft := params.Bool("draft", false)
+	prerelease := params.Bool("prerelease", false)
+	target := params.String("target", "")
+
+	releaseCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	return d.gitService.CreateRelease(releaseCtx, repoPath, tag, title, notes, draft, prerelease, target)
+}
+
 // assignPR assigns the PR to specific users for a work item.
 func (d *Daemon) assignPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	sess := d.config.GetSession(item.SessionID)

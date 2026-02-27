@@ -6081,6 +6081,144 @@ func TestActionErrorWrapping(t *testing.T) {
 	})
 }
 
+func TestCreateReleaseAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &createReleaseAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(map[string]any{"tag": "v1.0.0"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestCreateReleaseAction_Execute_MissingTag(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &createReleaseAction{daemon: d}
+	// No "tag" param provided
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if result.Success {
+		t.Error("expected failure when tag is missing")
+	}
+	if result.Error == nil {
+		t.Error("expected error when tag is missing")
+	}
+}
+
+func TestCreateReleaseAction_Execute_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock `gh release create` to succeed
+	mockExec.AddPrefixMatch("gh", []string{"release", "create", "v1.0.0"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.0.0\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &createReleaseAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"tag": "v1.0.0"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if result.Data["release_url"] != "https://github.com/owner/repo/releases/tag/v1.0.0" {
+		t.Errorf("unexpected release_url in Data: %v", result.Data["release_url"])
+	}
+
+	// Verify gh release create was called
+	calls := mockExec.GetCalls()
+	found := false
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "release" && c.Args[1] == "create" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected gh release create to be called")
+	}
+}
+
+func TestCreateReleaseAction_Execute_GhError(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock `gh release create` to fail
+	mockExec.AddPrefixMatch("gh", []string{"release", "create"}, exec.MockResponse{
+		Err: errGHFailed,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &createReleaseAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"tag": "v1.0.0"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if result.Success {
+		t.Error("expected failure when gh CLI fails")
+	}
+	if result.Error == nil {
+		t.Error("expected error when gh CLI fails")
+	}
+}
+
 func TestWaitAction_Execute(t *testing.T) {
 	t.Run("completes after duration", func(t *testing.T) {
 		cfg := testConfig()
