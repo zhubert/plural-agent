@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/daemonstate"
@@ -89,13 +90,13 @@ func printMatrixView(w io.Writer, items []*daemonstate.WorkItem, cfg *workflow.C
 	// Determine state column width (auto-sized to longest state name)
 	stateColWidth := 8
 	for _, s := range path {
-		if len(s) > stateColWidth {
-			stateColWidth = len(s)
+		if n := utf8.RuneCountInString(s); n > stateColWidth {
+			stateColWidth = n
 		}
 	}
 	for step := range stepItems {
-		if len(step) > stateColWidth {
-			stateColWidth = len(step)
+		if n := utf8.RuneCountInString(step); n > stateColWidth {
+			stateColWidth = n
 		}
 	}
 
@@ -105,8 +106,8 @@ func printMatrixView(w io.Writer, items []*daemonstate.WorkItem, cfg *workflow.C
 	for i, item := range items {
 		h := formatIssue(item)
 		headers[i] = h
-		if len(h) > itemColWidth {
-			itemColWidth = len(h)
+		if n := utf8.RuneCountInString(h); n > itemColWidth {
+			itemColWidth = n
 		}
 	}
 
@@ -166,8 +167,8 @@ func printMatrixRow(w io.Writer, stateName string, items []*daemonstate.WorkItem
 		}
 		if step == stateName {
 			cell := formatCellInfo(item)
-			if len(cell) > itemColWidth {
-				cell = cell[:itemColWidth]
+			if cellRunes := []rune(cell); len(cellRunes) > itemColWidth {
+				cell = string(cellRunes[:itemColWidth])
 			}
 			fmt.Fprintf(w, "  %-*s", itemColWidth, cell)
 		} else {
@@ -247,7 +248,7 @@ func printMapView(w io.Writer, items []*daemonstate.WorkItem, cfg *workflow.Conf
 				labels = append(labels, formatIssue(item))
 			}
 			annotation := strings.Join(labels, ", ")
-			pad := 26 - len(stateName)
+			pad := 26 - utf8.RuneCountInString(stateName)
 			if pad < 1 {
 				pad = 1
 			}
@@ -270,7 +271,7 @@ func printMapView(w io.Writer, items []*daemonstate.WorkItem, cfg *workflow.Conf
 			labels = append(labels, formatIssue(item))
 		}
 		annotation := strings.Join(labels, ", ")
-		pad := 26 - len(step)
+		pad := 26 - utf8.RuneCountInString(step)
 		if pad < 1 {
 			pad = 1
 		}
@@ -385,8 +386,9 @@ func formatIssue(item *daemonstate.WorkItem) string {
 	default:
 		s = fmt.Sprintf("%s %s", ref.ID, ref.Title)
 	}
-	if len(s) > 30 {
-		s = s[:27] + "..."
+	runes := []rune(s)
+	if len(runes) > 30 {
+		s = string(runes[:27]) + "..."
 	}
 	return s
 }

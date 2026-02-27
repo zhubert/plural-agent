@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
-	"github.com/zhubert/erg/internal/config"
 )
 
 // ---- formatAgeAt ----
@@ -114,11 +115,42 @@ func TestFormatIssue_Truncation(t *testing.T) {
 		},
 	}
 	got := formatIssue(item)
-	if len(got) > 30 {
-		t.Errorf("expected truncation to 30 chars, got %d chars: %q", len(got), got)
+	if utf8.RuneCountInString(got) > 30 {
+		t.Errorf("expected truncation to 30 runes, got %d runes: %q", utf8.RuneCountInString(got), got)
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Errorf("expected truncated string to end with '...', got %q", got)
+	}
+}
+
+func TestFormatIssue_EmDash_NoTruncation(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Fix em\u2014dash bug"},
+	}
+	got := formatIssue(item)
+	want := "#42 Fix em\u2014dash bug"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestFormatIssue_EmDash_Truncation(t *testing.T) {
+	item := &daemonstate.WorkItem{
+		IssueRef: config.IssueRef{
+			Source: "github",
+			ID:     "42",
+			Title:  "Fix the em\u2014dash in the issue title here",
+		},
+	}
+	got := formatIssue(item)
+	if utf8.RuneCountInString(got) > 30 {
+		t.Errorf("expected truncation to 30 runes, got %d: %q", utf8.RuneCountInString(got), got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("expected truncated string to end with '...', got %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("expected valid UTF-8 after truncation, got invalid bytes: %q", got)
 	}
 }
 
