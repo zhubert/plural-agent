@@ -1754,6 +1754,192 @@ func TestMergeBaseIntoBranch_NonConflictFailure(t *testing.T) {
 	}
 }
 
+// --- SquashBranch tests ---
+
+func TestSquashBranch_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", "my squash message"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "my squash message")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSquashBranch_AutoMessage_SingleCommit(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("add feature X\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", "add feature X"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSquashBranch_AutoMessage_MultipleCommits(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	// git log newest-first: "third commit\nsecond commit\nfirst commit"
+	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("third commit\nsecond commit\nfirst commit\n"),
+	})
+	// After reversing: first commit is title, second and third are body
+	expectedMsg := "first commit\n\nsecond commit\nthird commit"
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", expectedMsg}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSquashBranch_FetchFails_FallsBackToLocal(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Err: fmt.Errorf("network unavailable"),
+	})
+	// Fallback: merge-base with local branch
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", "squash msg"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "squash msg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSquashBranch_NoCommits(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	// No commits on the branch
+	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "")
+	if err == nil {
+		t.Fatal("expected error when no commits to squash")
+	}
+	if !strings.Contains(err.Error(), "no commits to squash") {
+		t.Errorf("expected 'no commits to squash' error, got: %v", err)
+	}
+}
+
+func TestSquashBranch_MergeBaseFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
+		Err: fmt.Errorf("network error"),
+	})
+	// Both remote and local merge-base fail
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "main"}, pexec.MockResponse{
+		Err: fmt.Errorf("branch not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "msg")
+	if err == nil {
+		t.Fatal("expected error when merge-base fails")
+	}
+	if !strings.Contains(err.Error(), "failed to find merge base") {
+		t.Errorf("expected merge base error, got: %v", err)
+	}
+}
+
+func TestSquashBranch_ResetFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{
+		Err: fmt.Errorf("reset failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "msg")
+	if err == nil {
+		t.Fatal("expected error when reset fails")
+	}
+	if !strings.Contains(err.Error(), "git reset --soft") {
+		t.Errorf("expected reset error, got: %v", err)
+	}
+}
+
+func TestSquashBranch_CommitFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", "msg"}, pexec.MockResponse{
+		Err: fmt.Errorf("nothing to commit"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "msg")
+	if err == nil {
+		t.Fatal("expected error when commit fails")
+	}
+	if !strings.Contains(err.Error(), "git commit after squash") {
+		t.Errorf("expected commit error, got: %v", err)
+	}
+}
+
+func TestSquashBranch_PushFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"commit", "-m", "msg"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{
+		Err: fmt.Errorf("push rejected"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "msg")
+	if err == nil {
+		t.Fatal("expected error when push fails")
+	}
+	if !strings.Contains(err.Error(), "push --force-with-lease") {
+		t.Errorf("expected push error, got: %v", err)
+	}
+}
+
 // --- CheckIssueHasLabel tests ---
 
 func TestCheckIssueHasLabel_LabelPresent(t *testing.T) {

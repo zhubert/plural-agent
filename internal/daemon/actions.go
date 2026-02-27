@@ -422,6 +422,51 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 	return workflow.ActionResult{Success: true}
 }
 
+// squashAction implements the git.squash action.
+type squashAction struct {
+	daemon *Daemon
+}
+
+// Execute squashes all branch commits since divergence from the base branch into one.
+func (a *squashAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	// Refresh stale session to ensure worktree exists.
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	// Determine base branch.
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	message := ac.Params.String("message", "")
+
+	squashCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	if err := d.gitService.SquashBranch(squashCtx, workDir, item.Branch, baseBranch, message); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("squash failed: %w", err)}
+	}
+
+	d.logger.Info("squashed branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch)
+	return workflow.ActionResult{Success: true}
+}
+
 // resolveConflictsAction implements the ai.resolve_conflicts action.
 // It merges origin/main into the feature branch (leaving conflict markers),
 // then starts a Claude session to resolve the conflicts.
