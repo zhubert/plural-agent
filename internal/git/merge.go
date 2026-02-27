@@ -247,7 +247,8 @@ func (s *GitService) AbortMerge(ctx context.Context, repoPath string) error {
 // If issueRef is provided, appropriate link text will be added to the PR body based on the source.
 // baseBranch is the branch this PR should be compared against (typically the session's BaseBranch).
 // sessionID is used to load and upload the session transcript as a PR comment; pass "" to skip.
-func (s *GitService) CreatePR(ctx context.Context, repoPath, worktreePath, branch, baseBranch, commitMsg string, issueRef *config.IssueRef, sessionID string) <-chan Result {
+// draft controls whether the PR is created as a draft PR.
+func (s *GitService) CreatePR(ctx context.Context, repoPath, worktreePath, branch, baseBranch, commitMsg string, issueRef *config.IssueRef, sessionID string, draft bool) <-chan Result {
 	ch := make(chan Result)
 
 	go func() {
@@ -290,6 +291,9 @@ func (s *GitService) CreatePR(ctx context.Context, repoPath, worktreePath, branc
 			ch <- Result{Output: fmt.Sprintf("PR title: %s\n", prTitle)}
 			// Create PR with Claude-generated title and body
 			ghArgs = []string{"pr", "create", "--base", baseBranch, "--head", branch, "--title", prTitle, "--body", prBody}
+		}
+		if draft {
+			ghArgs = append(ghArgs, "--draft")
 		}
 
 		// Run gh pr create using the executor

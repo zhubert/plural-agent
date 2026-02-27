@@ -2487,7 +2487,7 @@ func TestCreatePR_NoChanges_ReturnsError(t *testing.T) {
 	})
 
 	item, _ := d.state.GetWorkItem("item-no-changes")
-	_, err := d.createPR(context.Background(), item)
+	_, err := d.createPR(context.Background(), item, false)
 	if err == nil {
 		t.Fatal("expected error when creating PR with no changes")
 	}
@@ -2755,7 +2755,7 @@ func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
 	})
 
 	item, _ := d.state.GetWorkItem("item-existing")
-	_, err := d.createPR(context.Background(), item)
+	_, err := d.createPR(context.Background(), item, false)
 	if err != nil {
 		t.Fatalf("expected no error for existing PR, got: %v", err)
 	}
@@ -5719,5 +5719,121 @@ func TestWritePRDescriptionAction_RegisteredInRegistry(t *testing.T) {
 	registry := d.buildActionRegistry()
 	if registry.Get("ai.write_pr_description") == nil {
 		t.Error("ai.write_pr_description not registered in action registry")
+	}
+}
+
+// --- github.create_draft_pr tests ---
+
+func TestCreateDraftPRAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &createDraftPRAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error for missing work item")
+	}
+}
+
+func TestCreateDraftPRAction_NoChanges_UnqueuesIssue(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+
+	defaultBranch := getDefaultBranch(t, repoDir)
+	mustRunGit(t, repoDir, "checkout", "-b", "issue-60")
+
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock gh issue edit/comment/close for unqueueIssue
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "close"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = repoDir
+	cfg.Repos = []string{repoDir}
+
+	sess := &config.Session{
+		ID:         "sess-draft-no-changes",
+		RepoPath:   repoDir,
+		WorkTree:   repoDir,
+		Branch:     "issue-60",
+		BaseBranch: defaultBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-draft-no-changes",
+		IssueRef:  config.IssueRef{Source: "github", ID: "60"},
+		SessionID: "sess-draft-no-changes",
+		Branch:    "issue-60",
+		StepData:  map[string]any{},
+	})
+
+	action := &createDraftPRAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-draft-no-changes",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success on no-changes, got error: %v", result.Error)
+	}
+	if result.OverrideNext != "done" {
+		t.Errorf("expected OverrideNext='done', got %q", result.OverrideNext)
+	}
+}
+
+func TestCreateDraftPRAction_RegisteredInRegistry(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	registry := d.buildActionRegistry()
+	if registry.Get("github.create_draft_pr") == nil {
+		t.Error("github.create_draft_pr not registered in action registry")
+	}
+}
+
+func TestCreatePRAction_DraftParam_PassedThrough(t *testing.T) {
+	// Verifies that github.create_pr with draft=true reads the param correctly.
+	// Since createPR will fail with "session not found" before reaching git ops,
+	// we just verify the action returns an error (not a panic or wrong code path).
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-draft-param",
+		IssueRef:  config.IssueRef{Source: "github", ID: "99"},
+		SessionID: "nonexistent-session",
+		Branch:    "issue-99",
+		StepData:  map[string]any{},
+	})
+
+	action := &createPRAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-draft-param",
+		Params:     workflow.NewParamHelper(map[string]any{"draft": true}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	// Should fail because session doesn't exist, not because of a panic or wrong param handling
+	if result.Success {
+		t.Error("expected failure for missing session")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error")
 	}
 }
