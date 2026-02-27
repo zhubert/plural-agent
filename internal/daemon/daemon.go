@@ -312,6 +312,7 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("ai.write_pr_description", &writePRDescriptionAction{daemon: d})
 	registry.Register("git.format", &formatAction{daemon: d})
 	registry.Register("git.rebase", &rebaseAction{daemon: d})
+	registry.Register("git.validate_diff", &validateDiffAction{daemon: d})
 	registry.Register("git.squash", &squashAction{daemon: d})
 	registry.Register("git.cherry_pick", &cherryPickAction{daemon: d})
 	registry.Register("ai.resolve_conflicts", &resolveConflictsAction{daemon: d})

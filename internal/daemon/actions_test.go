@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"slices"
@@ -5395,6 +5396,613 @@ func TestWebhookPostAction_Execute_CustomTimeout(t *testing.T) {
 
 	if !result.Success {
 		t.Errorf("expected success with custom timeout, got error: %v", result.Error)
+	}
+}
+
+// --- git.validate_diff tests ---
+
+// initTestGitRepoWithBranch initialises a temp git repo with one commit on the
+// default branch and checks out a new feature branch. Returns the repo dir and
+// the name of the default branch.
+func initTestGitRepoWithBranch(t *testing.T, featureBranch string) (string, string) {
+	t.Helper()
+	dir := initTestGitRepo(t)
+	defaultBranch := getDefaultBranch(t, dir)
+	mustRunGit(t, dir, "checkout", "-b", featureBranch)
+	return dir, defaultBranch
+}
+
+// writeTestFile writes content to a file inside the given repo directory.
+func writeTestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", name, err)
+	}
+}
+
+func TestValidateDiffAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestValidateDiffAction_Execute_SessionNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent-session",
+		Branch:    "feature-1",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestValidateDiff_NoDiff(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-empty")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-empty",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-empty",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	// Even with strict limits, an empty diff should pass.
+	params := workflow.NewParamHelper(map[string]any{
+		"max_diff_lines": 10,
+		"require_tests":  true,
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success for empty diff, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_MaxDiffLines_Pass(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-small")
+
+	writeTestFile(t, dir, "small.go", "package main\n\nfunc foo() {}\nfunc bar() {}\nfunc baz() {}\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add small file")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-small",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-small",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_diff_lines": 100})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success for diff under limit, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_MaxDiffLines_Fail(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-large")
+
+	lines := make([]string, 50)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("var x%d = %d", i, i)
+	}
+	writeTestFile(t, dir, "large.go", "package main\n\n"+strings.Join(lines, "\n")+"\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add large file")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-large",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-large",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	// Limit is 10 lines; we added 52+ lines — should fail.
+	params := workflow.NewParamHelper(map[string]any{"max_diff_lines": 10})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for diff over limit")
+	}
+	if result.Error == nil {
+		t.Error("expected error for diff over limit")
+	}
+	if !strings.Contains(result.Error.Error(), "diff too large") {
+		t.Errorf("expected 'diff too large' in error, got: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_ForbiddenPatterns_Pass(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-clean")
+
+	writeTestFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add main.go")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-clean",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-clean",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"forbidden_patterns": []interface{}{".env", "*.pem", "credentials.json"},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success with no forbidden files, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_ForbiddenPatterns_Fail(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-secret")
+
+	writeTestFile(t, dir, ".env", "SECRET_KEY=abc123\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "oops add .env")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-secret",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-secret",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"forbidden_patterns": []interface{}{".env", "*.pem"},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for forbidden file")
+	}
+	if result.Error == nil {
+		t.Error("expected error for forbidden file")
+	}
+	if !strings.Contains(result.Error.Error(), "forbidden file") {
+		t.Errorf("expected 'forbidden file' in error, got: %v", result.Error)
+	}
+	if !strings.Contains(result.Error.Error(), ".env") {
+		t.Errorf("expected '.env' in error, got: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_RequireTests_NoSourceChanges(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-docs")
+
+	// Only docs — no source files — should pass even with require_tests.
+	writeTestFile(t, dir, "docs.md", "# Docs\n\nsome documentation\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add docs")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-docs",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-docs",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"require_tests": true})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success when no source files changed, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_RequireTests_WithTestFile(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-with-tests")
+
+	writeTestFile(t, dir, "foo.go", "package main\n\nfunc Foo() {}\n")
+	writeTestFile(t, dir, "foo_test.go", "package main\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add foo with test")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-with-tests",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-with-tests",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"require_tests": true})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success with both source and test files, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_RequireTests_MissingTest(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-no-tests")
+
+	writeTestFile(t, dir, "bar.go", "package main\n\nfunc Bar() {}\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add bar without test")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-no-tests",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-no-tests",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"require_tests": true})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when source changed without tests")
+	}
+	if result.Error == nil {
+		t.Error("expected error when source changed without tests")
+	}
+	if !strings.Contains(result.Error.Error(), "no test files") {
+		t.Errorf("expected 'no test files' in error, got: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_MaxLockFileLines_Pass(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-smallsum")
+
+	writeTestFile(t, dir, "go.sum", "module1 v1.0.0 h1:abc\nmodule2 v2.0.0 h1:def\nmodule3 v3.0.0 h1:ghi\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "small go.sum update")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-smallsum",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-smallsum",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_lock_file_lines": 50})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success for small lock file change, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_MaxLockFileLines_Fail(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-bigsum")
+
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("module%d v1.0.%d h1:abc%d", i, i, i)
+	}
+	writeTestFile(t, dir, "go.sum", strings.Join(lines, "\n")+"\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "huge go.sum update")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-bigsum",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-bigsum",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_lock_file_lines": 20})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for large lock file change")
+	}
+	if result.Error == nil {
+		t.Error("expected error for large lock file change")
+	}
+	if !strings.Contains(result.Error.Error(), "go.sum") {
+		t.Errorf("expected 'go.sum' in error, got: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_MultipleViolations(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-multi")
+
+	writeTestFile(t, dir, "code.go", "package main\n\nfunc Code() {}\n")
+	writeTestFile(t, dir, ".env", "SECRET=value\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "multiple violations")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-multi",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-multi",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"require_tests":      true,
+		"forbidden_patterns": []interface{}{".env"},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for multiple violations")
+	}
+	if result.Error == nil {
+		t.Error("expected error for multiple violations")
+	}
+	if !strings.Contains(result.Error.Error(), "forbidden file") {
+		t.Errorf("expected 'forbidden file' in error, got: %v", result.Error)
+	}
+	if !strings.Contains(result.Error.Error(), "no test files") {
+		t.Errorf("expected 'no test files' in error, got: %v", result.Error)
+	}
+	if result.Data == nil {
+		t.Error("expected Data field to contain violations")
+	} else if v, ok := result.Data["violations"].([]string); !ok || len(v) != 2 {
+		t.Errorf("expected 2 violations in Data, got: %v", result.Data["violations"])
+	}
+}
+
+func TestValidateDiff_CustomSourceAndTestPatterns(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-custom")
+
+	writeTestFile(t, dir, "service.py", "def handle(): pass\n")
+	writeTestFile(t, dir, "test_service.py", "def test_handle(): pass\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "add python service with test")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-custom",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-custom",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"require_tests":   true,
+		"source_patterns": []interface{}{"*.py"},
+		"test_patterns":   []interface{}{"test_*.py"},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success with custom patterns and matching test file, got error: %v", result.Error)
+	}
+}
+
+func TestValidateDiff_CustomLockFilePatterns(t *testing.T) {
+	dir, baseBranch := initTestGitRepoWithBranch(t, "feature-customlock")
+
+	lines := make([]string, 60)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("package%d==1.%d.0", i, i)
+	}
+	writeTestFile(t, dir, "requirements.txt", strings.Join(lines, "\n")+"\n")
+	mustRunGit(t, dir, "add", ".")
+	mustRunGit(t, dir, "commit", "-m", "update requirements.txt")
+
+	cfg := testConfig()
+	sess := &config.Session{
+		ID:         "sess-1",
+		RepoPath:   dir,
+		WorkTree:   dir,
+		Branch:     "feature-customlock",
+		BaseBranch: baseBranch,
+	}
+	cfg.AddSession(*sess)
+
+	d := testDaemon(cfg)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-customlock",
+	})
+
+	action := &validateDiffAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{
+		"max_lock_file_lines": 10,
+		"lock_file_patterns":  []interface{}{"requirements.txt"},
+	})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for large requirements.txt change")
+	}
+	if !strings.Contains(result.Error.Error(), "requirements.txt") {
+		t.Errorf("expected 'requirements.txt' in error, got: %v", result.Error)
 	}
 }
 

@@ -138,6 +138,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateRebaseParams(prefix, state.Params)...)
 		}
 
+		// Validate params for git.validate_diff action
+		if state.Action == "git.validate_diff" {
+			errs = append(errs, validateDiffParams(prefix, state.Params)...)
+		}
+
 		// Validate params for ai.resolve_conflicts action
 		if state.Action == "ai.resolve_conflicts" {
 			errs = append(errs, validateResolveConflictsParams(prefix, state.Params)...)
@@ -768,6 +773,56 @@ func detectCycles(cfg *Config) []ValidationError {
 	for name := range cfg.States {
 		if color[name] == 0 {
 			dfs(name)
+		}
+	}
+
+	return errs
+}
+
+// validateDiffParams validates params for git.validate_diff actions.
+func validateDiffParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+	if params == nil {
+		return errs
+	}
+
+	// max_diff_lines must be a positive integer when present.
+	if v, ok := params["max_diff_lines"]; ok {
+		switch n := v.(type) {
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_diff_lines",
+					Message: "max_diff_lines must be greater than 0",
+				})
+			}
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_diff_lines",
+					Message: "max_diff_lines must be greater than 0",
+				})
+			}
+		}
+	}
+
+	// max_lock_file_lines must be a positive integer when present.
+	if v, ok := params["max_lock_file_lines"]; ok {
+		switch n := v.(type) {
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_lock_file_lines",
+					Message: "max_lock_file_lines must be greater than 0",
+				})
+			}
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_lock_file_lines",
+					Message: "max_lock_file_lines must be greater than 0",
+				})
+			}
 		}
 	}
 
