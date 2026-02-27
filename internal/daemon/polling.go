@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhubert/erg/internal/daemonstate"
-	"github.com/zhubert/erg/internal/workflow"
+	"github.com/google/uuid"
 	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 // pollForNewIssues checks for new issues and creates work items for them.
@@ -239,8 +240,10 @@ func (d *Daemon) matchesRepoFilter(ctx context.Context, repoPath string) bool {
 }
 
 // checkLinkedPRsAndUnqueue checks if a GitHub issue already has an open or merged PR
-// addressing it. If so, it unqueues the issue (removes the label + comments) and
-// returns true to indicate the issue should be skipped. Returns false otherwise.
+// addressing it. If the PR is already merged, the issue is unqueued and marked
+// completed. If the PR is open, the daemon adopts it: it creates a work item and
+// session, then advances to the appropriate wait state (e.g. await_ci) so the
+// normal tick loop monitors CI and review status.
 func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, issue issues.Issue) bool {
 	log := d.logger.With("issue", issue.ID, "component", "pre-flight")
 
@@ -259,19 +262,12 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 		return false
 	}
 
-	// Use the first open/merged PR number in the comment.
 	pr := linkedPRs[0]
 	label := d.resolveQueueLabel(repoPath)
-	comment := fmt.Sprintf(
-		"An existing PR (#%d) appears to address this issue. Removing from the queue — re-add the '%s' label if this still needs work.",
-		pr.Number, label,
-	)
 
-	log.Info("existing PR found for issue, unqueueing without spawning session",
-		"pr", pr.Number, "state", pr.State)
+	log.Info("existing PR found for issue",
+		"pr", pr.Number, "state", pr.State, "branch", pr.HeadRefName)
 
-	// Build a minimal WorkItem to pass to unqueueIssue (it doesn't need to be
-	// persisted — we just need IssueRef and a resolved repo path).
 	item := &daemonstate.WorkItem{
 		ID: fmt.Sprintf("%s-%s", repoPath, issue.ID),
 		IssueRef: config.IssueRef{
@@ -280,15 +276,75 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 			Title:  issue.Title,
 			URL:    issue.URL,
 		},
+		Branch:   pr.HeadRefName,
+		PRURL:    pr.URL,
+		StepData: map[string]any{},
 	}
-	// Add to state, run unqueue operations, then mark completed so it
-	// doesn't re-appear on the next poll.
 	d.state.AddWorkItem(item)
-	d.unqueueIssue(ctx, *item, comment)
-	if err := d.state.MarkWorkItemTerminal(item.ID, true); err != nil {
-		log.Debug("failed to mark pre-flight item terminal", "error", err)
+
+	if pr.State == git.PRStateMerged {
+		// PR already merged — just unqueue and mark completed.
+		comment := fmt.Sprintf(
+			"PR #%d has already been merged. Removing from the queue.",
+			pr.Number,
+		)
+		d.unqueueIssue(ctx, *item, comment)
+		if err := d.state.MarkWorkItemTerminal(item.ID, true); err != nil {
+			log.Debug("failed to mark pre-flight item terminal", "error", err)
+		}
+		log.Info("linked PR already merged, marked completed", "pr", pr.Number)
+		return true
 	}
 
+	// PR is open — adopt it into the workflow so the daemon monitors CI/review.
+	comment := fmt.Sprintf(
+		"Adopting existing PR #%d into the workflow. Removing the '%s' label — the daemon will monitor CI and review status.",
+		pr.Number, label,
+	)
+	d.unqueueIssue(ctx, *item, comment)
+
+	// Create a synthetic session so GetSession() works for CI/review polling.
+	sessionID := uuid.New().String()
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.SessionID = sessionID
+	})
+
+	sess := config.Session{
+		ID:            sessionID,
+		RepoPath:      repoPath,
+		Branch:        pr.HeadRefName,
+		DaemonManaged: true,
+		Autonomous:    true,
+		Containerized: true,
+		Started:       true,
+		PRCreated:     true,
+		IssueRef: &config.IssueRef{
+			Source: string(issues.SourceGitHub),
+			ID:     issue.ID,
+			Title:  issue.Title,
+			URL:    issue.URL,
+		},
+	}
+	d.config.AddSession(sess)
+
+	// Use the workflow engine to find the right wait state (e.g. await_ci).
+	engine := d.getEngine(repoPath)
+	recoveryStep := engine.FindRecoveryWaitStep("open_pr")
+	if recoveryStep == "" {
+		recoveryStep = "await_ci"
+	}
+
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		now := time.Now()
+		it.State = daemonstate.WorkItemActive
+		it.CurrentStep = recoveryStep
+		it.Phase = "idle"
+		it.StepEnteredAt = now
+		it.UpdatedAt = now
+	})
+
+	log.Info("adopted open PR into workflow",
+		"pr", pr.Number, "branch", pr.HeadRefName, "step", recoveryStep, "sessionID", sessionID)
 	return true
 }
 

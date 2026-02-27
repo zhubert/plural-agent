@@ -1324,8 +1324,8 @@ func TestGetLinkedPRsForIssue_OpenAndMerged(t *testing.T) {
 					"issue": {
 						"timelineItems": {
 							"nodes": [
-								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10"}},
-								{"source": {"number": 5, "state": "MERGED", "url": "https://github.com/owner/repo/pull/5"}}
+								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}},
+								{"source": {"number": 5, "state": "MERGED", "url": "https://github.com/owner/repo/pull/5", "headRefName": "fix-bug"}}
 							]
 						}
 					}
@@ -1346,8 +1346,14 @@ func TestGetLinkedPRsForIssue_OpenAndMerged(t *testing.T) {
 	if prs[0].Number != 10 || prs[0].State != PRStateOpen {
 		t.Errorf("expected first PR to be #10 OPEN, got #%d %s", prs[0].Number, prs[0].State)
 	}
+	if prs[0].HeadRefName != "issue-42" {
+		t.Errorf("expected first PR headRefName 'issue-42', got %q", prs[0].HeadRefName)
+	}
 	if prs[1].Number != 5 || prs[1].State != PRStateMerged {
 		t.Errorf("expected second PR to be #5 MERGED, got #%d %s", prs[1].Number, prs[1].State)
+	}
+	if prs[1].HeadRefName != "fix-bug" {
+		t.Errorf("expected second PR headRefName 'fix-bug', got %q", prs[1].HeadRefName)
 	}
 }
 

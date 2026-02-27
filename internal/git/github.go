@@ -97,9 +97,10 @@ func (s *GitService) GetBatchPRStates(ctx context.Context, repoPath string, bran
 
 // LinkedPR represents a pull request that references a GitHub issue.
 type LinkedPR struct {
-	Number int
-	State  PRState
-	URL    string
+	Number      int
+	State       PRState
+	URL         string
+	HeadRefName string // Branch name (e.g., "issue-42")
 }
 
 // GetLinkedPRsForIssue returns open or merged pull requests that cross-reference the given issue.
@@ -133,6 +134,7 @@ func (s *GitService) GetLinkedPRsForIssue(ctx context.Context, repoPath string, 
                 number
                 state
                 url
+                headRefName
               }
             }
           }
@@ -159,9 +161,10 @@ func (s *GitService) GetLinkedPRsForIssue(ctx context.Context, repoPath string, 
 					TimelineItems struct {
 						Nodes []struct {
 							Source struct {
-								Number int    `json:"number"`
-								State  string `json:"state"`
-								URL    string `json:"url"`
+								Number      int    `json:"number"`
+								State       string `json:"state"`
+								URL         string `json:"url"`
+								HeadRefName string `json:"headRefName"`
 							} `json:"source"`
 						} `json:"nodes"`
 					} `json:"timelineItems"`
@@ -191,9 +194,10 @@ func (s *GitService) GetLinkedPRsForIssue(ctx context.Context, repoPath string, 
 			continue
 		}
 		linked = append(linked, LinkedPR{
-			Number: src.Number,
-			State:  state,
-			URL:    src.URL,
+			Number:      src.Number,
+			State:       state,
+			URL:         src.URL,
+			HeadRefName: src.HeadRefName,
 		})
 	}
 
