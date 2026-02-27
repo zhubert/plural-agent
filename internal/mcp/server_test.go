@@ -1090,9 +1090,13 @@ func TestServer_handleToolsList_HostTools(t *testing.T) {
 		pushBranchResp := make(chan PushBranchResponse, 1)
 		getReviewCommentsChan := make(chan GetReviewCommentsRequest, 1)
 		getReviewCommentsResp := make(chan GetReviewCommentsResponse, 1)
+		commentIssueChan := make(chan CommentIssueRequest, 1)
+		commentIssueResp := make(chan CommentIssueResponse, 1)
+		submitReviewChan := make(chan SubmitReviewRequest, 1)
+		submitReviewResp := make(chan SubmitReviewResponse, 1)
 
 		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil, nil, "test",
-			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp))
+			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp, commentIssueChan, commentIssueResp, submitReviewChan, submitReviewResp))
 
 		if !s.hasHostTools {
 			t.Error("server should have host tools")
@@ -1139,7 +1143,9 @@ func TestServer_handleCreatePR(t *testing.T) {
 		getReviewCommentsResp := make(chan GetReviewCommentsResponse, 1)
 
 		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil, nil, "test",
-			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp))
+			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp,
+				make(chan CommentIssueRequest, 1), make(chan CommentIssueResponse, 1),
+				make(chan SubmitReviewRequest, 1), make(chan SubmitReviewResponse, 1)))
 
 		go func() {
 			req := <-createPRChan
@@ -1194,7 +1200,9 @@ func TestServer_handlePushBranch(t *testing.T) {
 		getReviewCommentsResp := make(chan GetReviewCommentsResponse, 1)
 
 		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil, nil, "test",
-			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp))
+			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp, getReviewCommentsChan, getReviewCommentsResp,
+				make(chan CommentIssueRequest, 1), make(chan CommentIssueResponse, 1),
+				make(chan SubmitReviewRequest, 1), make(chan SubmitReviewResponse, 1)))
 
 		go func() {
 			req := <-pushBranchChan

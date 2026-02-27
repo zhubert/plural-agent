@@ -153,6 +153,10 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 	var pushBranchRespChan chan mcp.PushBranchResponse
 	var getReviewCommentsChan chan mcp.GetReviewCommentsRequest
 	var getReviewCommentsRespChan chan mcp.GetReviewCommentsResponse
+	var commentIssueChan chan mcp.CommentIssueRequest
+	var commentIssueRespChan chan mcp.CommentIssueResponse
+	var submitReviewChan chan mcp.SubmitReviewRequest
+	var submitReviewRespChan chan mcp.SubmitReviewResponse
 
 	if mcpHostTools {
 		createPRChan = make(chan mcp.CreatePRRequest)
@@ -161,6 +165,10 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 		pushBranchRespChan = make(chan mcp.PushBranchResponse, 1)
 		getReviewCommentsChan = make(chan mcp.GetReviewCommentsRequest)
 		getReviewCommentsRespChan = make(chan mcp.GetReviewCommentsResponse, 1)
+		commentIssueChan = make(chan mcp.CommentIssueRequest)
+		commentIssueRespChan = make(chan mcp.CommentIssueResponse, 1)
+		submitReviewChan = make(chan mcp.SubmitReviewRequest)
+		submitReviewRespChan = make(chan mcp.SubmitReviewResponse, 1)
 
 		mcp.ForwardRequests(&wg, createPRChan, createPRRespChan,
 			client.SendCreatePRRequest,
@@ -180,10 +188,24 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 				return mcp.GetReviewCommentsResponse{ID: req.ID, Success: false, Error: "Communication error with TUI"}
 			})
 
+		mcp.ForwardRequests(&wg, commentIssueChan, commentIssueRespChan,
+			client.SendCommentIssueRequest,
+			func(req mcp.CommentIssueRequest) mcp.CommentIssueResponse {
+				return mcp.CommentIssueResponse{ID: req.ID, Success: false, Error: "Communication error with TUI"}
+			})
+
+		mcp.ForwardRequests(&wg, submitReviewChan, submitReviewRespChan,
+			client.SendSubmitReviewRequest,
+			func(req mcp.SubmitReviewRequest) mcp.SubmitReviewResponse {
+				return mcp.SubmitReviewResponse{ID: req.ID, Success: false, Error: "Communication error with TUI"}
+			})
+
 		serverOpts = append(serverOpts, mcp.WithHostTools(
 			createPRChan, createPRRespChan,
 			pushBranchChan, pushBranchRespChan,
 			getReviewCommentsChan, getReviewCommentsRespChan,
+			commentIssueChan, commentIssueRespChan,
+			submitReviewChan, submitReviewRespChan,
 		))
 	}
 
@@ -206,6 +228,8 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 		close(createPRChan)
 		close(pushBranchChan)
 		close(getReviewCommentsChan)
+		close(commentIssueChan)
+		close(submitReviewChan)
 	}
 	wg.Wait()
 	close(respChan)

@@ -49,6 +49,8 @@ const (
 	MessageTypeCreatePR          MessageType = "createPR"
 	MessageTypePushBranch        MessageType = "pushBranch"
 	MessageTypeGetReviewComments MessageType = "getReviewComments"
+	MessageTypeCommentIssue      MessageType = "commentIssue"
+	MessageTypeSubmitReview      MessageType = "submitReview"
 )
 
 // SocketMessage wraps permission, question, plan approval, or host tool requests/responses
@@ -66,6 +68,10 @@ type SocketMessage struct {
 	PushBranchResp        *PushBranchResponse        `json:"pushBranchResp,omitempty"`
 	GetReviewCommentsReq  *GetReviewCommentsRequest  `json:"getReviewCommentsReq,omitempty"`
 	GetReviewCommentsResp *GetReviewCommentsResponse `json:"getReviewCommentsResp,omitempty"`
+	CommentIssueReq       *CommentIssueRequest       `json:"commentIssueReq,omitempty"`
+	CommentIssueResp      *CommentIssueResponse      `json:"commentIssueResp,omitempty"`
+	SubmitReviewReq       *SubmitReviewRequest        `json:"submitReviewReq,omitempty"`
+	SubmitReviewResp      *SubmitReviewResponse       `json:"submitReviewResp,omitempty"`
 }
 
 // SocketServer listens for permission requests from MCP server subprocesses
@@ -85,6 +91,10 @@ type SocketServer struct {
 	pushBranchResp        <-chan PushBranchResponse
 	getReviewCommentsReq  chan<- GetReviewCommentsRequest
 	getReviewCommentsResp <-chan GetReviewCommentsResponse
+	commentIssueReq       chan<- CommentIssueRequest
+	commentIssueResp      <-chan CommentIssueResponse
+	submitReviewReq       chan<- SubmitReviewRequest
+	submitReviewResp      <-chan SubmitReviewResponse
 	closed                bool           // Set to true when Close() is called
 	closedMu              sync.RWMutex   // Guards closed flag
 	wg                    sync.WaitGroup // Tracks the Run() goroutine for clean shutdown
@@ -142,6 +152,8 @@ func WithHostToolChannels(
 	createPRReq chan<- CreatePRRequest, createPRResp <-chan CreatePRResponse,
 	pushBranchReq chan<- PushBranchRequest, pushBranchResp <-chan PushBranchResponse,
 	getReviewCommentsReq chan<- GetReviewCommentsRequest, getReviewCommentsResp <-chan GetReviewCommentsResponse,
+	commentIssueReq chan<- CommentIssueRequest, commentIssueResp <-chan CommentIssueResponse,
+	submitReviewReq chan<- SubmitReviewRequest, submitReviewResp <-chan SubmitReviewResponse,
 ) SocketServerOption {
 	return func(s *SocketServer) {
 		s.createPRReq = createPRReq
@@ -150,6 +162,10 @@ func WithHostToolChannels(
 		s.pushBranchResp = pushBranchResp
 		s.getReviewCommentsReq = getReviewCommentsReq
 		s.getReviewCommentsResp = getReviewCommentsResp
+		s.commentIssueReq = commentIssueReq
+		s.commentIssueResp = commentIssueResp
+		s.submitReviewReq = submitReviewReq
+		s.submitReviewResp = submitReviewResp
 	}
 }
 
@@ -429,6 +445,30 @@ func (s *SocketServer) handleConnection(conn net.Conn) {
 				MessageTypeGetReviewComments,
 				func(m *SocketMessage, r *GetReviewCommentsResponse) { m.GetReviewCommentsResp = r },
 				"get review comments")
+		case MessageTypeCommentIssue:
+			handleChannelMessage(s.log, conn, msg.CommentIssueReq,
+				s.commentIssueReq, s.commentIssueResp,
+				HostToolResponseTimeout,
+				CommentIssueResponse{Success: false, Error: "Host tools not available"},
+				func(id any) CommentIssueResponse {
+					return CommentIssueResponse{ID: id, Success: false, Error: "Timeout"}
+				},
+				func(r *CommentIssueRequest) any { return r.ID },
+				MessageTypeCommentIssue,
+				func(m *SocketMessage, r *CommentIssueResponse) { m.CommentIssueResp = r },
+				"comment issue")
+		case MessageTypeSubmitReview:
+			handleChannelMessage(s.log, conn, msg.SubmitReviewReq,
+				s.submitReviewReq, s.submitReviewResp,
+				HostToolResponseTimeout,
+				SubmitReviewResponse{Success: false, Error: "Host tools not available"},
+				func(id any) SubmitReviewResponse {
+					return SubmitReviewResponse{ID: id, Success: false, Error: "Timeout"}
+				},
+				func(r *SubmitReviewRequest) any { return r.ID },
+				MessageTypeSubmitReview,
+				func(m *SocketMessage, r *SubmitReviewResponse) { m.SubmitReviewResp = r },
+				"submit review")
 		default:
 			s.log.Warn("unknown message type", "type", msg.Type)
 		}
@@ -574,6 +614,22 @@ func (c *SocketClient) SendGetReviewCommentsRequest(req GetReviewCommentsRequest
 		func(m *SocketMessage, r *GetReviewCommentsRequest) { m.GetReviewCommentsReq = r },
 		func(m *SocketMessage) *GetReviewCommentsResponse { return m.GetReviewCommentsResp },
 		HostToolResponseTimeout, "get review comments")
+}
+
+// SendCommentIssueRequest sends a comment issue request and waits for response
+func (c *SocketClient) SendCommentIssueRequest(req CommentIssueRequest) (CommentIssueResponse, error) {
+	return sendSocketRequest(c, req, MessageTypeCommentIssue,
+		func(m *SocketMessage, r *CommentIssueRequest) { m.CommentIssueReq = r },
+		func(m *SocketMessage) *CommentIssueResponse { return m.CommentIssueResp },
+		HostToolResponseTimeout, "comment issue")
+}
+
+// SendSubmitReviewRequest sends a submit review request and waits for response
+func (c *SocketClient) SendSubmitReviewRequest(req SubmitReviewRequest) (SubmitReviewResponse, error) {
+	return sendSocketRequest(c, req, MessageTypeSubmitReview,
+		func(m *SocketMessage, r *SubmitReviewRequest) { m.SubmitReviewReq = r },
+		func(m *SocketMessage) *SubmitReviewResponse { return m.SubmitReviewResp },
+		HostToolResponseTimeout, "submit review")
 }
 
 // Close closes the client connection

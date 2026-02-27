@@ -50,13 +50,17 @@ type Server struct {
 	planApprovalChan      chan<- PlanApprovalRequest       // Send plan approval requests to TUI
 	planResponseChan      <-chan PlanApprovalResponse      // Receive plan approval responses from TUI
 	allowedTools          []string                         // Pre-allowed tools for this session
-	hasHostTools          bool                             // Whether to expose host operation tools (create_pr, push_branch, get_review_comments)
+	hasHostTools          bool                             // Whether to expose host operation tools
 	createPRChan          chan<- CreatePRRequest           // Send create PR requests to TUI
 	createPRResp          <-chan CreatePRResponse          // Receive create PR responses from TUI
 	pushBranchChan        chan<- PushBranchRequest         // Send push branch requests to TUI
 	pushBranchResp        <-chan PushBranchResponse        // Receive push branch responses from TUI
 	getReviewCommentsChan chan<- GetReviewCommentsRequest  // Send get review comments requests to TUI
 	getReviewCommentsResp <-chan GetReviewCommentsResponse // Receive get review comments responses from TUI
+	commentIssueChan      chan<- CommentIssueRequest       // Send comment issue requests to host
+	commentIssueResp      <-chan CommentIssueResponse      // Receive comment issue responses from host
+	submitReviewChan      chan<- SubmitReviewRequest       // Send submit review requests to host
+	submitReviewResp      <-chan SubmitReviewResponse      // Receive submit review responses from host
 	mu                    sync.Mutex
 	log                   *slog.Logger // Logger with session context
 }
@@ -64,11 +68,13 @@ type Server struct {
 // ServerOption is a functional option for configuring Server
 type ServerOption func(*Server)
 
-// WithHostTools enables host operation tools (create_pr, push_branch, get_review_comments)
+// WithHostTools enables host operation tools (create_pr, push_branch, get_review_comments, comment_issue, submit_review)
 func WithHostTools(
 	createPRChan chan<- CreatePRRequest, createPRResp <-chan CreatePRResponse,
 	pushBranchChan chan<- PushBranchRequest, pushBranchResp <-chan PushBranchResponse,
 	getReviewCommentsChan chan<- GetReviewCommentsRequest, getReviewCommentsResp <-chan GetReviewCommentsResponse,
+	commentIssueChan chan<- CommentIssueRequest, commentIssueResp <-chan CommentIssueResponse,
+	submitReviewChan chan<- SubmitReviewRequest, submitReviewResp <-chan SubmitReviewResponse,
 ) ServerOption {
 	return func(s *Server) {
 		s.hasHostTools = true
@@ -78,6 +84,10 @@ func WithHostTools(
 		s.pushBranchResp = pushBranchResp
 		s.getReviewCommentsChan = getReviewCommentsChan
 		s.getReviewCommentsResp = getReviewCommentsResp
+		s.commentIssueChan = commentIssueChan
+		s.commentIssueResp = commentIssueResp
+		s.submitReviewChan = submitReviewChan
+		s.submitReviewResp = submitReviewResp
 	}
 }
 
@@ -229,6 +239,38 @@ func (s *Server) handleToolsList(req *JSONRPCRequest) {
 					Properties: map[string]Property{},
 				},
 			},
+			ToolDefinition{
+				Name:        "comment_issue",
+				Description: "Post a comment on the tracked issue (e.g. a plan or status update). This runs on the host machine via the daemon's git service.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"body": {
+							Type:        "string",
+							Description: "The comment body in markdown format.",
+						},
+					},
+					Required: []string{"body"},
+				},
+			},
+			ToolDefinition{
+				Name:        "submit_review",
+				Description: "Submit a review result (passed/failed with summary). This stores the result in the daemon's work item data for downstream workflow processing.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"passed": {
+							Type:        "boolean",
+							Description: "Whether the review passed (true) or found blocking issues (false).",
+						},
+						"summary": {
+							Type:        "string",
+							Description: "Brief one-sentence summary of the review findings.",
+						},
+					},
+					Required: []string{"passed", "summary"},
+				},
+			},
 		)
 	}
 
@@ -252,6 +294,10 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) {
 		s.handlePushBranch(req, params)
 	case "get_review_comments":
 		s.handleGetReviewComments(req, params)
+	case "comment_issue":
+		s.handleCommentIssue(req, params)
+	case "submit_review":
+		s.handleSubmitReview(req, params)
 	default:
 		s.log.Warn("unknown tool", "tool", params.Name)
 		s.sendError(req.ID, -32602, "Unknown tool", nil)
@@ -580,6 +626,43 @@ func (s *Server) handleGetReviewComments(req *JSONRPCRequest, params ToolCallPar
 		func(r GetReviewCommentsResponse) bool { return !r.Success }, "review comments")
 }
 
+// handleCommentIssue handles the comment_issue host tool
+func (s *Server) handleCommentIssue(req *JSONRPCRequest, params ToolCallParams) {
+	if !s.hasHostTools || s.commentIssueChan == nil {
+		s.sendToolResult(req.ID, true, `{"error":"comment_issue is only available in automated sessions"}`)
+		return
+	}
+
+	body, _ := params.Arguments["body"].(string)
+	if body == "" {
+		s.sendToolResult(req.ID, true, `{"error":"body parameter is required"}`)
+		return
+	}
+
+	s.log.Info("comment_issue called", "bodyLen", len(body))
+
+	handleToolChannelRequest(s, req.ID, CommentIssueRequest{ID: req.ID, Body: body},
+		s.commentIssueChan, s.commentIssueResp, HostToolReceiveTimeout,
+		func(r CommentIssueResponse) bool { return !r.Success }, "issue comment")
+}
+
+// handleSubmitReview handles the submit_review host tool
+func (s *Server) handleSubmitReview(req *JSONRPCRequest, params ToolCallParams) {
+	if !s.hasHostTools || s.submitReviewChan == nil {
+		s.sendToolResult(req.ID, true, `{"error":"submit_review is only available in automated sessions"}`)
+		return
+	}
+
+	passed, _ := params.Arguments["passed"].(bool)
+	summary, _ := params.Arguments["summary"].(string)
+
+	s.log.Info("submit_review called", "passed", passed, "summary", summary)
+
+	handleToolChannelRequest(s, req.ID, SubmitReviewRequest{ID: req.ID, Passed: passed, Summary: summary},
+		s.submitReviewChan, s.submitReviewResp, HostToolReceiveTimeout,
+		func(r SubmitReviewResponse) bool { return !r.Success }, "review submission")
+}
+
 // sendToolResult sends a tool call result with text content.
 // Host tools return regular tool results (not PermissionResult format).
 func (s *Server) sendToolResult(id any, isError bool, text string) {
@@ -623,6 +706,8 @@ var hostMCPTools = []string{
 	"mcp__erg__create_pr",
 	"mcp__erg__push_branch",
 	"mcp__erg__get_review_comments",
+	"mcp__erg__comment_issue",
+	"mcp__erg__submit_review",
 }
 
 // isOwnMCPTool returns true if the tool name is one of our own MCP tools that

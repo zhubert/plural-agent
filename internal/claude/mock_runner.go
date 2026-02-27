@@ -38,6 +38,8 @@ type MockRunner struct {
 	createPR          *mcp.ChannelPair[mcp.CreatePRRequest, mcp.CreatePRResponse]
 	pushBranch        *mcp.ChannelPair[mcp.PushBranchRequest, mcp.PushBranchResponse]
 	getReviewComments *mcp.ChannelPair[mcp.GetReviewCommentsRequest, mcp.GetReviewCommentsResponse]
+	commentIssue      *mcp.ChannelPair[mcp.CommentIssueRequest, mcp.CommentIssueResponse]
+	submitReview      *mcp.ChannelPair[mcp.SubmitReviewRequest, mcp.SubmitReviewResponse]
 
 	// Callbacks for test assertions
 	OnSend             func(content []ContentBlock)
@@ -150,6 +152,30 @@ func (m *MockRunner) SimulateGetReviewCommentsRequest(req mcp.GetReviewCommentsR
 	m.mu.RLock()
 	stopped := m.stopped
 	ch := m.getReviewComments
+	m.mu.RUnlock()
+	if stopped || ch == nil {
+		return
+	}
+	ch.Req <- req
+}
+
+// SimulateCommentIssueRequest triggers a comment issue request that the UI will receive.
+func (m *MockRunner) SimulateCommentIssueRequest(req mcp.CommentIssueRequest) {
+	m.mu.RLock()
+	stopped := m.stopped
+	ch := m.commentIssue
+	m.mu.RUnlock()
+	if stopped || ch == nil {
+		return
+	}
+	ch.Req <- req
+}
+
+// SimulateSubmitReviewRequest triggers a submit review request that the UI will receive.
+func (m *MockRunner) SimulateSubmitReviewRequest(req mcp.SubmitReviewRequest) {
+	m.mu.RLock()
+	stopped := m.stopped
+	ch := m.submitReview
 	m.mu.RUnlock()
 	if stopped || ch == nil {
 		return
@@ -447,6 +473,8 @@ func (m *MockRunner) SetHostTools(hostTools bool) {
 		m.createPR = mcp.NewChannelPair[mcp.CreatePRRequest, mcp.CreatePRResponse](1)
 		m.pushBranch = mcp.NewChannelPair[mcp.PushBranchRequest, mcp.PushBranchResponse](1)
 		m.getReviewComments = mcp.NewChannelPair[mcp.GetReviewCommentsRequest, mcp.GetReviewCommentsResponse](1)
+		m.commentIssue = mcp.NewChannelPair[mcp.CommentIssueRequest, mcp.CommentIssueResponse](1)
+		m.submitReview = mcp.NewChannelPair[mcp.SubmitReviewRequest, mcp.SubmitReviewResponse](1)
 	}
 }
 
@@ -519,6 +547,52 @@ func (m *MockRunner) SendGetReviewCommentsResponse(resp mcp.GetReviewCommentsRes
 	}
 }
 
+// CommentIssueRequestChan implements RunnerSession.
+func (m *MockRunner) CommentIssueRequestChan() <-chan mcp.CommentIssueRequest {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stopped || m.commentIssue == nil {
+		return nil
+	}
+	return m.commentIssue.Req
+}
+
+// SendCommentIssueResponse implements RunnerSession.
+func (m *MockRunner) SendCommentIssueResponse(resp mcp.CommentIssueResponse) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stopped || m.commentIssue == nil {
+		return
+	}
+	select {
+	case m.commentIssue.Resp <- resp:
+	default:
+	}
+}
+
+// SubmitReviewRequestChan implements RunnerSession.
+func (m *MockRunner) SubmitReviewRequestChan() <-chan mcp.SubmitReviewRequest {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stopped || m.submitReview == nil {
+		return nil
+	}
+	return m.submitReview.Req
+}
+
+// SendSubmitReviewResponse implements RunnerSession.
+func (m *MockRunner) SendSubmitReviewResponse(resp mcp.SubmitReviewResponse) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stopped || m.submitReview == nil {
+		return
+	}
+	select {
+	case m.submitReview.Resp <- resp:
+	default:
+	}
+}
+
 // Stop implements RunnerSession.
 func (m *MockRunner) Stop() {
 	m.mu.Lock()
@@ -536,6 +610,8 @@ func (m *MockRunner) Stop() {
 	m.createPR.Close()
 	m.pushBranch.Close()
 	m.getReviewComments.Close()
+	m.commentIssue.Close()
+	m.submitReview.Close()
 	if m.responseChan != nil {
 		// Only close if we control it
 		select {

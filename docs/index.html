@@ -3099,6 +3099,40 @@
             <div class="param-section-title">Output data</div>
             <p class="param-none">None.</p>
           </div>
+          <div class="param-section">
+            <div class="param-section-title">Setup</div>
+            <p class="param-none">
+              Slack uses <strong>Incoming Webhooks</strong> for authentication
+              — there is no separate API token. To get a webhook URL:
+            </p>
+            <ol style="margin: 0.35rem 0 0; padding-left: 1.25rem; font-size: 0.82rem; color: var(--text-muted);">
+              <li>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener" style="color: var(--cyan);">api.slack.com/apps</a> and create a new app (or open an existing one).</li>
+              <li>Under <strong>Features</strong>, click <strong>Incoming Webhooks</strong> and toggle it on.</li>
+              <li>Click <strong>Add New Webhook to Workspace</strong>, choose a channel, and authorise.</li>
+              <li>Copy the generated URL (e.g. <code>https://hooks.slack.com/services/T.../B.../...</code>).</li>
+              <li>Set it as an environment variable on the host running erg:<br>
+                <code>export SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...</code></li>
+              <li>Reference it in your workflow config as <code>webhook_url: $SLACK_WEBHOOK_URL</code>.</li>
+            </ol>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Example</div>
+            <div class="code-block" style="margin-top: 0.4rem;">
+              <div class="code-header">
+                <span class="code-filename">workflow.yaml (excerpt)</span>
+              </div>
+              <pre>  notify_merged:
+    type: task
+    action: slack.notify
+    params:
+      webhook_url: $SLACK_WEBHOOK_URL           # set in the host environment
+      message: "Merged: {{.Title}} (#{{.IssueID}})\n{{.PRURL}}"
+      username: erg
+      icon_emoji: ":white_check_mark:"
+      channel: "#eng-deployments"              # optional — overrides webhook default
+    next: done</pre>
+            </div>
+          </div>
         </div>
 
         <h3 id="actions-webhook">Webhook actions</h3>

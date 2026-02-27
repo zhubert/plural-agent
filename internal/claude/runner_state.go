@@ -21,6 +21,8 @@ type MCPChannels struct {
 	CreatePR          *mcp.ChannelPair[mcp.CreatePRRequest, mcp.CreatePRResponse]
 	PushBranch        *mcp.ChannelPair[mcp.PushBranchRequest, mcp.PushBranchResponse]
 	GetReviewComments *mcp.ChannelPair[mcp.GetReviewCommentsRequest, mcp.GetReviewCommentsResponse]
+	CommentIssue      *mcp.ChannelPair[mcp.CommentIssueRequest, mcp.CommentIssueResponse]
+	SubmitReview      *mcp.ChannelPair[mcp.SubmitReviewRequest, mcp.SubmitReviewResponse]
 }
 
 // NewMCPChannels creates a new MCPChannels with buffered channels.
@@ -38,6 +40,8 @@ func (m *MCPChannels) InitHostToolChannels() {
 	m.CreatePR = mcp.NewChannelPair[mcp.CreatePRRequest, mcp.CreatePRResponse](PermissionChannelBuffer)
 	m.PushBranch = mcp.NewChannelPair[mcp.PushBranchRequest, mcp.PushBranchResponse](PermissionChannelBuffer)
 	m.GetReviewComments = mcp.NewChannelPair[mcp.GetReviewCommentsRequest, mcp.GetReviewCommentsResponse](PermissionChannelBuffer)
+	m.CommentIssue = mcp.NewChannelPair[mcp.CommentIssueRequest, mcp.CommentIssueResponse](PermissionChannelBuffer)
+	m.SubmitReview = mcp.NewChannelPair[mcp.SubmitReviewRequest, mcp.SubmitReviewResponse](PermissionChannelBuffer)
 }
 
 // Close closes all channels. Safe to call multiple times.
@@ -48,6 +52,8 @@ func (m *MCPChannels) Close() {
 	m.CreatePR.Close()
 	m.PushBranch.Close()
 	m.GetReviewComments.Close()
+	m.CommentIssue.Close()
+	m.SubmitReview.Close()
 }
 
 // StreamingState tracks state during response streaming.

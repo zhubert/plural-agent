@@ -226,3 +226,30 @@ type GetReviewCommentsResponse struct {
 	Comments []ReviewComment `json:"comments,omitempty"` // List of review comments
 	Error    string          `json:"error,omitempty"`    // Error message if fetch failed
 }
+
+// CommentIssueRequest represents a request from an automated session to post a comment on the tracked issue
+type CommentIssueRequest struct {
+	ID   any    `json:"id"`   // JSON-RPC request ID for response correlation
+	Body string `json:"body"` // Comment body (markdown)
+}
+
+// CommentIssueResponse represents the result of posting an issue comment
+type CommentIssueResponse struct {
+	ID      any    `json:"id"`              // Correlates with request ID
+	Success bool   `json:"success"`         // Whether comment was posted successfully
+	Error   string `json:"error,omitempty"` // Error message if posting failed
+}
+
+// SubmitReviewRequest represents a request from an automated session to submit a review result
+type SubmitReviewRequest struct {
+	ID      any    `json:"id"`      // JSON-RPC request ID for response correlation
+	Passed  bool   `json:"passed"`  // Whether the review passed
+	Summary string `json:"summary"` // Brief summary of the review
+}
+
+// SubmitReviewResponse represents the result of submitting a review
+type SubmitReviewResponse struct {
+	ID      any    `json:"id"`              // Correlates with request ID
+	Success bool   `json:"success"`         // Whether result was stored successfully
+	Error   string `json:"error,omitempty"` // Error message if storing failed
+}

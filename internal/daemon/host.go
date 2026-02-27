@@ -2,12 +2,16 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strconv"
+	"time"
 
 	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/erg/internal/claude"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/worker"
 	"github.com/zhubert/erg/internal/workflow"
 )
@@ -57,6 +61,64 @@ func (d *Daemon) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
 	if err := d.state.Save(); err != nil {
 		d.logger.Warn("failed to save state after recording spend", "error", err)
 	}
+}
+
+// SetWorkItemData stores a key-value pair in the work item's StepData
+// for the work item associated with the given session ID.
+func (d *Daemon) SetWorkItemData(sessionID, key string, value any) {
+	for _, item := range d.state.GetActiveWorkItems() {
+		if item.SessionID == sessionID {
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				if it.StepData == nil {
+					it.StepData = make(map[string]any)
+				}
+				it.StepData[key] = value
+			})
+			return
+		}
+	}
+	d.logger.Warn("SetWorkItemData: no work item found for session", "sessionID", sessionID)
+}
+
+// CommentOnIssue posts a comment on the issue/task associated with the given session.
+// It routes through the appropriate provider (GitHub, Asana, Linear) based on the
+// issue source. For GitHub, falls back to GitService if no provider is registered.
+func (d *Daemon) CommentOnIssue(ctx context.Context, sessionID, body string) error {
+	sess := d.config.GetSession(sessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	issueRef := sess.GetIssueRef()
+	if issueRef == nil {
+		return fmt.Errorf("no issue associated with session %s", sessionID)
+	}
+
+	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	source := issues.Source(issueRef.Source)
+
+	// Try the provider registry first — works for all providers including GitHub.
+	if d.issueRegistry != nil {
+		if p := d.issueRegistry.GetProvider(source); p != nil {
+			if pa, ok := p.(issues.ProviderActions); ok {
+				return pa.Comment(commentCtx, sess.RepoPath, issueRef.ID, body)
+			}
+		}
+	}
+
+	// Fallback for GitHub when no provider is registered (e.g., in tests
+	// or minimal daemon configurations).
+	if source == issues.SourceGitHub {
+		issueNum, err := strconv.Atoi(issueRef.ID)
+		if err != nil {
+			return fmt.Errorf("invalid GitHub issue ID %q: %w", issueRef.ID, err)
+		}
+		return d.gitService.CommentOnIssue(commentCtx, sess.RepoPath, issueNum, body)
+	}
+
+	return fmt.Errorf("no provider registered for %s issues", source)
 }
 
 // workItemView creates a read-only view of a work item snapshot for the engine.

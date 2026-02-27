@@ -45,6 +45,8 @@ func (r *Runner) ensureServerRunning() error {
 			r.mcp.CreatePR.Req, r.mcp.CreatePR.Resp,
 			r.mcp.PushBranch.Req, r.mcp.PushBranch.Resp,
 			r.mcp.GetReviewComments.Req, r.mcp.GetReviewComments.Resp,
+			r.mcp.CommentIssue.Req, r.mcp.CommentIssue.Resp,
+			r.mcp.SubmitReview.Req, r.mcp.SubmitReview.Resp,
 		))
 	}
 

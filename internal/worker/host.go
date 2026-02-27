@@ -43,5 +43,14 @@ type Host interface {
 	// RecordSpend adds token and cost data from a completed Claude response
 	// to the daemon's running totals.
 	RecordSpend(costUSD float64, outputTokens, inputTokens int)
+
+	// SetWorkItemData stores a key-value pair in the work item's StepData
+	// for the session identified by sessionID.
+	SetWorkItemData(sessionID, key string, value any)
+
+	// CommentOnIssue posts a comment on the issue/task associated with the
+	// given session. Routes through the appropriate provider (GitHub, Asana,
+	// Linear) based on the issue source.
+	CommentOnIssue(ctx context.Context, sessionID, body string) error
 }
 

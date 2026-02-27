@@ -186,3 +186,59 @@ func (r *Runner) SendGetReviewCommentsResponse(resp mcp.GetReviewCommentsRespons
 		r.log.Debug("SendGetReviewCommentsResponse channel full, ignoring")
 	}
 }
+
+// CommentIssueRequestChan returns the channel for receiving comment issue requests.
+func (r *Runner) CommentIssueRequestChan() <-chan mcp.CommentIssueRequest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.stopped || r.mcp == nil || r.mcp.CommentIssue == nil {
+		return nil
+	}
+	return r.mcp.CommentIssue.Req
+}
+
+// SendCommentIssueResponse sends a response to a comment issue request.
+func (r *Runner) SendCommentIssueResponse(resp mcp.CommentIssueResponse) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.stopped || r.mcp == nil || r.mcp.CommentIssue == nil {
+		return
+	}
+
+	ch := r.mcp.CommentIssue.Resp
+	select {
+	case ch <- resp:
+		// Success
+	default:
+		r.log.Debug("SendCommentIssueResponse channel full, ignoring")
+	}
+}
+
+// SubmitReviewRequestChan returns the channel for receiving submit review requests.
+func (r *Runner) SubmitReviewRequestChan() <-chan mcp.SubmitReviewRequest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.stopped || r.mcp == nil || r.mcp.SubmitReview == nil {
+		return nil
+	}
+	return r.mcp.SubmitReview.Req
+}
+
+// SendSubmitReviewResponse sends a response to a submit review request.
+func (r *Runner) SendSubmitReviewResponse(resp mcp.SubmitReviewResponse) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.stopped || r.mcp == nil || r.mcp.SubmitReview == nil {
+		return
+	}
+
+	ch := r.mcp.SubmitReview.Resp
+	select {
+	case ch <- resp:
+		// Success
+	default:
+		r.log.Debug("SendSubmitReviewResponse channel full, ignoring")
+	}
+}

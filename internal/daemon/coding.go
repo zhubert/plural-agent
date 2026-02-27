@@ -468,8 +468,9 @@ func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Sessio
 		runner.SetContainerized(true, d.config.GetContainerImage())
 	}
 
-	// No host tools — daemon manages push/PR/merge via workflow actions
-	// (intentionally omitted: runner.SetHostTools)
+	// Enable host tools so Claude can use comment_issue and submit_review.
+	// The worker rejects create_pr and push_branch with helpful error messages.
+	runner.SetHostTools(true)
 
 	// Headless: no streaming chunks needed for autonomous sessions
 	if sess.Autonomous {
@@ -537,6 +538,26 @@ func (d *Daemon) cleanupSession(ctx context.Context, sessionID string) {
 	d.saveConfig("cleanupSession")
 
 	log.Info("cleaned up session")
+}
+
+// cleanupPlanningSession cleans up a planning session's runner/container and config
+// without deleting the git worktree or branch (planning sessions are read-only on
+// the default branch, so there's nothing to delete).
+func (d *Daemon) cleanupPlanningSession(ctx context.Context, sessionID string) {
+	sess := d.config.GetSession(sessionID)
+	if sess == nil {
+		return
+	}
+
+	log := d.logger.With("sessionID", sessionID, "branch", sess.Branch)
+
+	d.sessionMgr.DeleteSession(sessionID)
+	d.config.RemoveSession(sessionID)
+	config.DeleteSessionMessages(sessionID)
+
+	d.saveConfig("cleanupPlanningSession")
+
+	log.Info("cleaned up planning session")
 }
 
 // cleanupStaleBranch attempts to clean up a stale branch left from a previous crashed session.
@@ -1010,7 +1031,7 @@ func (d *Daemon) saveRunnerMessages(sessionID string, runner claude.RunnerSessio
 // the diff and write a structured result file rather than modifying code.
 const DefaultReviewSystemPrompt = `You are an autonomous code reviewer performing a self-review before changes are pushed to a pull request.
 
-FOCUS: Review the provided diff for correctness, security, and code quality. Write findings to a JSON result file.
+FOCUS: Review the provided diff for correctness, security, and code quality. Submit your findings via the submit_review MCP tool.
 
 DO NOT:
 - Modify any source files — this is a read-only review
@@ -1025,23 +1046,12 @@ REVIEW CRITERIA:
 5. Code quality: Is the code readable and following project conventions?
 
 OUTPUT:
-After reviewing, create the directory .erg/ if it does not exist, then write .erg/ai_review.json:
-{
-  "passed": true,
-  "summary": "Brief one-sentence summary of the review",
-  "issues": []
-}
+After reviewing, use the submit_review MCP tool to report your findings:
+- Set passed=true if the code looks good or has only WARNING-level issues
+- Set passed=false only for BLOCKING issues (critical bugs, security holes, missing required tests)
+- Include a brief one-sentence summary describing the review outcome
 
-If you find BLOCKING issues (critical bugs, security holes, missing required tests):
-- Set "passed": false
-- List each issue in the "issues" array with "severity": "BLOCKING"
-
-If you find only WARNING issues (style, minor improvements, non-critical suggestions):
-- Set "passed": true
-- List each issue in the "issues" array with "severity": "WARNING"
-
-If the code looks good:
-- Set "passed": true with an empty "issues" array`
+Do NOT write to .erg/ai_review.json — use the submit_review tool instead.`
 
 // startAIReview starts a Claude session to review the branch diff.
 func (d *Daemon) startAIReview(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, round int, diff string) error {
@@ -1085,12 +1095,13 @@ INSTRUCTIONS:
 1. Read the diff carefully and understand what changes were made
 2. Use bash tools to explore the full context of changed files if needed
 3. Check for correctness, adequate tests, security issues, edge cases, and code quality
-4. Write your findings to .erg/ai_review.json (create .erg/ directory first if needed)
-5. Set "passed": false only for BLOCKING issues (critical bugs, security holes, missing required tests)
-6. Set "passed": true for warnings-only or clean reviews
+4. Use the submit_review MCP tool to report your findings
+5. Set passed=false only for BLOCKING issues (critical bugs, security holes, missing required tests)
+6. Set passed=true for warnings-only or clean reviews
 
 DO NOT modify any source files — this is a review-only session.
 DO NOT push or create PRs.
+DO NOT write to .erg/ai_review.json — use the submit_review tool instead.
 
 GIT DIFF:
 %s`, round, diff)
