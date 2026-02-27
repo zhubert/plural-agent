@@ -940,3 +940,33 @@ func (d *Daemon) postWebhook(ctx context.Context, item daemonstate.WorkItem, par
 
 	return resp.StatusCode, nil
 }
+
+// splitAction implements the ai.split action.
+type splitAction struct {
+	daemon *Daemon
+}
+
+// Execute analyzes the current branch diff with Claude and creates separate branches and
+// PRs for each logical concern found in the diff.
+//
+// Optional params:
+//   - max_lines (int, default 500): skip the split if the diff is smaller than this many lines.
+//   - base_branch (string): override the base branch for comparison (defaults to session.BaseBranch or main).
+func (a *splitAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found for work item %s", ac.WorkItemID)}
+	}
+
+	if err := d.splitBranches(ctx, item, sess, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("ai.split failed: %w", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}

@@ -5721,3 +5721,325 @@ func TestWritePRDescriptionAction_RegisteredInRegistry(t *testing.T) {
 		t.Error("ai.write_pr_description not registered in action registry")
 	}
 }
+
+// --- ai.split tests ---
+
+func TestSplitAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &splitAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestSplitAction_SessionNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "session-does-not-exist",
+		Branch:    "feature-42",
+		StepData:  map[string]any{},
+	})
+
+	action := &splitAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(nil),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestSplitAction_SkipsWhenDiffBelowThreshold(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// git status --porcelain (used by GetDiffStats)
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, exec.MockResponse{
+		Stdout: []byte(" M auth.go\n"),
+	})
+	// git diff --numstat (50 additions + 30 deletions = 80 lines)
+	mockExec.AddPrefixMatch("git", []string{"diff", "--numstat"}, exec.MockResponse{
+		Stdout: []byte("50\t30\tauth.go\n"),
+	})
+	// git symbolic-ref (for GetDefaultBranch fallback)
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &splitAction{daemon: d}
+	// max_lines = 500: diff only has 80 lines → skip
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"max_lines": 500}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success (skip) when diff below threshold, got error: %v", result.Error)
+	}
+
+	// Claude and gh pr create must NOT have been called.
+	for _, c := range mockExec.GetCalls() {
+		if c.Name == "claude" {
+			t.Error("Claude should not be called when diff is below threshold")
+		}
+		if c.Name == "gh" {
+			t.Error("gh should not be called when diff is below threshold")
+		}
+	}
+}
+
+func TestSplitAction_SingleGroupNoSplit(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetDiffStats: large diff
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, exec.MockResponse{
+		Stdout: []byte(" M auth.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--numstat"}, exec.MockResponse{
+		Stdout: []byte("300\t300\tauth.go\n"),
+	})
+	// AnalyzeDiffForSplit
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--name-only"}, exec.MockResponse{
+		Stdout: []byte("auth.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff"}, exec.MockResponse{
+		Stdout: []byte("diff --git a/auth.go b/auth.go\n+changes\n"),
+	})
+	// Claude returns single-group plan → no split needed
+	mockExec.AddPrefixMatch("claude", []string{"--print", "-p"}, exec.MockResponse{
+		Stdout: []byte(`{"groups":[{"name":"auth","title":"Add auth","description":"Auth changes","files":["auth.go"]}]}`),
+	})
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &splitAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"max_lines": 100}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success when single group returned, got: %v", result.Error)
+	}
+
+	// gh pr create should NOT have been called (no split needed for 1 group).
+	for _, c := range mockExec.GetCalls() {
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "pr" && c.Args[1] == "create" {
+			t.Error("gh pr create should not be called for single-group plan")
+		}
+	}
+}
+
+func TestSplitAction_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetDiffStats: large diff
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, exec.MockResponse{
+		Stdout: []byte(" M auth.go\n M tests.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--numstat"}, exec.MockResponse{
+		Stdout: []byte("300\t300\tauth.go\n200\t200\ttests.go\n"),
+	})
+	// AnalyzeDiffForSplit git calls
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--name-only"}, exec.MockResponse{
+		Stdout: []byte("auth.go\ntests.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff"}, exec.MockResponse{
+		Stdout: []byte("diff --git a/auth.go b/auth.go\n+auth changes\ndiff --git a/tests.go b/tests.go\n+test changes\n"),
+	})
+	// Claude returns 2-group plan
+	splitPlan := `{"groups":[{"name":"auth","title":"Add authentication","description":"Authentication changes","files":["auth.go"]},{"name":"tests","title":"Add tests","description":"Test coverage","files":["tests.go"]}]}`
+	mockExec.AddPrefixMatch("claude", []string{"--print", "-p"}, exec.MockResponse{
+		Stdout: []byte(splitPlan),
+	})
+	// GetDefaultBranch fallback
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+	// CreateSplitBranch calls (for each group)
+	mockExec.AddPrefixMatch("git", []string{"checkout", "-b"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"checkout", "feature-sess-1"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"commit", "-m"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"push", "-u"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "create"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &splitAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"max_lines": 100}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify gh pr create was called twice (once per group)
+	prCreateCount := 0
+	for _, c := range mockExec.GetCalls() {
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "pr" && c.Args[1] == "create" {
+			prCreateCount++
+		}
+	}
+	if prCreateCount != 2 {
+		t.Errorf("expected 2 gh pr create calls (one per split group), got %d", prCreateCount)
+	}
+}
+
+func TestSplitAction_ClaudeFailure(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetDiffStats: large diff
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, exec.MockResponse{
+		Stdout: []byte(" M auth.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--numstat"}, exec.MockResponse{
+		Stdout: []byte("600\t0\tauth.go\n"),
+	})
+	// AnalyzeDiffForSplit calls
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--name-only"}, exec.MockResponse{
+		Stdout: []byte("auth.go\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"diff", "--no-ext-diff"}, exec.MockResponse{
+		Stdout: []byte("diff content\n"),
+	})
+	// Claude fails
+	mockExec.AddPrefixMatch("claude", []string{"--print", "-p"}, exec.MockResponse{
+		Err: fmt.Errorf("claude: not found"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-2")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-2",
+		IssueRef:  config.IssueRef{Source: "github", ID: "43"},
+		SessionID: "sess-2",
+		Branch:    "feature-sess-2",
+		StepData:  map[string]any{},
+	})
+
+	action := &splitAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-2",
+		Params:     workflow.NewParamHelper(map[string]any{"max_lines": 100}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when Claude fails")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error when Claude fails")
+	}
+}
+
+func TestSplitAction_RegisteredInRegistry(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	registry := d.buildActionRegistry()
+	if registry.Get("ai.split") == nil {
+		t.Error("ai.split not registered in action registry")
+	}
+}

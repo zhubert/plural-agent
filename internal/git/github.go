@@ -1113,6 +1113,161 @@ Diff:
 	return body, nil
 }
 
+// SplitGroup describes a single logical concern extracted from a diff.
+type SplitGroup struct {
+	// Name is a short slug used to suffix the branch name (e.g. "auth", "tests").
+	Name string `json:"name"`
+	// Title is the PR title for this split.
+	Title string `json:"title"`
+	// Description is a short explanation of what belongs in this group.
+	Description string `json:"description"`
+	// Files is the list of changed file paths that belong to this group.
+	Files []string `json:"files"`
+}
+
+// SplitPlan is the Claude-generated plan returned by AnalyzeDiffForSplit.
+type SplitPlan struct {
+	Groups []SplitGroup `json:"groups"`
+}
+
+// AnalyzeDiffForSplit asks Claude to analyze the diff between baseBranch and branch
+// and propose a SplitPlan grouping the changed files into logical concerns.
+// Returns an error if Claude cannot be invoked or produces invalid output.
+func (s *GitService) AnalyzeDiffForSplit(ctx context.Context, repoPath, branch, baseBranch string) (*SplitPlan, error) {
+	log := logger.WithComponent("git")
+	log.Info("analyzing diff for split with Claude", "branch", branch, "baseBranch", baseBranch)
+
+	if baseBranch == "" {
+		baseBranch = s.GetDefaultBranch(ctx, repoPath)
+	}
+
+	// Use origin/<baseBranch> when available for an up-to-date comparison ref.
+	comparisonRef := baseBranch
+	_, fetchErr := s.executor.CombinedOutput(ctx, repoPath, "git", "fetch", "origin", baseBranch)
+	if fetchErr == nil {
+		candidateRef := fmt.Sprintf("origin/%s", baseBranch)
+		_, _, verifyErr := s.executor.Run(ctx, repoPath, "git", "rev-parse", "--verify", candidateRef)
+		if verifyErr == nil {
+			comparisonRef = candidateRef
+		}
+	}
+
+	// List changed files.
+	fileOutput, err := s.executor.Output(ctx, repoPath, "git", "diff", "--name-only",
+		fmt.Sprintf("%s...%s", comparisonRef, branch))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list changed files: %w", err)
+	}
+	changedFiles := strings.TrimSpace(string(fileOutput))
+	if changedFiles == "" {
+		return nil, fmt.Errorf("no changed files between %s and %s", baseBranch, branch)
+	}
+
+	// Get the diff for context (truncated if large).
+	diffOutput, err := s.executor.Output(ctx, repoPath, "git", "diff", "--no-ext-diff",
+		fmt.Sprintf("%s...%s", comparisonRef, branch))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get diff: %w", err)
+	}
+	fullDiff := string(diffOutput)
+	if len(fullDiff) > MaxDiffSize {
+		fullDiff = fullDiff[:MaxDiffSize] + "\n... (diff truncated)"
+	}
+
+	prompt := fmt.Sprintf(`You are a senior engineer reviewing a large pull request. Analyze the diff below and group the changed files into logically separate concerns so they can be submitted as independent PRs.
+
+Return ONLY valid JSON — no preamble, no markdown fences. Use this exact schema:
+{"groups":[{"name":"<slug>","title":"<PR title>","description":"<one sentence>","files":["path/to/file",...]},...]}
+
+Rules:
+- Every changed file must appear in exactly one group.
+- "name" must be a short lowercase slug (letters, digits, hyphens only), unique across groups.
+- Aim for 2–5 groups. If the changes are already a single coherent concern, return one group.
+- Preserve logical dependencies: if group B depends on group A, list A first.
+- Do NOT invent files — only use files from the list below.
+
+Changed files:
+%s
+
+Diff:
+%s`, changedFiles, fullDiff)
+
+	output, err := s.executor.Output(ctx, repoPath, "claude", "--print", "-p", prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze diff with Claude: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
+		return nil, fmt.Errorf("Claude returned empty split plan")
+	}
+
+	var plan SplitPlan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse split plan JSON: %w", err)
+	}
+	if len(plan.Groups) == 0 {
+		return nil, fmt.Errorf("split plan contains no groups")
+	}
+
+	log.Info("split plan generated", "branch", branch, "groups", len(plan.Groups))
+	return &plan, nil
+}
+
+// CreateSplitBranch creates a new branch from baseBranch, cherry-picks the given
+// files from sourceBranch into it, commits with the provided message, and pushes.
+// It then creates a GitHub PR with the given title and body.
+// The sourceBranch must already be pushed to origin.
+func (s *GitService) CreateSplitBranch(ctx context.Context, repoPath, sourceBranch, newBranch, baseBranch, prTitle, prBody string, files []string) error {
+	log := logger.WithComponent("git")
+	log.Info("creating split branch", "newBranch", newBranch, "baseBranch", baseBranch, "files", len(files))
+
+	// Create the new branch from baseBranch.
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", "-b", newBranch, baseBranch); err != nil {
+		return fmt.Errorf("git checkout -b %s %s failed: %w", newBranch, baseBranch, err)
+	}
+
+	// Cherry-pick the files from sourceBranch.
+	checkoutArgs := append([]string{"checkout", sourceBranch, "--"}, files...)
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", checkoutArgs...); err != nil {
+		// Best-effort: return to original branch before surfacing the error.
+		_, _ = s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", sourceBranch)
+		return fmt.Errorf("git checkout %s -- <files> failed: %w", sourceBranch, err)
+	}
+
+	// Commit the selected files.
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", "commit", "-m", prTitle); err != nil {
+		_, _ = s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", sourceBranch)
+		return fmt.Errorf("git commit on split branch %s failed: %w", newBranch, err)
+	}
+
+	// Push the new branch.
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", "push", "-u", "origin", newBranch); err != nil {
+		_, _ = s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", sourceBranch)
+		return fmt.Errorf("git push for split branch %s failed: %w", newBranch, err)
+	}
+
+	// Create the PR.
+	_, _, err := s.executor.Run(ctx, repoPath, "gh", "pr", "create",
+		"--base", baseBranch,
+		"--head", newBranch,
+		"--title", prTitle,
+		"--body", prBody,
+	)
+	if err != nil {
+		_, _ = s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", sourceBranch)
+		return fmt.Errorf("gh pr create for split branch %s failed: %w", newBranch, err)
+	}
+
+	// Return to the original branch.
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", sourceBranch); err != nil {
+		log.Warn("failed to restore original branch after split", "sourceBranch", sourceBranch, "error", err)
+	}
+
+	log.Info("split branch created and PR opened", "newBranch", newBranch)
+	return nil
+}
+
 // GetPRLinkText returns the appropriate text to add to a PR body based on the issue source.
 // For GitHub issues: returns "\n\nFixes #123"
 // For Asana tasks: returns "" (no auto-close support)

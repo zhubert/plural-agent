@@ -921,6 +921,91 @@ func (d *Daemon) writePRDescription(ctx context.Context, item daemonstate.WorkIt
 	return nil
 }
 
+// splitBranches analyzes the branch diff with Claude and creates a separate branch and
+// PR for each logical concern found in the diff.
+//
+// Optional params (from the workflow step):
+//   - max_lines (int, default 500): skip the split when the diff is smaller than this.
+//   - base_branch (string): override the comparison base branch.
+func (d *Daemon) splitBranches(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, params *workflow.ParamHelper) error {
+	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
+
+	// Refresh stale session so worktree path is valid.
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	baseBranch := params.String("base_branch", "")
+	if baseBranch == "" {
+		baseBranch = sess.BaseBranch
+	}
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	maxLines := params.Int("max_lines", 500)
+
+	// Check diff size; skip split if below threshold.
+	if maxLines > 0 {
+		diffCtx, diffCancel := context.WithTimeout(ctx, 30*time.Second)
+		stats, err := d.gitService.GetDiffStats(diffCtx, workDir)
+		diffCancel()
+		if err != nil {
+			log.Warn("could not get diff stats, proceeding with split anyway", "error", err)
+		} else {
+			totalLines := stats.Additions + stats.Deletions
+			if totalLines < maxLines {
+				log.Info("diff below max_lines threshold, skipping split",
+					"totalLines", totalLines, "max_lines", maxLines)
+				return nil
+			}
+		}
+	}
+
+	// Ask Claude to produce a split plan.
+	analyzeCtx, analyzeCancel := context.WithTimeout(ctx, 3*time.Minute)
+	plan, err := d.gitService.AnalyzeDiffForSplit(analyzeCtx, workDir, item.Branch, baseBranch)
+	analyzeCancel()
+	if err != nil {
+		return fmt.Errorf("failed to analyze diff for split: %w", err)
+	}
+
+	if len(plan.Groups) <= 1 {
+		log.Info("split plan has only one group, no split needed")
+		return nil
+	}
+
+	log.Info("splitting branch into multiple PRs", "groups", len(plan.Groups))
+
+	for i, group := range plan.Groups {
+		if len(group.Files) == 0 {
+			log.Warn("split group has no files, skipping", "group", group.Name)
+			continue
+		}
+
+		// Name new branch as <original-branch>-split-<slug>.
+		newBranch := fmt.Sprintf("%s-split-%s", item.Branch, group.Name)
+
+		body := fmt.Sprintf("## Summary\n%s\n\n_Split from #%s by ai.split_",
+			group.Description, item.IssueRef.ID)
+
+		splitCtx, splitCancel := context.WithTimeout(ctx, 5*time.Minute)
+		err := d.gitService.CreateSplitBranch(splitCtx, workDir, item.Branch, newBranch, baseBranch,
+			group.Title, body, group.Files)
+		splitCancel()
+		if err != nil {
+			return fmt.Errorf("failed to create split branch %d (%s): %w", i+1, newBranch, err)
+		}
+
+		log.Info("created split PR", "branch", newBranch, "title", group.Title)
+	}
+
+	return nil
+}
+
 // saveRunnerMessages saves messages for a session's runner.
 func (d *Daemon) saveRunnerMessages(sessionID string, runner claude.RunnerSession) {
 	if err := d.sessionMgr.SaveRunnerMessages(sessionID, runner); err != nil {
