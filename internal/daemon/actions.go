@@ -467,12 +467,19 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 	rebaseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	if err := d.gitService.RebaseBranch(rebaseCtx, workDir, item.Branch, baseBranch); err != nil {
+	result, err := d.gitService.RebaseBranchWithStatus(rebaseCtx, workDir, item.Branch, baseBranch)
+	if err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("rebase failed: %w", err)}
 	}
 
-	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1)
-	return workflow.ActionResult{Success: true}
+	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1, "clean", result.Clean)
+	return workflow.ActionResult{
+		Success: true,
+		Data: map[string]any{
+			"last_rebase_clean": result.Clean,
+			"last_rebase_at":    time.Now().Format(time.RFC3339),
+		},
+	}
 }
 
 // squashAction implements the git.squash action.
