@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -13,12 +12,11 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/mcp"
+	"github.com/zhubert/erg/internal/testutil"
 )
 
 // testLogger creates a discard logger for tests
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
+func testLogger() *slog.Logger { return testutil.DiscardLogger() }
 
 func TestNew(t *testing.T) {
 	tests := []struct {

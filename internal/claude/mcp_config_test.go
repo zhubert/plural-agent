@@ -9,7 +9,7 @@ import (
 func TestCreateContainerMCPConfigLocked(t *testing.T) {
 	r := &Runner{
 		sessionID: "test-container-mcp",
-		log:       pmTestLogger(),
+		log:       testLogger(),
 	}
 
 	// Use a container port (what ensureServerRunning passes for container sessions)
@@ -91,7 +91,7 @@ func TestCreateContainerMCPConfigLocked(t *testing.T) {
 func TestCreateMCPConfigLocked_HostSession(t *testing.T) {
 	r := &Runner{
 		sessionID: "test-host-mcp",
-		log:       pmTestLogger(),
+		log:       testLogger(),
 	}
 
 	socketPath := "/tmp/pl-test-host-mcp.sock"
@@ -150,7 +150,7 @@ func TestCreateContainerMCPConfig_NoExternalServers(t *testing.T) {
 	// (not supported in container mode)
 	r := &Runner{
 		sessionID: "test-no-external",
-		log:       pmTestLogger(),
+		log:       testLogger(),
 		mcpServers: []MCPServer{
 			{Name: "external", Command: "/usr/local/bin/external", Args: []string{"serve"}},
 		},
