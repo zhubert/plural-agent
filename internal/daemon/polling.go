@@ -263,7 +263,6 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	}
 
 	pr := linkedPRs[0]
-	label := d.resolveQueueLabel(repoPath)
 
 	log.Info("existing PR found for issue",
 		"pr", pr.Number, "state", pr.State, "branch", pr.HeadRefName)
@@ -297,11 +296,10 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	}
 
 	// PR is open — adopt it into the workflow so the daemon monitors CI/review.
-	comment := fmt.Sprintf(
-		"Adopting existing PR #%d into the workflow. Removing the '%s' label — the daemon will monitor CI and review status.",
-		pr.Number, label,
-	)
-	d.unqueueIssue(ctx, *item, comment)
+	// Keep the queued label as a durable safety net: if the daemon crashes before
+	// persisting state, the label ensures this issue is rediscovered on next start.
+	// HasWorkItemForIssue prevents re-adoption on subsequent polls within the same run.
+	// The label is removed later when the PR is actually merged (normal workflow path).
 
 	// Create a synthetic session so GetSession() works for CI/review polling.
 	sessionID := uuid.New().String()
