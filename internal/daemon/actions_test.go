@@ -6061,6 +6061,310 @@ func TestSplitAction_RegisteredInRegistry(t *testing.T) {
 		t.Error("ai.split not registered in action registry")
 	}
 }
+// --- cherryPickAction tests ---
+
+func TestCherryPickAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(map[string]any{"commits": "abc1234", "target_branch": "release-v2"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestCherryPickAction_Execute_SessionNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "missing-session",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"commits": "abc1234", "target_branch": "release-v2"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestCherryPickAction_Execute_MissingTargetBranch(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"commits": "abc1234"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when target_branch is missing")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "target_branch") {
+		t.Errorf("expected target_branch error, got: %v", result.Error)
+	}
+}
+
+func TestCherryPickAction_Execute_MissingCommits(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"target_branch": "release-v2"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when commits param is missing")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "commits") {
+		t.Errorf("expected commits error, got: %v", result.Error)
+	}
+}
+
+func TestCherryPickAction_Execute_Success_StringCommits(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"checkout", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"cherry-pick", "abc1234"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "origin", "release-v2"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"commits": "abc1234", "target_branch": "release-v2"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+}
+
+func TestCherryPickAction_Execute_Success_ListCommits(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"checkout", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"cherry-pick", "abc1234", "def5678"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "origin", "release-v2"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params: workflow.NewParamHelper(map[string]any{
+			"commits":       []any{"abc1234", "def5678"},
+			"target_branch": "release-v2",
+		}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+}
+
+func TestCherryPickAction_Execute_CherryPickFails(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"checkout", "release-v2"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"cherry-pick", "abc1234"}, exec.MockResponse{
+		Err: fmt.Errorf("merge conflict"),
+	})
+	mockExec.AddExactMatch("git", []string{"cherry-pick", "--abort"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &cherryPickAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"commits": "abc1234", "target_branch": "release-v2"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when cherry-pick fails")
+	}
+	if result.Error == nil {
+		t.Error("expected error when cherry-pick fails")
+	}
+}
+
+func TestCherryPickAction_RegisteredInRegistry(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	registry := d.buildActionRegistry()
+	if registry.Get("git.cherry_pick") == nil {
+		t.Error("git.cherry_pick not registered in action registry")
+	}
+}
+
+// --- parseCherryPickCommits tests ---
+
+func TestParseCherryPickCommits_StringSingle(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": "abc1234"})
+	commits, err := parseCherryPickCommits(params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) != 1 || commits[0] != "abc1234" {
+		t.Errorf("expected [abc1234], got %v", commits)
+	}
+}
+
+func TestParseCherryPickCommits_StringMultiple(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": "abc1234 def5678"})
+	commits, err := parseCherryPickCommits(params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) != 2 || commits[0] != "abc1234" || commits[1] != "def5678" {
+		t.Errorf("expected [abc1234 def5678], got %v", commits)
+	}
+}
+
+func TestParseCherryPickCommits_List(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": []any{"abc1234", "def5678"}})
+	commits, err := parseCherryPickCommits(params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commits) != 2 || commits[0] != "abc1234" || commits[1] != "def5678" {
+		t.Errorf("expected [abc1234 def5678], got %v", commits)
+	}
+}
+
+func TestParseCherryPickCommits_MissingParam(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{})
+	_, err := parseCherryPickCommits(params)
+	if err == nil {
+		t.Fatal("expected error for missing commits param")
+	}
+	if !strings.Contains(err.Error(), "commits parameter is required") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestParseCherryPickCommits_EmptyString(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": ""})
+	_, err := parseCherryPickCommits(params)
+	if err == nil {
+		t.Fatal("expected error for empty string commits")
+	}
+}
+
+func TestParseCherryPickCommits_EmptyList(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": []any{}})
+	_, err := parseCherryPickCommits(params)
+	if err == nil {
+		t.Fatal("expected error for empty list commits")
+	}
+}
+
+func TestParseCherryPickCommits_InvalidType(t *testing.T) {
+	params := workflow.NewParamHelper(map[string]any{"commits": 12345})
+	_, err := parseCherryPickCommits(params)
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+}
+
 // --- github.create_draft_pr tests ---
 
 func TestCreateDraftPRAction_WorkItemNotFound(t *testing.T) {

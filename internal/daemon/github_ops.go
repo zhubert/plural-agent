@@ -192,18 +192,28 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 		defer rebaseCancel()
 
 		if rebaseErr := d.gitService.RebaseBranch(rebaseCtx, worktree, sess.Branch, baseBranch); rebaseErr != nil {
-			log.Warn("linearization rebase failed, returning original merge error", "rebaseError", rebaseErr)
-			return mergeErr
-		}
+			log.Warn("linearization rebase failed, falling back to squash merge", "rebaseError", rebaseErr)
 
-		log.Info("branch linearized successfully, retrying merge")
+			squashCtx, squashCancel := context.WithTimeout(ctx, 60*time.Second)
+			defer squashCancel()
 
-		// Retry merge
-		retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
-		defer retryCancel()
+			if squashErr := d.gitService.MergePR(squashCtx, sess.RepoPath, item.Branch, false, "squash"); squashErr != nil {
+				log.Warn("squash merge fallback also failed", "squashError", squashErr)
+				return mergeErr
+			}
 
-		if retryErr := d.gitService.MergePR(retryCtx, sess.RepoPath, item.Branch, false, method); retryErr != nil {
-			return retryErr
+			log.Info("merged PR via squash fallback")
+			// Fall through to post-merge cleanup below.
+		} else {
+			log.Info("branch linearized successfully, retrying merge")
+
+			// Retry merge
+			retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
+			defer retryCancel()
+
+			if retryErr := d.gitService.MergePR(retryCtx, sess.RepoPath, item.Branch, false, method); retryErr != nil {
+				return retryErr
+			}
 		}
 	}
 

@@ -738,6 +738,47 @@ func (s *GitService) MergeBaseIntoBranch(ctx context.Context, worktreePath, base
 	return nil, nil
 }
 
+// CherryPick cherry-picks the given commits onto targetBranch in repoPath
+// and pushes the result to origin. The commits are applied in the order given.
+//
+// If cherry-pick conflicts occur, the cherry-pick is aborted and an error is
+// returned so the caller can route to ai.resolve_conflicts or another handler.
+func (s *GitService) CherryPick(ctx context.Context, repoPath, targetBranch string, commits []string) error {
+	log := logger.WithComponent("git")
+
+	if len(commits) == 0 {
+		return fmt.Errorf("no commits specified for cherry-pick")
+	}
+
+	// Fetch to ensure target branch ref is current (best-effort).
+	if _, err := s.executor.CombinedOutput(ctx, repoPath, "git", "fetch", "origin", targetBranch); err != nil {
+		return fmt.Errorf("git fetch origin %s failed: %w", targetBranch, err)
+	}
+
+	// Check out the target branch.
+	if out, err := s.executor.CombinedOutput(ctx, repoPath, "git", "checkout", targetBranch); err != nil {
+		return fmt.Errorf("git checkout %s failed: %s: %w", targetBranch, strings.TrimSpace(string(out)), err)
+	}
+
+	log.Info("cherry-picking commits", "targetBranch", targetBranch, "commits", commits)
+
+	// Cherry-pick all commits in one invocation (preserves order, atomic).
+	args := append([]string{"cherry-pick"}, commits...)
+	if out, err := s.executor.CombinedOutput(ctx, repoPath, "git", args...); err != nil {
+		// Abort to leave the worktree in a clean state.
+		s.executor.CombinedOutput(ctx, repoPath, "git", "cherry-pick", "--abort") //nolint:errcheck
+		return fmt.Errorf("git cherry-pick failed (possible conflicts): %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Push the updated target branch.
+	if out, err := s.executor.CombinedOutput(ctx, repoPath, "git", "push", "origin", targetBranch); err != nil {
+		return fmt.Errorf("git push origin %s failed: %s: %w", targetBranch, strings.TrimSpace(string(out)), err)
+	}
+
+	log.Info("cherry-pick complete", "targetBranch", targetBranch, "numCommits", len(commits))
+	return nil
+}
+
 // CIStatus represents the overall CI check status for a PR.
 type CIStatus string
 

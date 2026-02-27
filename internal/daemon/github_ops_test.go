@@ -96,7 +96,7 @@ func TestMergePR_RebasesOnFailure(t *testing.T) {
 	}
 }
 
-func TestMergePR_RebaseFailsFallsThrough(t *testing.T) {
+func TestMergePR_RebaseFailsFallsBackToSquash(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	cfg := testConfig()
 	d := testDaemonWithExec(cfg, mockExec)
@@ -115,8 +115,94 @@ func TestMergePR_RebaseFailsFallsThrough(t *testing.T) {
 
 	item, _ := d.state.GetWorkItem("wi-2")
 
-	// MergePR fails
-	mockExec.AddPrefixMatch("gh", []string{"pr", "merge"}, exec.MockResponse{
+	// First MergePR call (rebase) fails, second (squash) succeeds
+	mergeAttempts := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "gh" && len(args) >= 3 && args[0] == "pr" && args[1] == "merge" {
+			mergeAttempts++
+			// First attempt (rebase) fails
+			return mergeAttempts == 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("merge failed"), Stderr: []byte("This branch can't be rebased")})
+
+	// RebaseBranch: fetch succeeds
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	// RebaseBranch: rebase fails (real conflicts)
+	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{
+		Err: fmt.Errorf("rebase conflict"),
+	})
+	// RebaseBranch: abort after failure
+	mockExec.AddExactMatch("git", []string{"rebase", "--abort"}, exec.MockResponse{})
+
+	// Squash fallback succeeds (catch-all for gh pr merge)
+	mockExec.AddPrefixMatch("gh", []string{"pr", "merge"}, exec.MockResponse{})
+
+	ctx := context.Background()
+	err := d.mergePR(ctx, item)
+	if err != nil {
+		t.Fatalf("expected mergePR to succeed via squash fallback, got: %v", err)
+	}
+
+	// Verify merge was attempted twice (rebase then squash)
+	if mergeAttempts != 2 {
+		t.Errorf("expected 2 merge attempts (rebase + squash), got %d", mergeAttempts)
+	}
+
+	// Verify the session was marked as merged
+	updatedSess := cfg.GetSession("sess-2")
+	if updatedSess == nil {
+		t.Fatal("session not found after merge")
+	}
+	if !updatedSess.PRMerged {
+		t.Error("expected session to be marked as PR merged after squash fallback")
+	}
+
+	// Verify the squash merge used --squash flag
+	calls := mockExec.GetCalls()
+	foundSquash := false
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 3 && c.Args[0] == "pr" && c.Args[1] == "merge" {
+			for _, a := range c.Args {
+				if a == "--squash" {
+					foundSquash = true
+				}
+			}
+		}
+	}
+	if !foundSquash {
+		t.Error("expected squash merge to be attempted with --squash flag")
+	}
+}
+
+func TestMergePR_SquashFallbackAlsoFails(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	cfg := testConfig()
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-2b")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "wi-2b",
+		SessionID: "sess-2b",
+		Branch:    sess.Branch,
+		StepData:  map[string]any{},
+	})
+
+	item, _ := d.state.GetWorkItem("wi-2b")
+
+	// First MergePR (rebase) fails with specific message, squash also fails
+	mergeAttempts := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "gh" && len(args) >= 3 && args[0] == "pr" && args[1] == "merge" {
+			mergeAttempts++
+			return true
+		}
+		return false
+	}, exec.MockResponse{
 		Err:    fmt.Errorf("merge failed"),
 		Stderr: []byte("merge failed"),
 	})
@@ -133,18 +219,18 @@ func TestMergePR_RebaseFailsFallsThrough(t *testing.T) {
 	ctx := context.Background()
 	err := d.mergePR(ctx, item)
 	if err == nil {
-		t.Fatal("expected mergePR to return an error")
+		t.Fatal("expected mergePR to return an error when squash also fails")
 	}
 
-	// Should return the original merge error, not the rebase error
+	// Should return the original rebase merge error
 	if err.Error() != "gh pr merge failed: merge failed" {
 		t.Errorf("expected original merge error, got: %v", err)
 	}
 
 	// Verify session was NOT marked as merged
-	updatedSess := cfg.GetSession("sess-2")
+	updatedSess := cfg.GetSession("sess-2b")
 	if updatedSess != nil && updatedSess.PRMerged {
-		t.Error("session should not be marked as merged when merge fails")
+		t.Error("session should not be marked as merged when both merges fail")
 	}
 }
 
