@@ -2,6 +2,7 @@
 erg
 
 .erg/
+.claude/
 
 # Core dumps
 core
