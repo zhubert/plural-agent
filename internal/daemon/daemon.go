@@ -321,6 +321,7 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("github.create_release", &createReleaseAction{daemon: d})
 	registry.Register("slack.notify", &slackNotifyAction{daemon: d})
 	registry.Register("webhook.post", &webhookPostAction{daemon: d})
+	registry.Register("workflow.retry", workflow.NewRetryAction(registry))
 	registry.Register("workflow.wait", &waitAction{daemon: d})
 	return registry
 }
