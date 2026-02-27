@@ -158,6 +158,25 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 		}
 	}
 
+	// For ai.review steps, read the review result file written by Claude and
+	// update step data. If the review blocked (passed=false), treat as failure
+	// so the engine follows the error edge.
+	if exitErr == nil && state != nil && state.Action == "ai.review" && sess != nil {
+		reviewPassed, reviewSummary := d.readAIReviewResult(sess)
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.StepData["review_passed"] = reviewPassed
+			it.StepData["ai_review_summary"] = reviewSummary
+		})
+		if !reviewPassed {
+			exitErr = fmt.Errorf("AI review blocked: %s", reviewSummary)
+		}
+		// Re-fetch item so workItemView sees the updated StepData rather than
+		// the snapshot captured at collection time.
+		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+			item = fresh
+		}
+	}
+
 	// Normal async completion -- advance via engine
 	view := d.workItemView(item)
 	success := exitErr == nil

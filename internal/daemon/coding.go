@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
@@ -1010,4 +1011,177 @@ func (d *Daemon) saveRunnerMessages(sessionID string, runner claude.RunnerSessio
 	if err := d.sessionMgr.SaveRunnerMessages(sessionID, runner); err != nil {
 		d.logger.Error("failed to save session messages", "sessionID", sessionID, "error", err)
 	}
+}
+
+// DefaultReviewSystemPrompt is the system prompt used for ai.review sessions when no
+// custom system_prompt is configured in the workflow. It instructs Claude to review
+// the diff and write a structured result file rather than modifying code.
+const DefaultReviewSystemPrompt = `You are an autonomous code reviewer performing a self-review before changes are pushed to a pull request.
+
+FOCUS: Review the provided diff for correctness, security, and code quality. Write findings to a JSON result file.
+
+DO NOT:
+- Modify any source files — this is a read-only review
+- Push branches or create pull requests
+- Run "git push" or "gh pr create"
+
+REVIEW CRITERIA:
+1. Correctness: Does the code implement the intended functionality correctly?
+2. Tests: Are there adequate tests for new code and bug fixes?
+3. Security: Are there vulnerabilities (SQL injection, XSS, path traversal, command injection, etc.)?
+4. Edge cases: Are error conditions and edge cases handled properly?
+5. Code quality: Is the code readable and following project conventions?
+
+OUTPUT:
+After reviewing, create the directory .erg/ if it does not exist, then write .erg/ai_review.json:
+{
+  "passed": true,
+  "summary": "Brief one-sentence summary of the review",
+  "issues": []
+}
+
+If you find BLOCKING issues (critical bugs, security holes, missing required tests):
+- Set "passed": false
+- List each issue in the "issues" array with "severity": "BLOCKING"
+
+If you find only WARNING issues (style, minor improvements, non-critical suggestions):
+- Set "passed": true
+- List each issue in the "issues" array with "severity": "WARNING"
+
+If the code looks good:
+- Set "passed": true with an empty "issues" array`
+
+// startAIReview starts a Claude session to review the branch diff.
+func (d *Daemon) startAIReview(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, round int, diff string) error {
+	// Refresh stale session (handles daemon restarts where old session is gone)
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	prompt := formatAIReviewPrompt(round, diff)
+
+	// Resolve system prompt from the workflow config state for this step.
+	// The state name is item.CurrentStep (e.g., "ai_review").
+	wfCfg := d.getWorkflowConfig(sess.RepoPath)
+	reviewState := wfCfg.States[item.CurrentStep]
+	systemPrompt := ""
+	if reviewState != nil {
+		p := workflow.NewParamHelper(reviewState.Params)
+		systemPrompt = p.String("system_prompt", "")
+	}
+
+	resolvedPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, sess.RepoPath)
+	if err != nil {
+		d.logger.Warn("failed to resolve ai_review system prompt", "error", err)
+	}
+
+	if resolvedPrompt == "" {
+		resolvedPrompt = DefaultReviewSystemPrompt
+	}
+
+	d.startWorkerWithPrompt(ctx, item, sess, prompt, resolvedPrompt)
+	d.logger.Info("started AI review session", "workItem", item.ID, "round", round)
+	return nil
+}
+
+// formatAIReviewPrompt builds the initial message for a Claude review session.
+// It includes the round number and the full diff for Claude to review.
+func formatAIReviewPrompt(round int, diff string) string {
+	return fmt.Sprintf(`AI SELF-REVIEW — ROUND %d
+
+Please review the following git diff and assess the code quality before this branch is pushed.
+
+INSTRUCTIONS:
+1. Read the diff carefully and understand what changes were made
+2. Use bash tools to explore the full context of changed files if needed
+3. Check for correctness, adequate tests, security issues, edge cases, and code quality
+4. Write your findings to .erg/ai_review.json (create .erg/ directory first if needed)
+5. Set "passed": false only for BLOCKING issues (critical bugs, security holes, missing required tests)
+6. Set "passed": true for warnings-only or clean reviews
+
+DO NOT modify any source files — this is a review-only session.
+DO NOT push or create PRs.
+
+GIT DIFF:
+%s`, round, diff)
+}
+
+// getAIReviewDiff returns the git diff between the remote base branch and HEAD.
+// workDir is the worktree or repo path. baseBranch is e.g. "main".
+func getAIReviewDiff(ctx context.Context, workDir, baseBranch string) (string, error) {
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+
+	ref := fmt.Sprintf("origin/%s...HEAD", baseBranch)
+	cmd := osexec.CommandContext(ctx, "git", "diff", ref)
+	cmd.Dir = workDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git diff failed: %w", err)
+	}
+
+	const maxDiffRunes = 50000
+	const truncSuffix = "\n\n... (diff truncated)"
+	return truncateDiff(string(output), maxDiffRunes, truncSuffix), nil
+}
+
+// truncateDiff truncates diff to at most maxRunes runes, appending truncSuffix
+// when truncation occurs. Using rune counts prevents splitting multi-byte UTF-8
+// characters that would produce invalid sequences for Claude's API.
+func truncateDiff(diff string, maxRunes int, truncSuffix string) string {
+	runes := []rune(diff)
+	if len(runes) <= maxRunes {
+		return diff
+	}
+	suffixRunes := []rune(truncSuffix)
+	return string(runes[:maxRunes-len(suffixRunes)]) + truncSuffix
+}
+
+// getAIReviewRounds extracts the AI review round counter from step data.
+func getAIReviewRounds(stepData map[string]any) int {
+	v, ok := stepData["ai_review_rounds"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// aiReviewResult is the JSON structure written by Claude to .erg/ai_review.json.
+type aiReviewResult struct {
+	Passed  bool   `json:"passed"`
+	Summary string `json:"summary"`
+}
+
+// readAIReviewResult reads the AI review result from .erg/ai_review.json in
+// the session's worktree. Returns (passed=true, summary="") if the file is
+// absent or unparseable — absent means Claude found no blocking issues.
+func (d *Daemon) readAIReviewResult(sess *config.Session) (bool, string) {
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	resultPath := filepath.Join(workDir, ".erg", "ai_review.json")
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		// File not present — Claude didn't flag any blocking issues
+		d.logger.Debug("ai_review.json not found, assuming review passed", "path", resultPath)
+		return true, ""
+	}
+
+	var result aiReviewResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		d.logger.Warn("failed to parse ai_review.json, assuming passed", "error", err, "path", resultPath)
+		return true, ""
+	}
+
+	d.logger.Info("read AI review result", "passed", result.Passed, "summary", result.Summary)
+	return result.Passed, result.Summary
 }

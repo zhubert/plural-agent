@@ -757,6 +757,70 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 	return workflow.ActionResult{Success: true, Async: true}
 }
 
+// aiReviewAction implements the ai.review action.
+// It runs a Claude session to review the branch diff before pushing,
+// acting as a self-review quality gate that can flag blocking issues.
+type aiReviewAction struct {
+	daemon *Daemon
+}
+
+// Execute fetches the branch diff and starts a Claude review session.
+// The session reviews the diff with a review-focused system prompt and writes
+// its result to .erg/ai_review.json in the worktree. handleAsyncComplete reads
+// that file to determine whether to advance (passed=true) or error (passed=false).
+func (a *aiReviewAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	// Check max rounds
+	maxRounds := ac.Params.Int("max_ai_review_rounds", 1)
+	rounds := getAIReviewRounds(item.StepData)
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max AI review rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	// Compute the work directory and base branch for the diff
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	// Get the branch diff
+	diffCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	diff, err := getAIReviewDiff(diffCtx, workDir, baseBranch)
+	if err != nil {
+		d.logger.Warn("failed to get review diff, proceeding with empty diff", "error", err)
+		diff = "(diff unavailable)"
+	}
+
+	// Increment rounds before starting worker
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["ai_review_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
+
+	// Resume/start review session
+	if err := d.startAIReview(ctx, item, sess, rounds+1, diff); err != nil {
+		return workflow.ActionResult{Error: err}
+	}
+
+	return workflow.ActionResult{Success: true, Async: true}
+}
+
 // createReleaseAction implements the github.create_release action.
 type createReleaseAction struct {
 	daemon *Daemon

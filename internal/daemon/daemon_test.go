@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -2476,5 +2477,107 @@ func TestDockerDownAndRecovery_FullCycle(t *testing.T) {
 	}
 	if item.State != daemonstate.WorkItemActive {
 		t.Errorf("expected active state after recovery, got %s", item.State)
+	}
+}
+
+// TestHandleAsyncComplete_AIReview_StepDataVisibleAfterUpdate verifies that when
+// an ai.review step completes, review_passed and ai_review_summary are stored in
+// the work item's StepData and the engine receives the updated state.
+// This is a regression test for the temporal inconsistency where workItemView was
+// constructed from a stale local snapshot before UpdateWorkItem persisted the data.
+func TestHandleAsyncComplete_AIReview_StepDataVisibleAfterUpdate(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		reviewPassed  bool
+		reviewSummary string
+		wantState     daemonstate.WorkItemState
+	}{
+		{
+			name:          "review blocked sets review_passed=false and fails item",
+			reviewPassed:  false,
+			reviewSummary: "missing tests for Foo",
+			wantState:     daemonstate.WorkItemFailed,
+		},
+		{
+			name:         "review passed sets review_passed=true and advances item",
+			reviewPassed: true,
+			wantState:    daemonstate.WorkItemCompleted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig()
+			d := testDaemon(cfg)
+
+			// Use a temp dir as the session's worktree so we can write ai_review.json.
+			worktreeDir := t.TempDir()
+			ergDir := filepath.Join(worktreeDir, ".erg")
+			if err := os.MkdirAll(ergDir, 0o755); err != nil {
+				t.Fatalf("mkdir .erg: %v", err)
+			}
+			resultData, _ := json.Marshal(aiReviewResult{Passed: tc.reviewPassed, Summary: tc.reviewSummary})
+			if err := os.WriteFile(filepath.Join(ergDir, "ai_review.json"), resultData, 0o644); err != nil {
+				t.Fatalf("write ai_review.json: %v", err)
+			}
+
+			sess := testSession("sess-ai-review")
+			sess.WorkTree = worktreeDir
+			cfg.AddSession(*sess)
+
+			// Custom workflow: ai.review (async) → done (succeed) / failed (fail).
+			customCfg := &workflow.Config{
+				Start: "ai_review",
+				States: map[string]*workflow.State{
+					"ai_review": {
+						Type:   workflow.StateTypeTask,
+						Action: "ai.review",
+						Next:   "done",
+						Error:  "failed",
+					},
+					"done":   {Type: workflow.StateTypeSucceed},
+					"failed": {Type: workflow.StateTypeFail},
+				},
+			}
+			registry := d.buildActionRegistry()
+			engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+			d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+			d.state.AddWorkItem(&daemonstate.WorkItem{
+				ID:          "item-ai-review",
+				IssueRef:    config.IssueRef{Source: "github", ID: "200"},
+				SessionID:   "sess-ai-review",
+				Branch:      "feature-ai-review",
+				CurrentStep: "ai_review",
+			})
+			d.state.AdvanceWorkItem("item-ai-review", "ai_review", "async_pending")
+
+			d.workers["item-ai-review"] = newMockDoneWorker()
+
+			d.collectCompletedWorkers(context.Background())
+
+			// Worker should be removed.
+			if _, ok := d.workers["item-ai-review"]; ok {
+				t.Error("expected done worker to be removed")
+			}
+
+			item, _ := d.state.GetWorkItem("item-ai-review")
+
+			// StepData must reflect the review result regardless of pass/fail.
+			if got, ok := item.StepData["review_passed"]; !ok {
+				t.Error("expected review_passed to be set in StepData")
+			} else if got != tc.reviewPassed {
+				t.Errorf("review_passed = %v, want %v", got, tc.reviewPassed)
+			}
+			if got, _ := item.StepData["ai_review_summary"].(string); got != tc.reviewSummary {
+				t.Errorf("ai_review_summary = %q, want %q", got, tc.reviewSummary)
+			}
+
+			// Item should be terminal and in the expected state.
+			if !item.IsTerminal() {
+				t.Errorf("expected item to be terminal, got State=%s Phase=%s", item.State, item.Phase)
+			}
+			if item.State != tc.wantState {
+				t.Errorf("State = %q, want %q", item.State, tc.wantState)
+			}
+		})
 	}
 }

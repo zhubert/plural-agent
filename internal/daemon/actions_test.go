@@ -6305,6 +6305,29 @@ func TestWaitAction_Execute(t *testing.T) {
 	})
 }
 
+// --- ai.review action tests ---
+
+func TestAIReviewAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &aiReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ai_review_rounds": 1})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
 func TestWritePRDescriptionAction_WorkItemNotFound(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
@@ -6322,6 +6345,103 @@ func TestWritePRDescriptionAction_WorkItemNotFound(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected error for missing work item")
+	}
+}
+
+func TestAIReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"ai_review_rounds": 1},
+	})
+
+	action := &aiReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ai_review_rounds": 1})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded")
+	}
+	if !strings.Contains(result.Error.Error(), "max AI review rounds exceeded") {
+		t.Errorf("expected 'max AI review rounds exceeded' error, got: %v", result.Error)
+	}
+}
+
+func TestAIReviewAction_Execute_MaxRoundsFloat64(t *testing.T) {
+	// JSON deserialization produces float64 for numbers
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"ai_review_rounds": float64(1)},
+	})
+
+	action := &aiReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ai_review_rounds": 1})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when max rounds exceeded (float64)")
+	}
+	if result.Error == nil {
+		t.Error("expected error when max rounds exceeded (float64)")
+	}
+}
+
+func TestAIReviewAction_Execute_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &aiReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ai_review_rounds": 1})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
 	}
 }
 
@@ -6350,6 +6470,383 @@ func TestWritePRDescriptionAction_SessionNotFound(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("expected error when session not found")
+	}
+}
+
+func TestAIReviewAction_RegisteredInRegistry(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	registry := d.buildActionRegistry()
+	if registry.Get("ai.review") == nil {
+		t.Error("ai.review not registered in action registry")
+	}
+}
+
+func TestGetAIReviewRounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepData map[string]any
+		want     int
+	}{
+		{"missing", map[string]any{}, 0},
+		{"int zero", map[string]any{"ai_review_rounds": 0}, 0},
+		{"int one", map[string]any{"ai_review_rounds": 1}, 1},
+		{"float64 zero", map[string]any{"ai_review_rounds": float64(0)}, 0},
+		{"float64 two", map[string]any{"ai_review_rounds": float64(2)}, 2},
+		{"wrong type", map[string]any{"ai_review_rounds": "oops"}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := getAIReviewRounds(tc.stepData)
+			if got != tc.want {
+				t.Errorf("getAIReviewRounds(%v) = %d, want %d", tc.stepData, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTruncateDiff(t *testing.T) {
+	tests := []struct {
+		name      string
+		diff      string
+		maxRunes  int
+		suffix    string
+		wantLen   int // expected rune count of result
+		wantTrunc bool
+	}{
+		{
+			name:      "short diff unchanged",
+			diff:      "hello world",
+			maxRunes:  100,
+			suffix:    "...truncated",
+			wantLen:   len([]rune("hello world")),
+			wantTrunc: false,
+		},
+		{
+			name:      "exact length unchanged",
+			diff:      strings.Repeat("a", 100),
+			maxRunes:  100,
+			suffix:    "...truncated",
+			wantLen:   100,
+			wantTrunc: false,
+		},
+		{
+			name:      "long diff truncated to maxRunes",
+			diff:      strings.Repeat("a", 200),
+			maxRunes:  100,
+			suffix:    strings.Repeat("s", 10),
+			wantLen:   100,
+			wantTrunc: true,
+		},
+		{
+			name:      "multibyte UTF-8 not split",
+			diff:      strings.Repeat("日", 200), // each '日' is 3 bytes, 1 rune
+			maxRunes:  100,
+			suffix:    strings.Repeat("s", 10),
+			wantLen:   100,
+			wantTrunc: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateDiff(tc.diff, tc.maxRunes, tc.suffix)
+			runeCount := len([]rune(got))
+			if runeCount != tc.wantLen {
+				t.Errorf("rune count = %d, want %d", runeCount, tc.wantLen)
+			}
+			if tc.wantTrunc && !strings.HasSuffix(got, tc.suffix) {
+				t.Errorf("expected result to end with suffix %q", tc.suffix)
+			}
+			if !tc.wantTrunc && got != tc.diff {
+				t.Errorf("expected unchanged diff, got %q", got)
+			}
+		})
+	}
+}
+
+func TestGetAIReviewDiff(t *testing.T) {
+	// Create a remote bare repo to serve as origin
+	remoteDir := t.TempDir()
+	localDir := t.TempDir()
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %s (%v)", args, out, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Initialize the remote repo and create an initial commit
+	runGit(remoteDir, "init", "-b", "main")
+	runGit(remoteDir, "config", "user.email", "test@test.com")
+	runGit(remoteDir, "config", "user.name", "Test")
+	helloPath := filepath.Join(remoteDir, "hello.go")
+	if err := os.WriteFile(helloPath, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(remoteDir, "add", ".")
+	runGit(remoteDir, "commit", "-m", "initial")
+
+	// Clone into localDir so origin/main is set up correctly
+	cloneCmd := osexec.Command("git", "clone", remoteDir, localDir)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone failed: %s (%v)", out, err)
+	}
+	runGit(localDir, "config", "user.email", "test@test.com")
+	runGit(localDir, "config", "user.name", "Test")
+
+	// Add a new file on the local branch (simulating work done by Claude)
+	newFile := filepath.Join(localDir, "new.go")
+	if err := os.WriteFile(newFile, []byte("package main\nfunc New() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(localDir, "add", ".")
+	runGit(localDir, "commit", "-m", "add new.go")
+
+	diff, err := getAIReviewDiff(context.Background(), localDir, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(diff, "new.go") {
+		t.Errorf("expected diff to mention new.go; got:\n%s", diff)
+	}
+}
+
+func TestGetAIReviewDiff_EmptyBaseBranch(t *testing.T) {
+	// When baseBranch is empty it should default to "main"
+	remoteDir := t.TempDir()
+	localDir := t.TempDir()
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s (%v)", args, out, err)
+		}
+	}
+
+	runGit(remoteDir, "init", "-b", "main")
+	runGit(remoteDir, "config", "user.email", "test@test.com")
+	runGit(remoteDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(remoteDir, "readme.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(remoteDir, "add", ".")
+	runGit(remoteDir, "commit", "-m", "initial")
+
+	cloneCmd := osexec.Command("git", "clone", remoteDir, localDir)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone failed: %s (%v)", out, err)
+	}
+	runGit(localDir, "config", "user.email", "test@test.com")
+	runGit(localDir, "config", "user.name", "Test")
+
+	// No extra commit — HEAD == origin/main; diff should be empty
+	diff, err := getAIReviewDiff(context.Background(), localDir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("expected empty diff when HEAD == origin/main, got:\n%s", diff)
+	}
+}
+
+func TestGetAIReviewDiff_InvalidDir(t *testing.T) {
+	_, err := getAIReviewDiff(context.Background(), "/nonexistent/path", "main")
+	if err == nil {
+		t.Error("expected error for invalid directory")
+	}
+}
+
+func TestGetAIReviewDiff_Truncation(t *testing.T) {
+	// Verify that diffs larger than 50000 runes are truncated
+	remoteDir := t.TempDir()
+	localDir := t.TempDir()
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s (%v)", args, out, err)
+		}
+	}
+
+	runGit(remoteDir, "init", "-b", "main")
+	runGit(remoteDir, "config", "user.email", "test@test.com")
+	runGit(remoteDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(remoteDir, "base.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(remoteDir, "add", ".")
+	runGit(remoteDir, "commit", "-m", "initial")
+
+	cloneCmd := osexec.Command("git", "clone", remoteDir, localDir)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone failed: %s (%v)", out, err)
+	}
+	runGit(localDir, "config", "user.email", "test@test.com")
+	runGit(localDir, "config", "user.name", "Test")
+
+	// Write a file large enough to exceed the 50000-rune limit
+	bigContent := "package main\n// " + strings.Repeat("x", 60000) + "\n"
+	if err := os.WriteFile(filepath.Join(localDir, "big.go"), []byte(bigContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(localDir, "add", ".")
+	runGit(localDir, "commit", "-m", "add big file")
+
+	diff, err := getAIReviewDiff(context.Background(), localDir, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	const wantSuffix = "\n\n... (diff truncated)"
+	if !strings.HasSuffix(diff, wantSuffix) {
+		t.Errorf("expected truncated diff to end with %q; got suffix: %q",
+			wantSuffix, diff[max(0, len(diff)-30):])
+	}
+	if runeCount := len([]rune(diff)); runeCount != 50000 {
+		t.Errorf("expected truncated diff to be exactly 50000 runes, got %d", runeCount)
+	}
+}
+
+func TestFormatAIReviewPrompt(t *testing.T) {
+	diff := "diff --git a/foo.go b/foo.go\n+func Foo() {}"
+	prompt := formatAIReviewPrompt(2, diff)
+
+	if !strings.Contains(prompt, "ROUND 2") {
+		t.Error("expected prompt to contain round number")
+	}
+	if !strings.Contains(prompt, diff) {
+		t.Error("expected prompt to contain the diff")
+	}
+	if !strings.Contains(prompt, "DO NOT modify") {
+		t.Error("expected prompt to contain DO NOT modify instruction")
+	}
+	if !strings.Contains(prompt, "ai_review.json") {
+		t.Error("expected prompt to mention ai_review.json output file")
+	}
+}
+
+func TestReadAIReviewResult_FileNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	dir := t.TempDir()
+	sess := &config.Session{WorkTree: dir}
+
+	passed, summary := d.readAIReviewResult(sess)
+
+	if !passed {
+		t.Error("expected passed=true when ai_review.json is absent")
+	}
+	if summary != "" {
+		t.Errorf("expected empty summary when file absent, got %q", summary)
+	}
+}
+
+func TestReadAIReviewResult_Passed(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	dir := t.TempDir()
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(ergDir, "ai_review.json")
+	content := `{"passed": true, "summary": "Looks good", "issues": []}`
+	if err := os.WriteFile(resultPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := &config.Session{WorkTree: dir}
+	passed, summary := d.readAIReviewResult(sess)
+
+	if !passed {
+		t.Error("expected passed=true")
+	}
+	if summary != "Looks good" {
+		t.Errorf("expected summary 'Looks good', got %q", summary)
+	}
+}
+
+func TestReadAIReviewResult_Failed(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	dir := t.TempDir()
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(ergDir, "ai_review.json")
+	content := `{"passed": false, "summary": "SQL injection risk found", "issues": [{"severity": "BLOCKING", "description": "SQL injection in query builder"}]}`
+	if err := os.WriteFile(resultPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := &config.Session{WorkTree: dir}
+	passed, summary := d.readAIReviewResult(sess)
+
+	if passed {
+		t.Error("expected passed=false for blocking issues")
+	}
+	if summary != "SQL injection risk found" {
+		t.Errorf("expected summary 'SQL injection risk found', got %q", summary)
+	}
+}
+
+func TestReadAIReviewResult_InvalidJSON(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	dir := t.TempDir()
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(ergDir, "ai_review.json")
+	if err := os.WriteFile(resultPath, []byte("not valid json {{{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := &config.Session{WorkTree: dir}
+	passed, _ := d.readAIReviewResult(sess)
+
+	if !passed {
+		t.Error("expected passed=true when JSON is invalid (fail-open for malformed output)")
+	}
+}
+
+func TestReadAIReviewResult_FallbackToRepoPath(t *testing.T) {
+	// When WorkTree is empty, use RepoPath
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	dir := t.TempDir()
+	ergDir := filepath.Join(dir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(ergDir, "ai_review.json")
+	if err := os.WriteFile(resultPath, []byte(`{"passed": false, "summary": "critical bug"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// WorkTree is empty — should fall back to RepoPath
+	sess := &config.Session{WorkTree: "", RepoPath: dir}
+	passed, summary := d.readAIReviewResult(sess)
+
+	if passed {
+		t.Error("expected passed=false")
+	}
+	if summary != "critical bug" {
+		t.Errorf("expected summary 'critical bug', got %q", summary)
 	}
 }
 
