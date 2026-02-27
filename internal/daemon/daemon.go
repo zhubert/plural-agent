@@ -284,7 +284,7 @@ func (d *Daemon) loadWorkflowConfigs() {
 
 		// Create engine with action registry and event checker
 		registry := d.buildActionRegistry()
-		checker := NewEventChecker(d)
+		checker := newEventChecker(d)
 		engine := workflow.NewEngine(cfg, registry, checker, d.logger)
 		d.engines[repoPath] = engine
 
@@ -333,7 +333,7 @@ func (d *Daemon) getEngine(repoPath string) *workflow.Engine {
 	// Create a default engine on the fly
 	cfg := workflow.DefaultWorkflowConfig()
 	registry := d.buildActionRegistry()
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	return workflow.NewEngine(cfg, registry, checker, d.logger)
 }
 

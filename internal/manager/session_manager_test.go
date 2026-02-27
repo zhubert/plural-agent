@@ -102,9 +102,9 @@ func TestSessionManager_GetRunners(t *testing.T) {
 	cfg := createTestConfig()
 	sm := NewSessionManager(cfg, git.NewGitService())
 
-	runners := sm.GetRunners()
+	runners := sm.getRunners()
 	if runners == nil {
-		t.Error("GetRunners should return non-nil map")
+		t.Error("getRunners should return non-nil map")
 	}
 
 	if len(runners) != 0 {
@@ -115,7 +115,7 @@ func TestSessionManager_GetRunners(t *testing.T) {
 	sm.runners["session-1"] = claude.New("session-1", "/test", "", false, nil)
 	sm.runners["session-2"] = claude.New("session-2", "/test", "", false, nil)
 
-	runners = sm.GetRunners()
+	runners = sm.getRunners()
 	if len(runners) != 2 {
 		t.Errorf("Expected 2 runners, got %d", len(runners))
 	}

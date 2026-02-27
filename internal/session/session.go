@@ -37,8 +37,8 @@ const MaxBranchNameValidation = 100
 // They also cannot start with - or end with .lock
 var validBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$`)
 
-// ValidateBranchName checks if a branch name is valid for git
-func ValidateBranchName(branch string) error {
+// validateBranchName checks if a branch name is valid for git
+func validateBranchName(branch string) error {
 	if branch == "" {
 		return nil // Empty is allowed (will use default)
 	}
@@ -444,17 +444,17 @@ func (s *SessionService) Delete(ctx context.Context, sess *config.Session) error
 	return nil
 }
 
-// OrphanedWorktree represents a worktree that has no matching session
-type OrphanedWorktree struct {
+// orphanedWorktree represents a worktree that has no matching session
+type orphanedWorktree struct {
 	Path     string // Full path to the worktree
 	RepoPath string // Parent repo path (derived from worktree .git file)
 	ID       string // Session ID (directory name)
 }
 
-// FindOrphanedWorktrees finds all worktrees in the centralized worktrees directory
+// findOrphanedWorktrees finds all worktrees in the centralized worktrees directory
 // (and pre-rename legacy .plural-worktrees directories) that don't have a matching session in config.
 // Directory scans are parallelized for better performance with many repos.
-func FindOrphanedWorktrees(cfg *config.Config) ([]OrphanedWorktree, error) {
+func findOrphanedWorktrees(cfg *config.Config) ([]orphanedWorktree, error) {
 	log := logger.WithComponent("session")
 	log.Info("searching for orphaned worktrees")
 
@@ -511,7 +511,7 @@ func FindOrphanedWorktrees(cfg *config.Config) ([]OrphanedWorktree, error) {
 
 	// Scan directories in parallel
 	var mu sync.Mutex
-	var orphans []OrphanedWorktree
+	var orphans []orphanedWorktree
 
 	var wg sync.WaitGroup
 	for _, worktreesDir := range dirsToCheck {
@@ -580,13 +580,13 @@ func getWorktreeRepoPath(worktreePath string) (string, error) {
 	return "", fmt.Errorf("could not find .git directory in path: %s", gitdir)
 }
 
-func findOrphansInDir(worktreesDir string, knownSessions map[string]bool, repoPathsSet map[string]bool) ([]OrphanedWorktree, error) {
+func findOrphansInDir(worktreesDir string, knownSessions map[string]bool, repoPathsSet map[string]bool) ([]orphanedWorktree, error) {
 	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var orphans []OrphanedWorktree
+	var orphans []orphanedWorktree
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -606,7 +606,7 @@ func findOrphansInDir(worktreesDir string, knownSessions map[string]bool, repoPa
 
 			// Only include orphans that belong to repos in our config
 			if repoPathsSet[repoPath] {
-				orphans = append(orphans, OrphanedWorktree{
+				orphans = append(orphans, orphanedWorktree{
 					Path:     worktreePath,
 					RepoPath: repoPath,
 					ID:       sessionID,
@@ -622,7 +622,7 @@ func findOrphansInDir(worktreesDir string, knownSessions map[string]bool, repoPa
 // running "git rev-parse --abbrev-ref HEAD" inside it. This handles all branch
 // naming patterns: default (erg-<UUID>), prefixed (user/erg-<UUID>), and
 // renamed branches.
-func detectWorktreeBranch(ctx context.Context, s *SessionService, orphan OrphanedWorktree) string {
+func detectWorktreeBranch(ctx context.Context, s *SessionService, orphan orphanedWorktree) string {
 	stdout, _, err := s.executor.Run(ctx, orphan.Path, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return ""
@@ -641,7 +641,7 @@ func detectWorktreeBranch(ctx context.Context, s *SessionService, orphan Orphane
 func (s *SessionService) PruneOrphanedWorktrees(ctx context.Context, cfg *config.Config) (int, error) {
 	log := logger.WithComponent("session")
 
-	orphans, err := FindOrphanedWorktrees(cfg)
+	orphans, err := findOrphanedWorktrees(cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -651,7 +651,7 @@ func (s *SessionService) PruneOrphanedWorktrees(ctx context.Context, cfg *config
 	}
 
 	// Group orphans by repo to avoid concurrent git operations on the same repo
-	orphansByRepo := make(map[string][]OrphanedWorktree)
+	orphansByRepo := make(map[string][]orphanedWorktree)
 	for _, orphan := range orphans {
 		orphansByRepo[orphan.RepoPath] = append(orphansByRepo[orphan.RepoPath], orphan)
 	}
@@ -663,7 +663,7 @@ func (s *SessionService) PruneOrphanedWorktrees(ctx context.Context, cfg *config
 	var wg sync.WaitGroup
 	for repoPath, repoOrphans := range orphansByRepo {
 		wg.Add(1)
-		go func(repoPath string, repoOrphans []OrphanedWorktree) {
+		go func(repoPath string, repoOrphans []orphanedWorktree) {
 			defer wg.Done()
 
 			for _, orphan := range repoOrphans {
