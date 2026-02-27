@@ -29,9 +29,9 @@ type diffStats struct {
 	Deletions    int
 }
 
-// selectResult contains all the state needed by the UI after selecting a session.
+// SelectResult contains all the state needed by the UI after selecting a session.
 // This allows SessionManager to handle data operations while app.go handles UI updates.
-type selectResult struct {
+type SelectResult struct {
 	Runner     claude.RunnerInterface
 	Messages   []claude.Message
 	HeaderName string     // Branch name if custom, otherwise session name
@@ -147,7 +147,7 @@ func (sm *SessionManager) GetSession(sessionID string) *config.Session {
 // Select prepares a session for activation, creating or reusing a runner,
 // and gathering all state needed for UI restoration. The caller (app.go)
 // is responsible for saving the previous session's state before calling this.
-func (sm *SessionManager) Select(sess *config.Session, previousSessionID string, previousInput string, previousStreaming string) *selectResult {
+func (sm *SessionManager) Select(ctx context.Context, sess *config.Session, previousSessionID string, previousInput string, previousStreaming string) *SelectResult {
 	if sess == nil {
 		return nil
 	}
@@ -185,7 +185,6 @@ func (sm *SessionManager) Select(sess *config.Session, previousSessionID string,
 	// Get diff stats for the worktree
 	var ds *diffStats
 	if sess.WorkTree != "" && sm.gitService != nil {
-		ctx := context.Background()
 		if gitStats, err := sm.gitService.GetDiffStats(ctx, sess.WorkTree); err == nil {
 			ds = &diffStats{
 				FilesChanged: gitStats.FilesChanged,
@@ -198,7 +197,7 @@ func (sm *SessionManager) Select(sess *config.Session, previousSessionID string,
 	}
 
 	// Build result with all state needed for UI
-	result := &selectResult{
+	result := &SelectResult{
 		Runner:     runner,
 		Messages:   runner.GetMessages(),
 		HeaderName: headerName,

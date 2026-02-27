@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -146,7 +147,7 @@ func TestSessionManager_Select_Nil(t *testing.T) {
 	cfg := createTestConfig()
 	sm := NewSessionManager(cfg, git.NewGitService())
 
-	result := sm.Select(nil, "", "", "")
+	result := sm.Select(context.Background(), nil, "", "", "")
 	if result != nil {
 		t.Error("Select(nil) should return nil")
 	}
@@ -158,7 +159,7 @@ func TestSessionManager_Select_SavesPreviousState(t *testing.T) {
 
 	// Select a session with previous state to save
 	sess := sm.GetSession("session-1")
-	sm.Select(sess, "prev-session", "saved input", "saved streaming")
+	sm.Select(context.Background(), sess, "prev-session", "saved input", "saved streaming")
 
 	// Verify state was saved
 	state := sm.stateManager.GetIfExists("prev-session")
@@ -179,7 +180,7 @@ func TestSessionManager_Select_CreatesRunner(t *testing.T) {
 	sm := NewSessionManager(cfg, git.NewGitService())
 
 	sess := sm.GetSession("session-1")
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	if result == nil {
 		t.Fatal("Select should return non-nil result")
@@ -205,7 +206,7 @@ func TestSessionManager_Select_ReusesRunner(t *testing.T) {
 	sm.runners["session-1"] = existingRunner
 
 	sess := sm.GetSession("session-1")
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	if result.Runner != existingRunner {
 		t.Error("Select should reuse existing runner")
@@ -218,7 +219,7 @@ func TestSessionManager_Select_HeaderName(t *testing.T) {
 
 	// Session with auto-generated branch (erg-)
 	sess := sm.GetSession("session-1")
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	if result.HeaderName != sess.Name {
 		t.Errorf("Expected header name %q, got %q", sess.Name, result.HeaderName)
@@ -226,7 +227,7 @@ func TestSessionManager_Select_HeaderName(t *testing.T) {
 
 	// Session with custom branch
 	sess = sm.GetSession("session-2")
-	result = sm.Select(sess, "", "", "")
+	result = sm.Select(context.Background(), sess, "", "", "")
 
 	if result.HeaderName != "custom-branch" {
 		t.Errorf("Expected header name 'custom-branch', got %q", result.HeaderName)
@@ -255,7 +256,7 @@ func TestSessionManager_Select_HeaderName_ExactErgPrefix(t *testing.T) {
 	sm := NewSessionManager(cfg, git.NewGitService())
 
 	sess := sm.GetSession("session-exact-prefix")
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	if result.HeaderName != sess.Name {
 		t.Errorf("Expected header name %q for 'erg-' branch, got %q", sess.Name, result.HeaderName)
@@ -276,7 +277,7 @@ func TestSessionManager_Select_RestoresState(t *testing.T) {
 	state.StreamingContent = "streaming content"
 	state.InputText = "saved input text"
 
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	if !result.IsWaiting {
 		t.Error("Expected IsWaiting to be restored")
@@ -458,7 +459,7 @@ func TestSessionManager_Select_ForkedSession(t *testing.T) {
 	})
 
 	childSess := sm.GetSession("child-session")
-	result := sm.Select(childSess, "", "", "")
+	result := sm.Select(context.Background(), childSess, "", "", "")
 
 	trackingRunner, ok := result.Runner.(*trackingMockRunner)
 	if !ok {
@@ -508,7 +509,7 @@ func TestSessionManager_Select_ForkedSession_AlreadyStarted(t *testing.T) {
 	})
 
 	childSess := sm.GetSession("child-session")
-	result := sm.Select(childSess, "", "", "")
+	result := sm.Select(context.Background(), childSess, "", "", "")
 
 	trackingRunner, ok := result.Runner.(*trackingMockRunner)
 	if !ok {
@@ -544,7 +545,7 @@ func TestSessionManager_Select_NonForkedSession(t *testing.T) {
 	})
 
 	sess := sm.GetSession("session-1")
-	result := sm.Select(sess, "", "", "")
+	result := sm.Select(context.Background(), sess, "", "", "")
 
 	trackingRunner, ok := result.Runner.(*trackingMockRunner)
 	if !ok {
@@ -589,7 +590,7 @@ func TestSessionManager_Select_ForkedSession_ParentNotStarted(t *testing.T) {
 	})
 
 	childSess := sm.GetSession("child-session")
-	result := sm.Select(childSess, "", "", "")
+	result := sm.Select(context.Background(), childSess, "", "", "")
 
 	trackingRunner, ok := result.Runner.(*trackingMockRunner)
 	if !ok {
@@ -626,7 +627,7 @@ func TestSessionManager_Select_ForkedSession_ParentNotFound(t *testing.T) {
 	})
 
 	childSess := sm.GetSession("child-session")
-	result := sm.Select(childSess, "", "", "")
+	result := sm.Select(context.Background(), childSess, "", "", "")
 
 	trackingRunner, ok := result.Runner.(*trackingMockRunner)
 	if !ok {
@@ -743,7 +744,7 @@ func TestCopyClaudeSessionForFork_NoSessionFileCopyFallback(t *testing.T) {
 		})
 
 		childSess := sm.GetSession("child-session-1")
-		result := sm.Select(childSess, "", "", "")
+		result := sm.Select(context.Background(), childSess, "", "", "")
 
 		trackingRunner, ok := result.Runner.(*trackingMockRunner)
 		if !ok {
@@ -797,7 +798,7 @@ func TestCopyClaudeSessionForFork_NoSessionFileCopyFallback(t *testing.T) {
 		})
 
 		childSess := sm.GetSession("child-session-2")
-		result := sm.Select(childSess, "", "", "")
+		result := sm.Select(context.Background(), childSess, "", "", "")
 
 		trackingRunner, ok := result.Runner.(*trackingMockRunner)
 		if !ok {
