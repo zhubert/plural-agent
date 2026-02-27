@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zhubert/erg/internal/claude"
 	"github.com/zhubert/erg/internal/config"
@@ -83,6 +84,22 @@ func TestTailToolDesc_LongValue_Truncated(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Errorf("expected truncated string to end with '...', got %q", got)
+	}
+}
+
+func TestTailToolDesc_EmDash_Truncation(t *testing.T) {
+	// Command containing em dashes that requires truncation.
+	longVal := "This command has an em\u2014dash and is quite long indeed here extra"
+	input := json.RawMessage(`{"command": "` + longVal + `"}`)
+	got := tailToolDesc("Bash", input)
+	if utf8.RuneCountInString(got) > 35 {
+		t.Errorf("expected truncation to 35 runes, got %d: %q", utf8.RuneCountInString(got), got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("expected truncated string to end with '...', got %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("expected valid UTF-8 after truncation, got invalid bytes: %q", got)
 	}
 }
 
@@ -413,6 +430,33 @@ func TestRenderTailView_NoSessionID_ShowsWaiting(t *testing.T) {
 
 	if !strings.Contains(out, "waiting for session") {
 		t.Errorf("expected 'waiting for session' for item without session ID, got %q", out)
+	}
+}
+
+func TestRenderTailView_LineWidths_EmDashTitle(t *testing.T) {
+	const (
+		termCols = 80
+		n        = 2
+	)
+	items := []*daemonstate.WorkItem{
+		newWorkItem("1", "Fix em\u2014dash bug in the title display here", "coding", "idle", ""),
+		newWorkItem("2", "Normal title", "await_review", "idle", ""),
+	}
+	var buf bytes.Buffer
+	renderTailView(&buf, items, 10, termCols)
+	out := buf.String()
+
+	colWidth := (termCols - (n - 1)) / n
+	expectedWidth := colWidth*n + (n - 1)
+
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		if len([]rune(line)) != expectedWidth {
+			t.Errorf("line %d width = %d, expected %d: %q", i, len([]rune(line)), expectedWidth, line)
+		}
 	}
 }
 

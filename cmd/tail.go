@@ -106,8 +106,8 @@ func tailToolDesc(name string, input json.RawMessage) string {
 				parts := strings.Split(v, "/")
 				v = parts[len(parts)-1]
 			}
-			if len(v) > 35 {
-				v = v[:32] + "..."
+			if vRunes := []rune(v); len(vRunes) > 35 {
+				v = string(vRunes[:32]) + "..."
 			}
 			return v
 		}
