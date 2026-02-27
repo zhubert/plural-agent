@@ -878,6 +878,106 @@ func TestCheckPRChecks_ErrorNoOutput(t *testing.T) {
 }
 
 // =============================================================================
+// GetPRCheckDetails Tests
+// =============================================================================
+
+func TestGetPRCheckDetails_AllPassing(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state,link"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"build","state":"SUCCESS","link":"https://example.com/1"},{"name":"test","state":"SUCCESS","link":"https://example.com/2"}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	checks, err := svc.GetPRCheckDetails(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(checks))
+	}
+	if checks[0].Name != "build" || checks[0].State != "SUCCESS" {
+		t.Errorf("unexpected first check: %+v", checks[0])
+	}
+	if checks[1].Name != "test" || checks[1].State != "SUCCESS" {
+		t.Errorf("unexpected second check: %+v", checks[1])
+	}
+}
+
+func TestGetPRCheckDetails_SomeFailing(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	// gh pr checks returns non-zero exit code when checks fail
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state,link"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"build","state":"SUCCESS","link":""},{"name":"lint","state":"FAILURE","link":"https://example.com/3"}]`),
+		Err:    fmt.Errorf("exit status 1"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	checks, err := svc.GetPRCheckDetails(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(checks))
+	}
+	if checks[1].Name != "lint" || checks[1].State != "FAILURE" {
+		t.Errorf("unexpected failing check: %+v", checks[1])
+	}
+}
+
+func TestGetPRCheckDetails_Pending(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state,link"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"build","state":"SUCCESS","link":""},{"name":"deploy","state":"IN_PROGRESS","link":""}]`),
+		Err:    fmt.Errorf("exit status 1"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	checks, err := svc.GetPRCheckDetails(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(checks))
+	}
+	if checks[1].State != "IN_PROGRESS" {
+		t.Errorf("expected IN_PROGRESS state, got %s", checks[1].State)
+	}
+}
+
+func TestGetPRCheckDetails_NoChecks(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state,link"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	checks, err := svc.GetPRCheckDetails(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(checks) != 0 {
+		t.Errorf("expected 0 checks, got %d", len(checks))
+	}
+}
+
+func TestGetPRCheckDetails_Error(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	// Error with no output (e.g., no PR found)
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state,link"}, pexec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	checks, err := svc.GetPRCheckDetails(context.Background(), "/repo", "feature-branch")
+	if err == nil {
+		t.Fatal("expected error for empty output with command failure")
+	}
+	if checks != nil {
+		t.Errorf("expected nil checks on error, got %v", checks)
+	}
+}
+
+// =============================================================================
 // MergePR Tests
 // =============================================================================
 

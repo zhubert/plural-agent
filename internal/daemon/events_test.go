@@ -1699,3 +1699,180 @@ func TestCheckGateApproved_CommentMatch_MissingPattern(t *testing.T) {
 		t.Error("expected fired=false when comment_pattern is missing")
 	}
 }
+
+// =============================================================================
+// checkCIWaitForChecks Tests
+// =============================================================================
+
+func setupCIWaitForChecksTest(t *testing.T, checkJSON string, cmdErr error) (*eventChecker, *workflow.ParamHelper, *workflow.WorkItemView) {
+	t.Helper()
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("gh", []string{"pr", "checks", "feature-sess-1", "--json", "name,state,link"}, exec.MockResponse{
+		Stdout: []byte(checkJSON),
+		Err:    cmdErr,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_checks",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	return checker, params, view
+}
+
+func TestCheckCIWaitForChecks_AllPassing(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t,
+		`[{"name":"build","state":"SUCCESS","link":""},{"name":"test","state":"SUCCESS","link":""}]`,
+		nil,
+	)
+
+	fired, data, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when all checks pass")
+	}
+	if data["ci_status"] != "passing" {
+		t.Errorf("expected ci_status=passing, got %v", data["ci_status"])
+	}
+	passed, _ := data["passed_checks"].([]string)
+	if len(passed) != 2 {
+		t.Errorf("expected 2 passed checks, got %v", passed)
+	}
+	failed, _ := data["failed_checks"].([]string)
+	if len(failed) != 0 {
+		t.Errorf("expected 0 failed checks, got %v", failed)
+	}
+}
+
+func TestCheckCIWaitForChecks_SomeFailing(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t,
+		`[{"name":"build","state":"SUCCESS","link":""},{"name":"lint","state":"FAILURE","link":""}]`,
+		fmt.Errorf("exit status 1"),
+	)
+
+	fired, data, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when checks are complete (even failing)")
+	}
+	if data["ci_status"] != "failing" {
+		t.Errorf("expected ci_status=failing, got %v", data["ci_status"])
+	}
+	failed, _ := data["failed_checks"].([]string)
+	if len(failed) != 1 || failed[0] != "lint" {
+		t.Errorf("expected failed_checks=[lint], got %v", failed)
+	}
+	passed, _ := data["passed_checks"].([]string)
+	if len(passed) != 1 || passed[0] != "build" {
+		t.Errorf("expected passed_checks=[build], got %v", passed)
+	}
+}
+
+func TestCheckCIWaitForChecks_StillPending(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t,
+		`[{"name":"build","state":"SUCCESS","link":""},{"name":"deploy","state":"IN_PROGRESS","link":""}]`,
+		fmt.Errorf("exit status 1"),
+	)
+
+	fired, _, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when checks still pending")
+	}
+}
+
+func TestCheckCIWaitForChecks_NoChecks(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t, `[]`, nil)
+
+	fired, data, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when no checks configured")
+	}
+	if data["ci_status"] != "none" {
+		t.Errorf("expected ci_status=none, got %v", data["ci_status"])
+	}
+}
+
+func TestCheckCIWaitForChecks_APIError(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t, "", fmt.Errorf("no pull requests found"))
+
+	fired, _, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false on API error")
+	}
+}
+
+func TestCheckCIWaitForChecks_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	// No session added — work item references a missing session
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "missing-session",
+		Branch:      "feature-missing",
+		CurrentStep: "await_checks",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkCIWaitForChecks(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when session not found")
+	}
+}
+
+func TestCheckEvent_CIWaitForChecks_Routed(t *testing.T) {
+	checker, params, view := setupCIWaitForChecksTest(t,
+		`[{"name":"build","state":"SUCCESS","link":""}]`,
+		nil,
+	)
+
+	fired, data, err := checker.CheckEvent(context.Background(), "ci.wait_for_checks", params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true via CheckEvent dispatch")
+	}
+	if data["ci_status"] != "passing" {
+		t.Errorf("expected ci_status=passing, got %v", data["ci_status"])
+	}
+}

@@ -27,6 +27,8 @@ func (c *eventChecker) CheckEvent(ctx context.Context, event string, params *wor
 		return c.checkPRReviewed(ctx, params, item)
 	case "ci.complete":
 		return c.checkCIComplete(ctx, params, item)
+	case "ci.wait_for_checks":
+		return c.checkCIWaitForChecks(ctx, params, item)
 	case "pr.mergeable":
 		return c.checkPRMergeable(ctx, params, item)
 	case "gate.approved":
@@ -273,6 +275,75 @@ func (c *eventChecker) checkPRMergeable(ctx context.Context, params *workflow.Pa
 	return true, map[string]any{
 		"review_approved": true,
 		"ci_passed":       true,
+	}, nil
+}
+
+// checkCIWaitForChecks waits for all GitHub CI checks to reach a terminal state.
+// Unlike ci.complete (which only fires on passing CI), this event fires once all
+// checks have finished — whether passing or failing — and populates step data
+// with individual check results so downstream choice states can route accordingly.
+//
+// Data returned on fire:
+//
+//	ci_status     - "passing" | "failing" | "none"
+//	passed_checks - list of check names that passed
+//	failed_checks - list of check names that failed
+func (c *eventChecker) checkCIWaitForChecks(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+	d := c.daemon
+	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "ci.wait_for_checks")
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		log.Warn("session not found for work item")
+		return false, nil, nil
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	checks, err := d.gitService.GetPRCheckDetails(pollCtx, sess.RepoPath, item.Branch)
+	if err != nil {
+		log.Debug("CI check details not available yet", "error", err)
+		return false, nil, nil
+	}
+
+	if len(checks) == 0 {
+		log.Debug("no CI checks configured")
+		return true, map[string]any{
+			"ci_status":     string(git.CIStatusNone),
+			"passed_checks": []string{},
+			"failed_checks": []string{},
+		}, nil
+	}
+
+	var passedChecks, failedChecks []string
+	hasPending := false
+	for _, check := range checks {
+		switch check.State {
+		case "FAILURE", "ERROR", "CANCELLED", "TIMED_OUT":
+			failedChecks = append(failedChecks, check.Name)
+		case "PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED":
+			hasPending = true
+		default: // SUCCESS, NEUTRAL, SKIPPED, etc.
+			passedChecks = append(passedChecks, check.Name)
+		}
+	}
+
+	if hasPending {
+		log.Debug("CI checks still pending")
+		return false, nil, nil
+	}
+
+	ciStatus := git.CIStatusPassing
+	if len(failedChecks) > 0 {
+		ciStatus = git.CIStatusFailing
+	}
+
+	log.Info("all CI checks complete", "ci_status", ciStatus, "passed", len(passedChecks), "failed", len(failedChecks))
+	return true, map[string]any{
+		"ci_status":     string(ciStatus),
+		"passed_checks": passedChecks,
+		"failed_checks": failedChecks,
 	}, nil
 }
 
