@@ -39,7 +39,7 @@ func TestCheckPRReviewed_PRClosed(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -81,7 +81,7 @@ func TestCheckPRReviewed_PRMergedExternally(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -125,7 +125,7 @@ func TestCheckPRReviewed_AddressingFeedbackPhase(t *testing.T) {
 	})
 	d.state.AdvanceWorkItem("item-1", "await_review", "addressing_feedback")
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -165,7 +165,7 @@ func TestCheckPRReviewed_PushingPhase(t *testing.T) {
 	})
 	d.state.AdvanceWorkItem("item-1", "await_review", "pushing")
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -216,7 +216,7 @@ func TestCheckPRReviewed_ReviewApproved(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -255,7 +255,7 @@ func TestCheckPRReviewed_NoSession(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -294,7 +294,7 @@ func TestCheckCIComplete_CIPassing_AutoMergeEnabled(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -336,7 +336,7 @@ func TestCheckCIComplete_CIPassing_AutoMergeDisabled(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -375,7 +375,7 @@ func TestCheckCIComplete_CIFailing_AbandonPolicy(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "abandon"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -420,7 +420,7 @@ func TestCheckCIComplete_CIFailing_DefaultRetry(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil) // default on_failure = "retry"
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -465,7 +465,7 @@ func TestCheckCIComplete_CIPending(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -491,7 +491,7 @@ func TestCheckCIComplete_NoSession(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -550,7 +550,7 @@ func TestCheckPRReviewed_MaxFeedbackRoundsReached(t *testing.T) {
 		FeedbackRounds: 3, // At the default max
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"auto_address": true, "max_feedback_rounds": 3})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -609,7 +609,7 @@ func TestCheckPRReviewed_AutoAddressDisabled(t *testing.T) {
 		UpdatedAt:   time.Now(),
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"auto_address": false})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -680,7 +680,7 @@ func TestCheckPRReviewed_ChangesRequestedAutoAddressDisabled(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"auto_address": false})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -753,7 +753,7 @@ func TestCheckPRReviewed_ChangesRequestedAutoAddressEnabled(t *testing.T) {
 		CurrentStep: "await_review",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	// auto_address=true: changes_requested event should NOT fire even with a
 	// CHANGES_REQUESTED review — the inline addressFeedback path handles it via
 	// comment count, not by firing the event.
@@ -798,7 +798,7 @@ func TestCheckPRMergeable_PRClosed(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -840,7 +840,7 @@ func TestCheckPRMergeable_PRMergedExternally(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -886,7 +886,7 @@ func TestCheckPRMergeable_NotApproved(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -944,7 +944,7 @@ func TestCheckPRMergeable_CIPending(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1002,7 +1002,7 @@ func TestCheckPRMergeable_CIFailing(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1031,7 +1031,7 @@ func TestCheckPRMergeable_NoSession(t *testing.T) {
 		CurrentStep: "await_mergeable",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"require_review": true, "require_ci": true})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1070,7 +1070,7 @@ func TestCheckCIComplete_CIFailing_FixPolicy(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "fix"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1120,7 +1120,7 @@ func TestCheckCIComplete_Conflicting(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"on_failure": "fix"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1168,7 +1168,7 @@ func TestCheckCIComplete_MergeableCheckFails_FallsThroughToCI(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1221,7 +1221,7 @@ func TestCheckCIComplete_MergeableUnknown_FallsThroughToCI(t *testing.T) {
 		CurrentStep: "await_ci",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1268,7 +1268,7 @@ func TestCheckGateApproved_LabelAdded_Fires(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1318,7 +1318,7 @@ func TestCheckGateApproved_LabelAdded_LabelAbsent(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1357,7 +1357,7 @@ func TestCheckGateApproved_CommentMatch_Fires(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1405,7 +1405,7 @@ func TestCheckGateApproved_CommentMatch_OldCommentIgnored(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1445,7 +1445,7 @@ func TestCheckGateApproved_CommentMatch_NoMatch(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1469,7 +1469,7 @@ func TestCheckGateApproved_NonGitHubIssue(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1487,7 +1487,7 @@ func TestCheckGateApproved_WorkItemNotFound(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(nil)
 	view := &workflow.WorkItemView{ID: "nonexistent", RepoPath: "/test/repo"}
 
@@ -1510,7 +1510,7 @@ func TestCheckGateApproved_InvalidIssueNumber(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1547,7 +1547,7 @@ func TestCheckGateApproved_CLIError_LabelCheck(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1577,7 +1577,7 @@ func TestCheckGateApproved_InvalidPattern(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	// Invalid regex pattern
 	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `[invalid`})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
@@ -1607,7 +1607,7 @@ func TestCheckGateApproved_UnknownTrigger(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	params := workflow.NewParamHelper(map[string]any{"trigger": "webhook"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
 	view := d.workItemView(itemTmp)
@@ -1652,7 +1652,7 @@ func TestCheckGateApproved_DefaultTrigger_IsLabelAdded(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	// No trigger param — should default to label_added with "approved" label
 	params := workflow.NewParamHelper(nil)
 	itemTmp, _ := d.state.GetWorkItem("item-1")
@@ -1685,7 +1685,7 @@ func TestCheckGateApproved_CommentMatch_MissingPattern(t *testing.T) {
 		CurrentStep: "await_approval",
 	})
 
-	checker := NewEventChecker(d)
+	checker := newEventChecker(d)
 	// comment_match trigger with no pattern — should not fire
 	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match"})
 	itemTmp, _ := d.state.GetWorkItem("item-1")
