@@ -315,9 +315,10 @@ func TestStartQueuedItems_AwaitReviewDoesNotBlockNewWork(t *testing.T) {
 	}
 }
 
-// TestCheckLinkedPRsAndUnqueue_WithLinkedPR verifies that when a GitHub issue has
-// an open linked PR, checkLinkedPRsAndUnqueue returns true and marks the item completed.
-func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
+// TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow verifies that when a
+// GitHub issue has an open linked PR, checkLinkedPRsAndUnqueue adopts it into
+// the workflow (active + await_ci) instead of marking it completed.
+func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 	cfg := testConfig()
 	cfg.Repos = []string{"/test/repo"}
 	mockExec := exec.NewMockExecutor(nil)
@@ -327,7 +328,7 @@ func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
 		Stdout: []byte("git@github.com:owner/repo.git\n"),
 	})
 
-	// Mock gh api graphql — returns one OPEN linked PR.
+	// Mock gh api graphql — returns one OPEN linked PR with headRefName.
 	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
 		Stdout: []byte(`{
 			"data": {
@@ -335,7 +336,7 @@ func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
 					"issue": {
 						"timelineItems": {
 							"nodes": [
-								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10"}}
+								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}}
 							]
 						}
 					}
@@ -370,14 +371,112 @@ func TestCheckLinkedPRsAndUnqueue_WithLinkedPR(t *testing.T) {
 		t.Error("expected checkLinkedPRsAndUnqueue to return true when linked PR exists")
 	}
 
-	// The work item should be created and marked completed.
 	itemID := "/test/repo-42"
 	item, okItem := d.state.GetWorkItem(itemID)
 	if !okItem {
 		t.Fatal("expected work item to be created in state")
 	}
+
+	// Open PRs should be adopted into the workflow, not marked completed.
+	if item.State != daemonstate.WorkItemActive {
+		t.Errorf("expected work item to be active, got %s", item.State)
+	}
+	if item.CurrentStep != "await_ci" {
+		t.Errorf("expected work item at await_ci step, got %q", item.CurrentStep)
+	}
+	if item.Branch != "issue-42" {
+		t.Errorf("expected branch 'issue-42', got %q", item.Branch)
+	}
+	if item.PRURL != "https://github.com/owner/repo/pull/10" {
+		t.Errorf("expected PRURL set, got %q", item.PRURL)
+	}
+	if item.SessionID == "" {
+		t.Error("expected SessionID to be set")
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected phase 'idle', got %q", item.Phase)
+	}
+
+	// Verify a session was created for the work item.
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		t.Fatal("expected session to be created")
+	}
+	if sess.Branch != "issue-42" {
+		t.Errorf("expected session branch 'issue-42', got %q", sess.Branch)
+	}
+	if !sess.PRCreated {
+		t.Error("expected session to have PRCreated=true")
+	}
+}
+
+// TestCheckLinkedPRsAndUnqueue_MergedPR_MarksCompleted verifies that when a
+// GitHub issue has a merged linked PR, the work item is marked completed.
+func TestCheckLinkedPRsAndUnqueue_MergedPR_MarksCompleted(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: []byte(`{
+			"data": {
+				"repository": {
+					"issue": {
+						"timelineItems": {
+							"nodes": [
+								{"source": {"number": 10, "state": "MERGED", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}}
+							]
+						}
+					}
+				}
+			}
+		}`),
+	})
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	githubProvider := issues.NewGitHubProvider(gitSvc)
+	registry := issues.NewProviderRegistry(githubProvider)
+
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+
+	issue := issues.Issue{
+		ID:     "42",
+		Title:  "Fix the bug",
+		Source: issues.SourceGitHub,
+	}
+
+	skip := d.checkLinkedPRsAndUnqueue(context.Background(), "/test/repo", issue)
+
+	if !skip {
+		t.Error("expected checkLinkedPRsAndUnqueue to return true when linked PR exists")
+	}
+
+	itemID := "/test/repo-42"
+	item, okItem := d.state.GetWorkItem(itemID)
+	if !okItem {
+		t.Fatal("expected work item to be created in state")
+	}
+
+	// Merged PRs should be marked completed.
 	if item.State != daemonstate.WorkItemCompleted {
 		t.Errorf("expected work item to be completed, got %s", item.State)
+	}
+	if item.Branch != "issue-42" {
+		t.Errorf("expected branch 'issue-42', got %q", item.Branch)
+	}
+	if item.PRURL != "https://github.com/owner/repo/pull/10" {
+		t.Errorf("expected PRURL set, got %q", item.PRURL)
 	}
 }
 
