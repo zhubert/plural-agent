@@ -147,7 +147,7 @@ func (sm *SessionManager) GetSession(sessionID string) *config.Session {
 // Select prepares a session for activation, creating or reusing a runner,
 // and gathering all state needed for UI restoration. The caller (app.go)
 // is responsible for saving the previous session's state before calling this.
-func (sm *SessionManager) Select(sess *config.Session, previousSessionID string, previousInput string, previousStreaming string) *SelectResult {
+func (sm *SessionManager) Select(ctx context.Context, sess *config.Session, previousSessionID string, previousInput string, previousStreaming string) *SelectResult {
 	if sess == nil {
 		return nil
 	}
@@ -185,7 +185,6 @@ func (sm *SessionManager) Select(sess *config.Session, previousSessionID string,
 	// Get diff stats for the worktree
 	var diffStats *DiffStats
 	if sess.WorkTree != "" && sm.gitService != nil {
-		ctx := context.Background()
 		if gitStats, err := sm.gitService.GetDiffStats(ctx, sess.WorkTree); err == nil {
 			diffStats = &DiffStats{
 				FilesChanged: gitStats.FilesChanged,
