@@ -1,6 +1,6 @@
 # erg
 
-**Autonomous headless daemon for Claude Code** — label an issue, ship a PR.
+**Autonomous headless daemon for Claude Code** — does the work.
 
 **Docs: [zhubert.com/erg](https://zhubert.com/erg/)** — setup, workflow configuration, CLI reference, and more.
 
