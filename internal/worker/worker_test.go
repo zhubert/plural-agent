@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/zhubert/erg/internal/exec"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/mcp"
+	"github.com/zhubert/erg/internal/testutil"
 )
 
 // mockHost implements worker.Host for unit testing.
@@ -48,7 +48,7 @@ func newMockHost(mockExec *exec.MockExecutor) *mockHost {
 	return &mockHost{
 		cfg:             cfg,
 		gitService:      gitSvc,
-		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:          testutil.DiscardLogger(),
 		maxTurns:        50,
 		maxDuration:     30,
 		autoMerge:       true,

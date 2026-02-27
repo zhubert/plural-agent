@@ -3,10 +3,10 @@ package workflow
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/zhubert/erg/internal/testutil"
 )
 
 // mockAction is a test action that returns a preset result.
@@ -29,10 +29,6 @@ func (c *mockEventChecker) CheckEvent(ctx context.Context, event string, params 
 	return c.fired, c.data, c.err
 }
 
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 func TestEngine_ProcessStep_TerminalSucceed(t *testing.T) {
 	cfg := &Config{
 		Start: "done",
@@ -40,7 +36,7 @@ func TestEngine_ProcessStep_TerminalSucceed(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "done"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -62,7 +58,7 @@ func TestEngine_ProcessStep_TerminalFail(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "failed"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -91,7 +87,7 @@ func TestEngine_ProcessStep_TaskSync(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -122,7 +118,7 @@ func TestEngine_ProcessStep_TaskAsync(t *testing.T) {
 			"done":  {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -151,7 +147,7 @@ func TestEngine_ProcessStep_TaskFailure(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -173,7 +169,7 @@ func TestEngine_ProcessStep_WaitFired(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "wait", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -195,7 +191,7 @@ func TestEngine_ProcessStep_WaitNotFired(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "wait", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -218,7 +214,7 @@ func TestEngine_AdvanceAfterAsync_Success(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "coding", Phase: "async_pending"}
 	result, err := engine.AdvanceAfterAsync(view, true)
@@ -239,7 +235,7 @@ func TestEngine_AdvanceAfterAsync_Failure(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "coding", Phase: "async_pending"}
 	result, err := engine.AdvanceAfterAsync(view, false)
@@ -253,7 +249,7 @@ func TestEngine_AdvanceAfterAsync_Failure(t *testing.T) {
 
 func TestEngine_GetStartState(t *testing.T) {
 	cfg := &Config{Start: "my_start"}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 	if engine.GetStartState() != "my_start" {
 		t.Errorf("expected my_start, got %s", engine.GetStartState())
 	}
@@ -267,7 +263,7 @@ func TestEngine_IsTerminalState(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	if engine.IsTerminalState("coding") {
 		t.Error("coding should not be terminal")
@@ -291,7 +287,7 @@ func TestEngine_ProcessStep_UnknownState(t *testing.T) {
 			"done":   {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// Referencing a state that doesn't exist in the config should error
 	view := &WorkItemView{CurrentStep: "nonexistent_step", Phase: "idle"}
@@ -309,7 +305,7 @@ func TestEngine_ProcessStep_UnknownAction(t *testing.T) {
 			"done":  {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1", Phase: "idle"}
 	_, err := engine.ProcessStep(context.Background(), view)
@@ -325,7 +321,7 @@ func TestEngine_ProcessStep_UnsupportedStateType(t *testing.T) {
 			"bad": {Type: "bogus_type"},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "bad", Phase: "idle"}
 	_, err := engine.ProcessStep(context.Background(), view)
@@ -339,7 +335,7 @@ func TestEngine_AdvanceAfterAsync_UnknownState(t *testing.T) {
 		Start:  "coding",
 		States: map[string]*State{},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "nonexistent", Phase: "async_pending"}
 	_, err := engine.AdvanceAfterAsync(view, true)
@@ -356,7 +352,7 @@ func TestEngine_AdvanceAfterAsync_FailureNoErrorEdge(t *testing.T) {
 			"done":   {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// Fail with no Error edge configured — should return an error
 	view := &WorkItemView{CurrentStep: "coding", Phase: "async_pending"}
@@ -380,7 +376,7 @@ func TestEngine_ProcessStep_TaskFailureNoErrorEdge(t *testing.T) {
 			"done":  {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1", Phase: "idle"}
 	_, err := engine.ProcessStep(context.Background(), view)
@@ -398,7 +394,7 @@ func TestEngine_ProcessStep_WaitNoEventChecker(t *testing.T) {
 		},
 	}
 	// nil event checker
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "wait", Phase: "idle"}
 	_, err := engine.ProcessStep(context.Background(), view)
@@ -417,7 +413,7 @@ func TestEngine_ProcessStep_WaitEventCheckError(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "wait", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -444,7 +440,7 @@ func TestEngine_ProcessStep_WaitTimeout_ErrorEdge(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	// StepEnteredAt is 2 hours ago — should timeout
 	view := &WorkItemView{
@@ -476,7 +472,7 @@ func TestEngine_ProcessStep_WaitTimeout_TimeoutNextEdge(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	view := &WorkItemView{
 		CurrentStep:   "wait",
@@ -503,7 +499,7 @@ func TestEngine_ProcessStep_WaitTimeout_NoEdge(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	view := &WorkItemView{
 		CurrentStep:   "wait",
@@ -527,7 +523,7 @@ func TestEngine_ProcessStep_WaitTimeout_NotExpired(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	// StepEnteredAt is only 30 minutes ago — should NOT timeout
 	view := &WorkItemView{
@@ -556,7 +552,7 @@ func TestEngine_ProcessStep_WaitTimeout_ZeroEnteredAt(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), checker, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), checker, testutil.DiscardLogger())
 
 	// Zero StepEnteredAt should skip timeout check
 	view := &WorkItemView{
@@ -583,7 +579,7 @@ func TestEngine_FullTraversal(t *testing.T) {
 	cfg := DefaultWorkflowConfig()
 
 	// Phase 1: coding (async)
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 	view := &WorkItemView{CurrentStep: "coding", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
 	if err != nil {
@@ -616,7 +612,7 @@ func TestEngine_FullTraversal(t *testing.T) {
 
 	// Phase 4: await_ci (event fired with ci_passed=true) → check_ci_result → await_review
 	checker := &mockEventChecker{fired: true, data: map[string]any{"ci_passed": true}}
-	engine2 := NewEngine(cfg, registry, checker, testLogger())
+	engine2 := NewEngine(cfg, registry, checker, testutil.DiscardLogger())
 	view.CurrentStep = "await_ci"
 	view.Phase = "idle"
 	view.StepData = map[string]any{}
@@ -652,7 +648,7 @@ func TestEngine_ProcessStep_RetryOnFailure(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	// First attempt — should retry (count goes from 0 to 1)
 	view := &WorkItemView{CurrentStep: "step1", Phase: "idle", StepData: map[string]any{}}
@@ -693,7 +689,7 @@ func TestEngine_ProcessStep_RetryExhausted(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	// Already retried 2 times — should fall through to error edge
 	view := &WorkItemView{
@@ -731,7 +727,7 @@ func TestEngine_ProcessStep_CatchError(t *testing.T) {
 			"recovery": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -771,7 +767,7 @@ func TestEngine_ProcessStep_CatchSpecificError(t *testing.T) {
 			"retry_later": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "step1", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -808,7 +804,7 @@ func TestEngine_ProcessStep_RetryThenCatch(t *testing.T) {
 			"recovery": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	// Retry exhausted (1 attempt used) — should fall through to catch
 	view := &WorkItemView{
@@ -842,7 +838,7 @@ func TestEngine_AdvanceAfterAsync_RetryOnFailure(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{
 		CurrentStep: "coding",
@@ -974,7 +970,7 @@ func TestEngine_ProcessStep_ChoiceEquals(t *testing.T) {
 			"wait_more": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// Test matching first rule
 	view := &WorkItemView{
@@ -1016,7 +1012,7 @@ func TestEngine_ProcessStep_ChoiceDefault(t *testing.T) {
 			"continue": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// No matching rule — should use default
 	view := &WorkItemView{
@@ -1046,7 +1042,7 @@ func TestEngine_ProcessStep_ChoiceNoMatchNoDefault(t *testing.T) {
 			"finish": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{
 		CurrentStep: "check",
@@ -1074,7 +1070,7 @@ func TestEngine_ProcessStep_ChoiceNotEquals(t *testing.T) {
 			"abort":    {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// pr_closed is false, so not_equals true → matches
 	view := &WorkItemView{
@@ -1109,7 +1105,7 @@ func TestEngine_ProcessStep_ChoiceIsPresent(t *testing.T) {
 			"no_pr":  {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// Variable present
 	view := &WorkItemView{
@@ -1182,7 +1178,7 @@ func TestEngine_ProcessStep_Pass(t *testing.T) {
 			"coding": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "setup", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1208,7 +1204,7 @@ func TestEngine_ProcessStep_PassNoData(t *testing.T) {
 			"done": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "skip", Phase: "idle"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1234,7 +1230,7 @@ func TestEngine_GetBeforeHooks(t *testing.T) {
 			"no_hook": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	// State with before hooks
 	hooks := engine.GetBeforeHooks("coding")
@@ -1275,7 +1271,7 @@ func TestEngine_ProcessStep_TaskSync_OverrideNext(t *testing.T) {
 			"failed":  {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "coding"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1312,7 +1308,7 @@ func TestEngine_ProcessStep_DefaultRetryOnNetworkAction(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "open_pr", Phase: "idle", StepData: map[string]any{}}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1351,7 +1347,7 @@ func TestEngine_ProcessStep_NoDefaultRetryOnAICode(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "coding", Phase: "idle", StepData: map[string]any{}}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1387,7 +1383,7 @@ func TestEngine_ProcessStep_ExplicitRetryOverridesDefault(t *testing.T) {
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "open_pr", Phase: "idle", StepData: map[string]any{}}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1447,7 +1443,7 @@ func TestEngine_ProcessStep_DefaultRetryExhaustedFallsToErrorEdge(t *testing.T) 
 			"failed": {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	// Simulate 3 retries already used (default max_attempts=3)
 	view := &WorkItemView{
@@ -1478,7 +1474,7 @@ func TestEngine_ProcessStep_TaskSync_NoOverride(t *testing.T) {
 			"open_pr": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, registry, nil, testLogger())
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
 
 	view := &WorkItemView{CurrentStep: "coding"}
 	result, err := engine.ProcessStep(context.Background(), view)
@@ -1492,7 +1488,7 @@ func TestEngine_ProcessStep_TaskSync_NoOverride(t *testing.T) {
 
 // defaultWorkflowEngine returns an engine backed by the default workflow config.
 func defaultWorkflowEngine() *Engine {
-	return NewEngine(DefaultWorkflowConfig(), NewActionRegistry(), nil, testLogger())
+	return NewEngine(DefaultWorkflowConfig(), NewActionRegistry(), nil, testutil.DiscardLogger())
 }
 
 func TestEngine_FindRecoveryWaitStep_DefaultWorkflow(t *testing.T) {
@@ -1540,7 +1536,7 @@ func TestEngine_FindRecoveryWaitStep_CustomWorkflow(t *testing.T) {
 			"error":           {Type: StateTypeFail},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 
 	tests := []struct {
 		currentStep string
@@ -1581,7 +1577,7 @@ func TestEngine_FindRecoveryWaitStep_NoWaitStates(t *testing.T) {
 			"finish": {Type: StateTypeSucceed},
 		},
 	}
-	engine := NewEngine(cfg, NewActionRegistry(), nil, testLogger())
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
 	got := engine.FindRecoveryWaitStep("start")
 	if got != "" {
 		t.Errorf("FindRecoveryWaitStep(no wait states) = %q, want empty string", got)

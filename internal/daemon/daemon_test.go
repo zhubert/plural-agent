@@ -5,39 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/zhubert/erg/internal/daemonstate"
-	"github.com/zhubert/erg/internal/worker"
-	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/session"
+	"github.com/zhubert/erg/internal/testutil"
+	"github.com/zhubert/erg/internal/worker"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 // discardLogger returns a slog.Logger that discards all output. Useful in tests.
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
+func discardLogger() *slog.Logger { return testutil.DiscardLogger() }
 
 // testConfig creates a minimal config for testing.
-func testConfig() *config.Config {
-	return &config.Config{
-		Repos:              []string{},
-		Sessions:           []config.Session{},
-		AllowedTools:       []string{},
-		RepoAllowedTools:   make(map[string][]string),
-		AutoMaxTurns:       50,
-		AutoMaxDurationMin: 30,
-	}
-}
+func testConfig() *config.Config { return testutil.TestConfig() }
 
 // testSession creates a minimal session for testing.
 func testSession(id string) *config.Session {
@@ -59,7 +48,7 @@ func testDaemon(cfg *config.Config) *Daemon {
 	mockExec := exec.NewMockExecutor(nil)
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
 	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := discardLogger()
 	registry := issues.NewProviderRegistry()
 
 	d := New(cfg, gitSvc, sessSvc, registry, logger)
@@ -73,7 +62,7 @@ func testDaemon(cfg *config.Config) *Daemon {
 func testDaemonWithExec(cfg *config.Config, mockExec *exec.MockExecutor) *Daemon {
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
 	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := discardLogger()
 	registry := issues.NewProviderRegistry()
 
 	d := New(cfg, gitSvc, sessSvc, registry, logger)

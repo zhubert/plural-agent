@@ -18,11 +18,6 @@ import (
 	"time"
 )
 
-// pmTestLogger creates a discard logger for process manager tests
-func pmTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 // pmCaptureLogger creates a logger that captures output to a buffer for assertions
 func pmCaptureLogger(buf *strings.Builder) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -41,7 +36,7 @@ func TestNewProcessManager(t *testing.T) {
 		OnLine: func(line string) {},
 	}
 
-	pm := NewProcessManager(config, callbacks, pmTestLogger())
+	pm := NewProcessManager(config, callbacks, testLogger())
 
 	if pm == nil {
 		t.Fatal("NewProcessManager returned nil")
@@ -72,7 +67,7 @@ func TestProcessManager_IsRunning(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	if pm.IsRunning() {
 		t.Error("IsRunning should be false before Start")
@@ -86,7 +81,7 @@ func TestProcessManager_SetInterrupted(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Initially false
 	pm.mu.Lock()
@@ -124,7 +119,7 @@ func TestProcessManager_GetRestartAttempts(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Initially 0
 	if pm.GetRestartAttempts() != 0 {
@@ -145,7 +140,7 @@ func TestProcessManager_ResetRestartAttempts(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Set some attempts
 	pm.mu.Lock()
@@ -165,7 +160,7 @@ func TestProcessManager_UpdateConfig(t *testing.T) {
 		SessionID:      "old-session",
 		WorkingDir:     "/old",
 		SessionStarted: false,
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	newConfig := ProcessConfig{
 		SessionID:      "new-session",
@@ -195,7 +190,7 @@ func TestProcessManager_MarkSessionStarted(t *testing.T) {
 		SessionID:      "test-session",
 		WorkingDir:     "/tmp",
 		SessionStarted: false,
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	pm.mu.Lock()
 	if pm.config.SessionStarted {
@@ -216,7 +211,7 @@ func TestProcessManager_Stop_Idempotent(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Stop should be safe to call multiple times
 	pm.Stop()
@@ -232,7 +227,7 @@ func TestProcessManager_WriteMessage_NotRunning(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	err := pm.WriteMessage([]byte("test message"))
 	if err == nil {
@@ -244,7 +239,7 @@ func TestProcessManager_Interrupt_NotRunning(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Interrupt should not error when no process is running
 	err := pm.Interrupt()
@@ -257,7 +252,7 @@ func TestProcessManager_Stop_ThenNotRunning(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	pm.Stop()
 
@@ -362,7 +357,7 @@ func TestProcessCallbacks_NilCallbacks(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// These should not panic even when callbacks are nil
 	pm.callbacks.OnLine = nil
@@ -413,7 +408,7 @@ func TestProcessManager_CleanupLocked(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Set some fields that would be set during Start()
 	pm.mu.Lock()
@@ -470,7 +465,7 @@ func TestProcessManager_ConcurrentAccess(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Test concurrent access to various methods
 	done := make(chan bool)
@@ -517,7 +512,7 @@ func TestProcessManager_UpdateConfig_AfterStop(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	pm.Stop()
 
@@ -541,7 +536,7 @@ func TestProcessManager_MarkSessionStarted_ThreadSafe(t *testing.T) {
 		SessionID:      "test-session",
 		WorkingDir:     "/tmp",
 		SessionStarted: false,
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	done := make(chan bool)
 
@@ -574,7 +569,7 @@ func TestReadLine_NormalRead(t *testing.T) {
 
 	pm := &ProcessManager{
 		ctx: ctx,
-		log: pmTestLogger(),
+		log: testLogger(),
 	}
 
 	pr, pw := io.Pipe()
@@ -602,7 +597,7 @@ func TestReadLine_ContextCancelled(t *testing.T) {
 
 	pm := &ProcessManager{
 		ctx: ctx,
-		log: pmTestLogger(),
+		log: testLogger(),
 	}
 
 	pr, pw := io.Pipe()
@@ -630,7 +625,7 @@ func TestReadLine_ContextCancelledThenPipeWrite(t *testing.T) {
 
 	pm := &ProcessManager{
 		ctx: ctx,
-		log: pmTestLogger(),
+		log: testLogger(),
 	}
 
 	pr, pw := io.Pipe()
@@ -669,7 +664,7 @@ func TestReadLine_EOF(t *testing.T) {
 
 	pm := &ProcessManager{
 		ctx: ctx,
-		log: pmTestLogger(),
+		log: testLogger(),
 	}
 
 	pr, pw := io.Pipe()
@@ -868,7 +863,7 @@ func TestProcessManager_WaitGroup_InitiallyZero(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// WaitGroup should be at zero initially (no goroutines started)
 	// This test verifies we can call Stop() without blocking forever
@@ -892,7 +887,7 @@ func TestProcessManager_Stop_WaitsForGoroutines(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Manually simulate what Start() does with the WaitGroup
 	pm.mu.Lock()
@@ -936,7 +931,7 @@ func TestProcessManager_MultipleStartStop_NoLeak(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Multiple stops should be safe
 	for i := range 5 {
@@ -967,7 +962,7 @@ func TestProcessManager_ConfigTransition_ResumeToNewSession(t *testing.T) {
 		SessionStarted:    true,
 		MCPConfigPath:     "/tmp/mcp.json",
 		ForkFromSessionID: "parent-id",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Simulate what Runner.ensureProcessRunning does on resume fallback:
 	// clear the resume/fork flags
@@ -1029,7 +1024,7 @@ func TestProcessManager_GoroutineExitOnContextCancel(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-session",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Set up context
 	pm.mu.Lock()
@@ -1476,7 +1471,7 @@ func TestProcessManager_HandleExit_CleansUpAuthFileOnFatalError(t *testing.T) {
 		OnFatalError: func(err error) {
 			fatalErrorCalled = true
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	// Set restart attempts to max so handleExit takes the fatal error path
 	pm.mu.Lock()
@@ -1517,7 +1512,7 @@ func TestProcessManager_HandleExit_NoAuthCleanupForNonContainerized(t *testing.T
 		OnFatalError: func(err error) {
 			fatalErrorCalled = true
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	pm.mu.Lock()
 	pm.running = true
@@ -1818,7 +1813,7 @@ func TestProcessManager_Start_FailsWithoutAuthForContainerized(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := testLogger()
 
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:      "test-no-auth",
@@ -1846,7 +1841,7 @@ func TestProcessManager_Start_AllowsNonContainerizedWithoutAuth(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := testLogger()
 
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:     "test-non-container",
@@ -1980,7 +1975,7 @@ func TestProcessManager_MonitorExit_SingleWait(t *testing.T) {
 		OnProcessExit: func(err error, stderrContent string) bool {
 			return false // don't restart
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	// Manually start a real process (cat reads stdin forever until EOF)
 	cmd := exec.Command("cat")
@@ -2054,7 +2049,7 @@ func TestProcessManager_MonitorExit_NaturalExit(t *testing.T) {
 			exitCalled.Add(1)
 			return false
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	// Start a process that exits immediately
 	cmd := exec.Command("true")
@@ -2129,7 +2124,7 @@ func TestProcessManager_WaitDone_InitializedByStart(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-waitdone-init",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	pm.mu.Lock()
 	if pm.waitDone != nil {
@@ -2142,7 +2137,7 @@ func TestProcessManager_CleanupLocked_ClearsWaitDone(t *testing.T) {
 	pm := NewProcessManager(ProcessConfig{
 		SessionID:  "test-cleanup-waitdone",
 		WorkingDir: "/tmp",
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	// Simulate state after Start
 	pm.mu.Lock()
@@ -2470,7 +2465,7 @@ func TestContainerStartupWatchdog_Timeout(t *testing.T) {
 			fatalErr = err
 			close(fatalCh)
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	// Manually start a real process that blocks forever
 	cmd := exec.Command("sleep", "60")
@@ -2581,7 +2576,7 @@ func TestContainerStartupWatchdog_CancelledOnReady(t *testing.T) {
 		OnFatalError: func(err error) {
 			t.Errorf("OnFatalError should not be called, got: %v", err)
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	pm.mu.Lock()
 	pm.ctx, pm.cancel = context.WithCancel(context.Background())
@@ -2629,7 +2624,7 @@ func TestContainerStartupWatchdog_CancelledOnStop(t *testing.T) {
 		OnFatalError: func(err error) {
 			t.Errorf("OnFatalError should not be called, got: %v", err)
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	pm.mu.Lock()
 	pm.ctx, pm.cancel = context.WithCancel(context.Background())
@@ -2671,7 +2666,7 @@ func TestContainerStartupWatchdog_NotStartedForNonContainer(t *testing.T) {
 		SessionID:     "test-watchdog-noncontainer",
 		WorkingDir:    t.TempDir(),
 		Containerized: false,
-	}, ProcessCallbacks{}, pmTestLogger())
+	}, ProcessCallbacks{}, testLogger())
 
 	pm.mu.Lock()
 	pm.ctx, pm.cancel = context.WithCancel(context.Background())
@@ -2709,7 +2704,7 @@ func TestContainerStartupTimeoutDuration(t *testing.T) {
 		pm := NewProcessManager(ProcessConfig{
 			SessionID:  "test-timeout-default",
 			WorkingDir: t.TempDir(),
-		}, ProcessCallbacks{}, pmTestLogger())
+		}, ProcessCallbacks{}, testLogger())
 
 		got := pm.containerStartupTimeoutDuration()
 		if got != ContainerStartupTimeout {
@@ -2723,7 +2718,7 @@ func TestContainerStartupTimeoutDuration(t *testing.T) {
 			SessionID:               "test-timeout-override",
 			WorkingDir:              t.TempDir(),
 			ContainerStartupTimeout: custom,
-		}, ProcessCallbacks{}, pmTestLogger())
+		}, ProcessCallbacks{}, testLogger())
 
 		got := pm.containerStartupTimeoutDuration()
 		if got != custom {
@@ -2747,7 +2742,7 @@ func TestContainerStartupWatchdog_CleanupOnCrash(t *testing.T) {
 		OnFatalError: func(err error) {
 			// Should NOT be called for non-timeout crash when restarts not exhausted
 		},
-	}, pmTestLogger())
+	}, testLogger())
 
 	// Start a process that exits immediately (simulating a crash)
 	cmd := exec.Command("true")
