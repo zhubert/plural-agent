@@ -363,7 +363,7 @@ func (pm *ProcessManager) Start() error {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		pm.log.Error("failed to get stdin pipe", "error", err)
-		return fmt.Errorf("failed to get stdin pipe: %v", err)
+		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
 
 	// Get stdout pipe for reading responses
@@ -371,7 +371,7 @@ func (pm *ProcessManager) Start() error {
 	if err != nil {
 		stdin.Close()
 		pm.log.Error("failed to get stdout pipe", "error", err)
-		return fmt.Errorf("failed to get stdout pipe: %v", err)
+		return fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
 
 	// Get stderr pipe for error messages
@@ -380,7 +380,7 @@ func (pm *ProcessManager) Start() error {
 		stdin.Close()
 		stdout.Close()
 		pm.log.Error("failed to get stderr pipe", "error", err)
-		return fmt.Errorf("failed to get stderr pipe: %v", err)
+		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -389,9 +389,9 @@ func (pm *ProcessManager) Start() error {
 		stderr.Close()
 		pm.log.Error("failed to start process", "error", err)
 		if pm.config.Containerized {
-			return fmt.Errorf("failed to start container: %v (is Docker running?)", err)
+			return fmt.Errorf("failed to start container: %w (is Docker running?)", err)
 		}
-		return fmt.Errorf("failed to start process: %v", err)
+		return fmt.Errorf("failed to start process: %w", err)
 	}
 
 	pm.cmd = cmd
@@ -564,7 +564,7 @@ func (pm *ProcessManager) WriteMessage(data []byte) error {
 	}
 
 	if _, err := stdin.Write(data); err != nil {
-		return fmt.Errorf("failed to write to process: %v", err)
+		return fmt.Errorf("failed to write to process: %w", err)
 	}
 
 	return nil
@@ -948,7 +948,7 @@ func (pm *ProcessManager) handleExit(err error) {
 				}
 			}
 			// Report fatal error
-			exitErr := fmt.Errorf("process crashed and restart failed: %v", err)
+			exitErr := fmt.Errorf("process crashed and restart failed: %w", err)
 			if pm.callbacks.OnFatalError != nil {
 				pm.callbacks.OnFatalError(exitErr)
 			}
@@ -975,7 +975,7 @@ func (pm *ProcessManager) handleExit(err error) {
 		friendly := friendlyContainerError(stderrContent, pm.config.Containerized)
 		exitErr = fmt.Errorf("process crashed repeatedly (max %d restarts): %s", MaxProcessRestartAttempts, friendly)
 	} else if err != nil {
-		exitErr = fmt.Errorf("process crashed repeatedly (max %d restarts): %v", MaxProcessRestartAttempts, err)
+		exitErr = fmt.Errorf("process crashed repeatedly (max %d restarts): %w", MaxProcessRestartAttempts, err)
 	} else {
 		exitErr = fmt.Errorf("process crashed repeatedly (max %d restarts exceeded)", MaxProcessRestartAttempts)
 	}

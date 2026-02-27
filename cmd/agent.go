@@ -58,7 +58,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	// Validate prerequisites
 	prereqs := cli.DefaultPrerequisites()
 	if err := cli.ValidateRequired(prereqs); err != nil {
-		return fmt.Errorf("%v\n\nInstall required tools and try again", err)
+		return fmt.Errorf("%w\n\nInstall required tools and try again", err)
 	}
 
 	if !hasContainerRuntime() {
@@ -239,7 +239,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 	// Validate prerequisites
 	prereqs := cli.DefaultPrerequisites()
 	if err := cli.ValidateRequired(prereqs); err != nil {
-		return fmt.Errorf("%v\n\nInstall required tools and try again", err)
+		return fmt.Errorf("%w\n\nInstall required tools and try again", err)
 	}
 
 	if !hasContainerRuntime() {

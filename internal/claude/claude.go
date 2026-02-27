@@ -598,7 +598,7 @@ func (r *Runner) SendContent(cmdCtx context.Context, content []ContentBlock) <-c
 		msgJSON, err := json.Marshal(inputMsg)
 		if err != nil {
 			r.log.Error("failed to serialize message", "error", err)
-			ch <- ResponseChunk{Error: fmt.Errorf("failed to serialize message: %v", err), Done: true}
+			ch <- ResponseChunk{Error: fmt.Errorf("failed to serialize message: %w", err), Done: true}
 			close(ch)
 			return
 		}

@@ -5162,3 +5162,164 @@ func TestWebhookPostAction_Execute_CustomTimeout(t *testing.T) {
 		t.Errorf("expected success with custom timeout, got error: %v", result.Error)
 	}
 }
+
+// TestActionErrorWrapping verifies that action Execute methods use %w so that
+// errors.Is can traverse the chain from the outer ActionResult.Error back to
+// the original sentinel / leaf error returned by the underlying operation.
+func TestActionErrorWrapping(t *testing.T) {
+	// sentinelErr is the leaf error injected via the mock executor.
+	sentinelErr := errors.New("sentinel gh failure")
+
+	setup := func(t *testing.T, prefixArgs []string) (*Daemon, *config.Config, *exec.MockExecutor) {
+		t.Helper()
+		cfg := testConfig()
+		mockExec := exec.NewMockExecutor(nil)
+		mockExec.AddPrefixMatch("gh", prefixArgs, exec.MockResponse{Err: sentinelErr})
+		gitSvc := git.NewGitServiceWithExecutor(mockExec)
+		d := testDaemonWithExec(cfg, mockExec)
+		d.gitService = gitSvc
+		d.repoFilter = "/test/repo"
+		sess := testSession("sess-1")
+		cfg.AddSession(*sess)
+		d.state.AddWorkItem(&daemonstate.WorkItem{
+			ID:        "item-1",
+			IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+			SessionID: "sess-1",
+		})
+		return d, cfg, mockExec
+	}
+
+	t.Run("commentIssueAction wraps error", func(t *testing.T) {
+		d, _, _ := setup(t, []string{"issue", "comment"})
+		action := &commentIssueAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"body": "hello"}),
+		}
+		result := action.Execute(context.Background(), ac)
+		if result.Success {
+			t.Fatal("expected failure")
+		}
+		if !errors.Is(result.Error, sentinelErr) {
+			t.Errorf("errors.Is did not find sentinel in chain: %v", result.Error)
+		}
+	})
+
+	t.Run("addLabelAction wraps error", func(t *testing.T) {
+		d, _, _ := setup(t, []string{"issue", "edit"})
+		action := &addLabelAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"label": "bug"}),
+		}
+		result := action.Execute(context.Background(), ac)
+		if result.Success {
+			t.Fatal("expected failure")
+		}
+		if !errors.Is(result.Error, sentinelErr) {
+			t.Errorf("errors.Is did not find sentinel in chain: %v", result.Error)
+		}
+	})
+
+	t.Run("removeLabelAction wraps error", func(t *testing.T) {
+		d, _, _ := setup(t, []string{"issue", "edit"})
+		action := &removeLabelAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"label": "bug"}),
+		}
+		result := action.Execute(context.Background(), ac)
+		if result.Success {
+			t.Fatal("expected failure")
+		}
+		if !errors.Is(result.Error, sentinelErr) {
+			t.Errorf("errors.Is did not find sentinel in chain: %v", result.Error)
+		}
+	})
+}
+
+func TestWaitAction_Execute(t *testing.T) {
+	t.Run("completes after duration", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"duration": "10ms"}),
+		}
+
+		start := time.Now()
+		result := action.Execute(context.Background(), ac)
+		elapsed := time.Since(start)
+
+		if !result.Success {
+			t.Errorf("expected success, got error: %v", result.Error)
+		}
+		if elapsed < 10*time.Millisecond {
+			t.Errorf("expected to wait at least 10ms, but only waited %v", elapsed)
+		}
+	})
+
+	t.Run("zero duration returns immediately", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{}),
+		}
+
+		result := action.Execute(context.Background(), ac)
+
+		if !result.Success {
+			t.Errorf("expected success for zero duration, got error: %v", result.Error)
+		}
+		if result.Error != nil {
+			t.Errorf("expected no error for zero duration, got: %v", result.Error)
+		}
+	})
+
+	t.Run("cancels on context done", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"duration": "10s"}),
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// Cancel after a short delay.
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel()
+		}()
+
+		start := time.Now()
+		result := action.Execute(ctx, ac)
+		elapsed := time.Since(start)
+
+		if result.Success {
+			t.Error("expected failure when context is cancelled")
+		}
+		if result.Error == nil {
+			t.Error("expected error when context is cancelled")
+		}
+		if !errors.Is(result.Error, context.Canceled) {
+			t.Errorf("expected context.Canceled, got: %v", result.Error)
+		}
+		// Should have been cancelled well before the 10s duration.
+		if elapsed >= 1*time.Second {
+			t.Errorf("expected cancellation within 1s, took %v", elapsed)
+		}
+	})
+
+	t.Run("registered in action registry", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		registry := d.buildActionRegistry()
+		if registry.Get("workflow.wait") == nil {
+			t.Error("workflow.wait not registered in action registry")
+		}
+	})
+}

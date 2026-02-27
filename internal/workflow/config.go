@@ -148,6 +148,7 @@ var ValidActions = map[string]bool{
 	"slack.notify":          true,
 	"webhook.post":          true,
 	"workflow.retry":        true,
+	"workflow.wait":         true,
 }
 
 // RetryableActions is the set of network-bound actions that should be retried
@@ -190,10 +191,11 @@ func DefaultRetryForAction(action string) []RetryConfig {
 
 // ValidEvents is the set of recognized event names for wait states.
 var ValidEvents = map[string]bool{
-	"pr.reviewed":   true,
-	"ci.complete":   true,
-	"pr.mergeable":  true,
-	"gate.approved": true,
+	"pr.reviewed":       true,
+	"ci.complete":       true,
+	"ci.wait_for_checks": true,
+	"pr.mergeable":      true,
+	"gate.approved":     true,
 }
 
 // ValidStateTypes is the set of recognized state types.

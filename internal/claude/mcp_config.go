@@ -73,7 +73,7 @@ func (r *Runner) ensureServerRunning() error {
 	}
 	if err != nil {
 		r.log.Error("failed to create socket server", "error", err)
-		return fmt.Errorf("failed to start permission server: %v", err)
+		return fmt.Errorf("failed to start permission server: %w", err)
 	}
 	r.socketServer = socketServer
 	r.log.Debug("socket server created", "elapsed", time.Since(startTime))
@@ -97,7 +97,7 @@ func (r *Runner) ensureServerRunning() error {
 		r.socketServer.Close()
 		r.socketServer = nil
 		r.log.Error("failed to create MCP config", "error", err)
-		return fmt.Errorf("failed to create MCP config: %v", err)
+		return fmt.Errorf("failed to create MCP config: %w", err)
 	}
 	r.mcpConfigPath = mcpConfigPath
 
