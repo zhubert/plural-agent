@@ -737,6 +737,31 @@ func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.Wor
 	return nil
 }
 
+// writePRDescriptionAction implements the ai.write_pr_description action.
+type writePRDescriptionAction struct {
+	daemon *Daemon
+}
+
+// Execute generates a rich PR description from the diff and updates the open PR body.
+func (a *writePRDescriptionAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	}
+
+	if err := d.writePRDescription(ctx, item, sess); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("ai.write_pr_description failed: %w", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // waitAction implements the workflow.wait action.
 type waitAction struct {
 	daemon *Daemon

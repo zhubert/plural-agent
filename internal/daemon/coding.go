@@ -886,6 +886,41 @@ func getReviewRounds(stepData map[string]any) int {
 	}
 }
 
+// writePRDescription generates a rich PR description from the branch diff and updates the PR body.
+// It uses Claude with a tailored prompt focused on description quality, then edits the open PR body.
+func (d *Daemon) writePRDescription(ctx context.Context, item daemonstate.WorkItem, sess *config.Session) error {
+	// Refresh stale session so worktree path is valid.
+	sess = d.refreshStaleSession(ctx, item, sess)
+
+	workDir := sess.WorkTree
+	if workDir == "" {
+		workDir = sess.RepoPath
+	}
+
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+
+	descCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	body, err := d.gitService.GenerateRichPRDescription(descCtx, workDir, item.Branch, baseBranch, sess.GetIssueRef())
+	if err != nil {
+		return fmt.Errorf("failed to generate PR description: %w", err)
+	}
+
+	updateCtx, updateCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer updateCancel()
+
+	if err := d.gitService.UpdatePRBody(updateCtx, workDir, item.Branch, body); err != nil {
+		return fmt.Errorf("failed to update PR body: %w", err)
+	}
+
+	d.logger.Info("updated PR description", "workItem", item.ID, "branch", item.Branch)
+	return nil
+}
+
 // saveRunnerMessages saves messages for a session's runner.
 func (d *Daemon) saveRunnerMessages(sessionID string, runner claude.RunnerSession) {
 	if err := d.sessionMgr.SaveRunnerMessages(sessionID, runner); err != nil {

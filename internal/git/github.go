@@ -1006,6 +1006,109 @@ Diff:
 	return title, body, nil
 }
 
+// UpdatePRBody updates the body of an existing pull request using the gh CLI.
+func (s *GitService) UpdatePRBody(ctx context.Context, repoPath, branch, body string) error {
+	_, _, err := s.executor.Run(ctx, repoPath, "gh", "pr", "edit", branch, "--body", body)
+	if err != nil {
+		return fmt.Errorf("gh pr edit --body failed: %w", err)
+	}
+	return nil
+}
+
+// GenerateRichPRDescription uses Claude to generate a rich PR description from the diff and
+// commit messages. The description includes a summary, test plan, and breaking change notes.
+// Unlike GeneratePRTitleAndBodyWithIssueRef, this focuses on description quality rather than
+// also generating a title, and uses a tailored prompt for richer output.
+//
+// baseBranch is the branch this PR will be compared against (typically the session's BaseBranch or main).
+func (s *GitService) GenerateRichPRDescription(ctx context.Context, repoPath, branch, baseBranch string, issueRef *config.IssueRef) (string, error) {
+	log := logger.WithComponent("git")
+	log.Info("generating rich PR description with Claude", "branch", branch, "baseBranch", baseBranch)
+
+	if baseBranch == "" {
+		baseBranch = s.GetDefaultBranch(ctx, repoPath)
+	}
+
+	// Use origin/<baseBranch> for git comparisons.
+	comparisonRef := baseBranch
+	_, fetchErr := s.executor.CombinedOutput(ctx, repoPath, "git", "fetch", "origin", baseBranch)
+	if fetchErr == nil {
+		candidateRef := fmt.Sprintf("origin/%s", baseBranch)
+		_, _, verifyErr := s.executor.Run(ctx, repoPath, "git", "rev-parse", "--verify", candidateRef)
+		if verifyErr == nil {
+			comparisonRef = candidateRef
+		}
+	}
+
+	// Get the commit log for this branch.
+	commitLog, err := s.executor.Output(ctx, repoPath, "git", "log",
+		fmt.Sprintf("%s..%s", comparisonRef, branch), "--oneline")
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit log: %w", err)
+	}
+
+	// Get the diff from base branch.
+	diffOutput, err := s.executor.Output(ctx, repoPath, "git", "diff", "--no-ext-diff",
+		fmt.Sprintf("%s...%s", comparisonRef, branch))
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %w", err)
+	}
+
+	fullDiff := string(diffOutput)
+	if len(fullDiff) > MaxDiffSize {
+		fullDiff = fullDiff[:MaxDiffSize] + "\n... (diff truncated)"
+	}
+
+	// Build a description-focused prompt that produces richer output than the PR-creation prompt.
+	issueContext := ""
+	if issueRef != nil && issueRef.Title != "" {
+		issueContext = fmt.Sprintf("\nIssue being addressed: %s", issueRef.Title)
+	}
+
+	prompt := fmt.Sprintf(`You are writing a GitHub pull request description. Analyze the diff and commit messages below and produce a rich, informative PR body.%s
+
+Output ONLY the PR body markdown — no preamble, no meta-commentary. Use this exact structure:
+
+## Summary
+1-3 sentences explaining what this PR does and why.
+
+## Changes
+Bullet points of the key changes made (be specific, reference files/functions where helpful).
+
+## Test plan
+- Concrete steps a reviewer can follow to verify the changes work correctly.
+
+## Breaking changes
+List any breaking changes (API changes, removed flags, changed defaults). Write "None" if there are none.
+
+Commits in this branch:
+%s
+
+Diff:
+%s`, issueContext, strings.TrimSpace(string(commitLog)), fullDiff)
+
+	output, err := s.executor.Output(ctx, repoPath, "claude", "--print", "-p", prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate PR description with Claude: %w", err)
+	}
+
+	body := strings.TrimSpace(string(output))
+	if body == "" {
+		return "", fmt.Errorf("Claude returned empty PR description")
+	}
+
+	// Append issue link if applicable.
+	if issueRef != nil {
+		linkText := GetPRLinkText(issueRef)
+		if linkText != "" {
+			body = body + linkText
+		}
+	}
+
+	log.Info("generated rich PR description", "branch", branch, "bodyLen", len(body))
+	return body, nil
+}
+
 // GetPRLinkText returns the appropriate text to add to a PR body based on the issue source.
 // For GitHub issues: returns "\n\nFixes #123"
 // For Asana tasks: returns "" (no auto-close support)
