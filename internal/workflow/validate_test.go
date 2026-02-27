@@ -713,6 +713,42 @@ func TestValidate(t *testing.T) {
 			wantFields: nil,
 		},
 		{
+			name: "assign_pr missing assignee param",
+			cfg: &Config{
+				Start:  "assign",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"assign": {Type: StateTypeTask, Action: "github.assign_pr", Next: "done"},
+					"done":   {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.assign.params.assignee"},
+		},
+		{
+			name: "assign_pr with empty assignee param",
+			cfg: &Config{
+				Start:  "assign",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"assign": {Type: StateTypeTask, Action: "github.assign_pr", Next: "done", Params: map[string]any{"assignee": ""}},
+					"done":   {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: []string{"states.assign.params.assignee"},
+		},
+		{
+			name: "assign_pr with valid assignee",
+			cfg: &Config{
+				Start:  "assign",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"assign": {Type: StateTypeTask, Action: "github.assign_pr", Next: "done", Params: map[string]any{"assignee": "octocat"}},
+					"done":   {Type: StateTypeSucceed},
+				},
+			},
+			wantFields: nil,
+		},
+		{
 			name: "git.format missing command param",
 			cfg: &Config{
 				Start:  "fmt",

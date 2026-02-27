@@ -539,6 +539,30 @@ func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, p
 	return nil
 }
 
+// assignPR assigns the PR to specific users for a work item.
+func (d *Daemon) assignPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	sess := d.config.GetSession(item.SessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found for work item %s", item.ID)
+	}
+
+	assignee := params.String("assignee", "")
+	if assignee == "" {
+		return fmt.Errorf("assignee parameter is required")
+	}
+
+	assignCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(assignCtx, "gh", "pr", "edit", item.Branch, "--add-assignee", assignee)
+	cmd.Dir = sess.RepoPath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-assignee failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // resolveRepoPath resolves the repo path for a work item, preferring the session's path.
 func (d *Daemon) resolveRepoPath(ctx context.Context, item daemonstate.WorkItem) string {
 	if item.SessionID != "" {

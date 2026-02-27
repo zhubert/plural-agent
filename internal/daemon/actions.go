@@ -304,6 +304,11 @@ type requestReviewAction struct {
 	daemon *Daemon
 }
 
+// assignPRAction implements the github.assign_pr action.
+type assignPRAction struct {
+	daemon *Daemon
+}
+
 // Execute requests review on the PR for the work item.
 func (a *requestReviewAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
@@ -314,6 +319,21 @@ func (a *requestReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 
 	if err := d.requestReview(ctx, item, ac.Params); err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("request review failed: %w", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
+// Execute assigns the PR to specific users for the work item.
+func (a *assignPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.assignPR(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("assign PR failed: %w", err)}
 	}
 
 	return workflow.ActionResult{Success: true}

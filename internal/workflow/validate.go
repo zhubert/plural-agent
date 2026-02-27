@@ -123,6 +123,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateRequestReviewParams(prefix, state.Params)...)
 		}
 
+		// Validate params for github.assign_pr action
+		if state.Action == "github.assign_pr" {
+			errs = append(errs, validateAssignPRParams(prefix, state.Params)...)
+		}
+
 		// Validate params for git.format action
 		if state.Action == "git.format" {
 			errs = append(errs, validateFormatParams(prefix, state.Params)...)
@@ -449,6 +454,37 @@ func validateRequestReviewParams(prefix string, params map[string]any) []Validat
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".params.reviewer",
 			Message: "reviewer must not be empty",
+		})
+	}
+
+	return errs
+}
+
+// validateAssignPRParams validates params for github.assign_pr actions.
+func validateAssignPRParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	if params == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.assignee",
+			Message: "assignee is required for github.assign_pr action",
+		})
+		return errs
+	}
+
+	assignee, ok := params["assignee"]
+	if !ok || assignee == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.assignee",
+			Message: "assignee is required for github.assign_pr action",
+		})
+		return errs
+	}
+
+	if s, ok := assignee.(string); ok && s == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.assignee",
+			Message: "assignee must not be empty",
 		})
 	}
 
