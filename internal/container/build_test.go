@@ -13,7 +13,7 @@ import (
 func TestGenerateDockerfile_GoWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: "1.23"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	expectedArch := goArch()
 	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", expectedArch)
 	if !strings.Contains(df, expected) {
@@ -29,7 +29,7 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 		{Lang: LangGo, Version: "1.22"},
 		{Lang: LangRuby, Version: "3.3"},
 		{Lang: LangNode, Version: "20"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	expected := fmt.Sprintf("go1.22.0.linux-%s.tar.gz", goArch())
 	if !strings.Contains(df, expected) {
 		t.Errorf("expected %s in Dockerfile", expected)
@@ -43,7 +43,7 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 }
 
 func TestGenerateDockerfile_NoLanguages(t *testing.T) {
-	df := GenerateDockerfile(nil, "0.2.11")
+	df := GenerateDockerfile(nil, "0.2.11", "")
 	if !strings.Contains(df, "node:20-alpine") {
 		t.Error("expected alpine base image with default Node 20")
 	}
@@ -63,7 +63,7 @@ func TestGenerateDockerfile_AlwaysIncludesClaudeCode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11")
+			df := GenerateDockerfile(tt.langs, "0.2.11", "")
 			if !strings.Contains(df, "@anthropic-ai/claude-code") {
 				t.Error("expected Claude Code install in every Dockerfile")
 			}
@@ -82,7 +82,7 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11")
+			df := GenerateDockerfile(tt.langs, "0.2.11", "")
 			if !strings.Contains(df, "entrypoint.sh") {
 				t.Error("expected entrypoint script in every Dockerfile")
 			}
@@ -105,7 +105,7 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: ""},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	// Should use default Go version 1.23
 	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", goArch())
 	if !strings.Contains(df, expected) {
@@ -116,7 +116,7 @@ func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
 func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	if !strings.Contains(df, "pyenv install 3.11") {
 		t.Error("expected pyenv install 3.11 in Dockerfile")
 	}
@@ -128,7 +128,7 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangRust, Version: "1.77.0"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	if !strings.Contains(df, "--default-toolchain 1.77.0") {
 		t.Error("expected Rust 1.77.0 toolchain in Dockerfile")
 	}
@@ -140,7 +140,7 @@ func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
 func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangJava, Version: "21"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	if !strings.Contains(df, "openjdk21-jdk") {
 		t.Error("expected OpenJDK 21 JDK install in Dockerfile")
 	}
@@ -149,7 +149,7 @@ func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
 func TestGenerateDockerfile_PHP(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPHP},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	if !strings.Contains(df, "php83-cli") {
 		t.Error("expected php83-cli install in Dockerfile")
 	}
@@ -176,7 +176,7 @@ func TestGenerateDockerfile_IncludesErgBinary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11")
+			df := GenerateDockerfile(tt.langs, "0.2.11", "")
 			expected := fmt.Sprintf("erg/releases/download/v0.2.11/erg_Linux_%s.tar.gz", expectedArch)
 			if !strings.Contains(df, expected) {
 				t.Errorf("expected release download URL in Dockerfile, got:\n%s", df)
@@ -191,7 +191,7 @@ func TestGenerateDockerfile_IncludesErgBinary(t *testing.T) {
 func TestGenerateDockerfile_DevVersionUsesLatestRelease(t *testing.T) {
 	for _, version := range []string{"dev", ""} {
 		t.Run("version="+version, func(t *testing.T) {
-			df := GenerateDockerfile(nil, version)
+			df := GenerateDockerfile(nil, version, "")
 			if strings.Contains(df, "/releases/download/v") {
 				t.Error("dev version should not use pinned release URL")
 			}
@@ -211,8 +211,8 @@ func TestGenerateDockerfile_Deterministic(t *testing.T) {
 		{Lang: LangNode, Version: "20"},
 		{Lang: LangRuby, Version: "3.3"},
 	}
-	df1 := GenerateDockerfile(langs, "0.2.11")
-	df2 := GenerateDockerfile(langs, "0.2.11")
+	df1 := GenerateDockerfile(langs, "0.2.11", "")
+	df2 := GenerateDockerfile(langs, "0.2.11", "")
 	if df1 != df2 {
 		t.Error("GenerateDockerfile should be deterministic for the same input")
 	}
@@ -222,7 +222,7 @@ func TestGenerateDockerfile_NodeVersionOverride(t *testing.T) {
 	// When Node is detected with a specific version, it should use that version
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangNode, Version: "22"},
-	}, "0.2.11")
+	}, "0.2.11", "")
 	if !strings.Contains(df, "node:22-alpine") {
 		t.Error("expected detected Node version 22 to override default in base image")
 	}
@@ -364,8 +364,17 @@ func TestEnsureImage_BuildFailure(t *testing.T) {
 }
 
 func TestEnsureImage_DevUsesCaching(t *testing.T) {
-	orig := dockerCommandFunc
-	defer func() { dockerCommandFunc = orig }()
+	origDocker := dockerCommandFunc
+	origCross := crossCompileFunc
+	defer func() {
+		dockerCommandFunc = origDocker
+		crossCompileFunc = origCross
+	}()
+
+	// Simulate cross-compile writing a binary
+	crossCompileFunc = func(outputPath string) error {
+		return os.WriteFile(outputPath, []byte("fake-erg-binary"), 0o755)
+	}
 
 	inspectCalled := false
 	dockerCommandFunc = func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -384,5 +393,163 @@ func TestEnsureImage_DevUsesCaching(t *testing.T) {
 	}
 	if !inspectCalled {
 		t.Error("dev builds should still check image cache")
+	}
+}
+
+func TestGenerateDockerfile_DevBinaryHash(t *testing.T) {
+	hash := "abc123def456"
+	df := GenerateDockerfile(nil, "dev", hash)
+
+	if !strings.Contains(df, "COPY erg /usr/local/bin/erg") {
+		t.Error("dev build with hash should use COPY instead of curl")
+	}
+	if !strings.Contains(df, "LABEL erg.dev.hash="+hash) {
+		t.Error("dev build with hash should include hash label")
+	}
+	if strings.Contains(df, "curl") && strings.Contains(df, "erg_Linux") {
+		t.Error("dev build with hash should not download erg from releases")
+	}
+}
+
+func TestGenerateDockerfile_DevBinaryHashChangesTag(t *testing.T) {
+	df1 := GenerateDockerfile(nil, "dev", "hash_aaa")
+	df2 := GenerateDockerfile(nil, "dev", "hash_bbb")
+	tag1 := ImageTag(df1)
+	tag2 := ImageTag(df2)
+	if tag1 == tag2 {
+		t.Error("different binary hashes should produce different image tags")
+	}
+}
+
+func TestGenerateDockerfile_DevNoHashFallsBackToLatest(t *testing.T) {
+	df := GenerateDockerfile(nil, "dev", "")
+	if strings.Contains(df, "COPY erg") {
+		t.Error("dev build without hash should not use COPY")
+	}
+	if !strings.Contains(df, "/releases/latest/download/") {
+		t.Error("dev build without hash should fall back to latest release")
+	}
+}
+
+func TestEnsureImage_DevCrossCompiles(t *testing.T) {
+	origDocker := dockerCommandFunc
+	origCross := crossCompileFunc
+	defer func() {
+		dockerCommandFunc = origDocker
+		crossCompileFunc = origCross
+	}()
+
+	crossCompileCalled := false
+	crossCompileFunc = func(outputPath string) error {
+		crossCompileCalled = true
+		return os.WriteFile(outputPath, []byte("fake-erg-binary"), 0o755)
+	}
+
+	var buildStdin string
+	var buildArgs []string
+	dockerCommandFunc = func(_ context.Context, stdin string, args ...string) ([]byte, error) {
+		if args[0] == "image" && args[1] == "inspect" {
+			return nil, fmt.Errorf("not found")
+		}
+		if args[0] == "build" {
+			buildStdin = stdin
+			buildArgs = args
+			return []byte("built"), nil
+		}
+		return nil, fmt.Errorf("unexpected: %v", args)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	tag, built, err := EnsureImage(context.Background(), nil, "dev", logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !crossCompileCalled {
+		t.Error("expected cross-compile to be called for dev builds")
+	}
+	if !built {
+		t.Error("expected image to be built")
+	}
+	if !strings.HasPrefix(tag, "erg:") {
+		t.Errorf("expected valid tag, got %q", tag)
+	}
+	if !strings.Contains(buildStdin, "COPY erg /usr/local/bin/erg") {
+		t.Error("expected COPY erg in Dockerfile for dev build")
+	}
+	if !strings.Contains(buildStdin, "LABEL erg.dev.hash=") {
+		t.Error("expected hash label in Dockerfile for dev build")
+	}
+	// Build context should be a temp dir, not "."
+	lastArg := buildArgs[len(buildArgs)-1]
+	if lastArg == "." {
+		t.Error("expected build context to be temp dir, not '.'")
+	}
+}
+
+func TestEnsureImage_DevCrossCompileFailureFallsBack(t *testing.T) {
+	origDocker := dockerCommandFunc
+	origCross := crossCompileFunc
+	defer func() {
+		dockerCommandFunc = origDocker
+		crossCompileFunc = origCross
+	}()
+
+	crossCompileFunc = func(_ string) error {
+		return fmt.Errorf("go not found")
+	}
+
+	var buildStdin string
+	dockerCommandFunc = func(_ context.Context, stdin string, args ...string) ([]byte, error) {
+		if args[0] == "image" && args[1] == "inspect" {
+			return nil, fmt.Errorf("not found")
+		}
+		if args[0] == "build" {
+			buildStdin = stdin
+			return []byte("built"), nil
+		}
+		return nil, fmt.Errorf("unexpected: %v", args)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	_, built, err := EnsureImage(context.Background(), nil, "dev", logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !built {
+		t.Error("expected image to be built even on cross-compile failure")
+	}
+	// Should fall back to latest release download
+	if strings.Contains(buildStdin, "COPY erg") {
+		t.Error("should not use COPY when cross-compile fails")
+	}
+	if !strings.Contains(buildStdin, "/releases/latest/download/") {
+		t.Error("should fall back to latest release download when cross-compile fails")
+	}
+}
+
+func TestEnsureImage_ReleaseBuildSkipsCrossCompile(t *testing.T) {
+	origDocker := dockerCommandFunc
+	origCross := crossCompileFunc
+	defer func() {
+		dockerCommandFunc = origDocker
+		crossCompileFunc = origCross
+	}()
+
+	crossCompileFunc = func(_ string) error {
+		t.Error("cross-compile should not be called for release builds")
+		return nil
+	}
+
+	dockerCommandFunc = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "image" && args[1] == "inspect" {
+			return nil, fmt.Errorf("not found")
+		}
+		return []byte("built"), nil
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	_, _, err := EnsureImage(context.Background(), nil, "0.2.11", logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -46,7 +48,9 @@ func releaseArch() string {
 // Node.js is always included since it's required for Claude Code.
 // If version is non-empty (and not "dev"), the erg binary is downloaded
 // from the GitHub release and installed as /usr/local/bin/erg.
-func GenerateDockerfile(langs []DetectedLang, version string) string {
+// When devBinaryHash is non-empty, the binary is COPYed from the build context
+// instead of downloaded, and a label is added to bust the image cache.
+func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) string {
 	var b strings.Builder
 
 	// Determine Node version: use detected version if present, else default
@@ -73,13 +77,19 @@ func GenerateDockerfile(langs []DetectedLang, version string) string {
 		}
 	}
 
-	// Install the erg binary from GitHub releases.
-	// Pinned versions use an exact tag; otherwise grab the latest release.
-	if version != "" && version != "dev" {
+	// Install the erg binary.
+	if devBinaryHash != "" {
+		// Dev mode: COPY the cross-compiled binary from the build context.
+		// The label makes the Dockerfile text unique per binary, busting the ImageTag cache.
+		b.WriteString("COPY erg /usr/local/bin/erg\n")
+		fmt.Fprintf(&b, "LABEL erg.dev.hash=%s\n", devBinaryHash)
+	} else if version != "" && version != "dev" {
+		// Pinned release version: download exact tag.
 		fmt.Fprintf(&b, "RUN curl -fsSL https://github.com/zhubert/erg/releases/download/v%s/erg_Linux_%s.tar.gz"+
 			" | tar -xz -C /tmp && mv /tmp/erg /usr/local/bin/erg\n",
 			version, releaseArch())
 	} else {
+		// Dev or empty version without a local binary: grab latest release.
 		fmt.Fprintf(&b, "RUN curl -fsSL -L https://github.com/zhubert/erg/releases/latest/download/erg_Linux_%s.tar.gz"+
 			" | tar -xz -C /tmp && mv /tmp/erg /usr/local/bin/erg\n",
 			releaseArch())
@@ -162,6 +172,56 @@ func ImageTag(dockerfile string) string {
 	return fmt.Sprintf("erg:%x", h[:6])
 }
 
+// crossCompileFunc builds a Linux binary from the local erg source and writes it
+// to outputPath. Overridable in tests.
+var crossCompileFunc = crossCompile
+
+// ergModulePath is the expected module path for the erg project.
+const ergModulePath = "github.com/zhubert/erg"
+
+func crossCompile(outputPath string) error {
+	// Find the erg source directory by walking up from the current executable.
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find executable: %w", err)
+	}
+	srcDir, err := findModuleRoot(filepath.Dir(exePath))
+	if err != nil {
+		return fmt.Errorf("cannot find erg source: %w", err)
+	}
+
+	cmd := exec.Command("go", "build", "-o", outputPath, ".")
+	cmd.Dir = srcDir
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goArch(), "CGO_ENABLED=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cross-compile failed: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// findModuleRoot walks up from dir looking for a go.mod with the erg module path.
+func findModuleRoot(dir string) (string, error) {
+	for {
+		modFile := filepath.Join(dir, "go.mod")
+		data, err := os.ReadFile(modFile)
+		if err == nil {
+			// Check first line for the module declaration
+			for _, line := range strings.SplitN(string(data), "\n", 3) {
+				if strings.HasPrefix(line, "module ") && strings.TrimSpace(strings.TrimPrefix(line, "module ")) == ergModulePath {
+					return dir, nil
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod with module %s not found", ergModulePath)
+		}
+		dir = parent
+	}
+}
+
 // dockerCommandFunc is the function used to execute docker commands. Overridden in tests.
 var dockerCommandFunc = dockerCommand
 
@@ -181,9 +241,39 @@ func dockerCommand(ctx context.Context, stdin string, args ...string) ([]byte, e
 
 // EnsureImage generates a Dockerfile for the detected languages, builds it if
 // not already cached, and returns the image tag plus whether a build was needed.
-// The erg binary is always installed from GitHub releases (pinned or latest).
+// For dev builds, the local erg binary is cross-compiled for Linux and COPYed
+// into the image. For release builds, the binary is downloaded from GitHub.
 func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logger *slog.Logger) (string, bool, error) {
-	dockerfile := GenerateDockerfile(langs, version)
+	var devBinaryHash string
+	var buildContextDir string
+
+	// For dev builds, try to cross-compile the local binary.
+	if version == "dev" {
+		tmpDir, err := os.MkdirTemp("", "erg-dev-build-*")
+		if err != nil {
+			logger.Warn("failed to create temp dir for dev build, falling back to release download", "error", err)
+		} else {
+			binaryPath := filepath.Join(tmpDir, "erg")
+			if err := crossCompileFunc(binaryPath); err != nil {
+				logger.Warn("cross-compilation failed, falling back to release download", "error", err)
+				os.RemoveAll(tmpDir)
+			} else {
+				data, err := os.ReadFile(binaryPath)
+				if err != nil {
+					logger.Warn("failed to read cross-compiled binary, falling back to release download", "error", err)
+					os.RemoveAll(tmpDir)
+				} else {
+					h := sha256.Sum256(data)
+					devBinaryHash = fmt.Sprintf("%x", h[:16])
+					buildContextDir = tmpDir
+					defer os.RemoveAll(tmpDir)
+					logger.Info("cross-compiled dev binary for container", "hash", devBinaryHash)
+				}
+			}
+		}
+	}
+
+	dockerfile := GenerateDockerfile(langs, version, devBinaryHash)
 	tag := ImageTag(dockerfile)
 
 	// Check if image already exists (cached)
@@ -203,7 +293,13 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 	}
 	logger.Info("building container image", "image", tag, "languages", strings.Join(langNames, ", "))
 
-	_, err := dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", ".")
+	var err error
+	if buildContextDir != "" {
+		// Dev build: use temp dir with the cross-compiled binary as build context
+		_, err = dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", buildContextDir)
+	} else {
+		_, err = dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", ".")
+	}
 	if err != nil {
 		return "", false, fmt.Errorf("docker build failed: %w", err)
 	}
