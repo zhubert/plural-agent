@@ -2391,3 +2391,128 @@ func TestGenerateRichPRDescription_GitLogError(t *testing.T) {
 		t.Fatal("expected error when git log fails, got nil")
 	}
 }
+
+// --- CherryPick tests ---
+
+func TestCherryPick_Success_SingleCommit(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"checkout", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"cherry-pick", "abc1234"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "origin", "release-v2"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCherryPick_Success_MultipleCommits(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"checkout", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"cherry-pick", "abc1234", "def5678"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "origin", "release-v2"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234", "def5678"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCherryPick_EmptyCommits(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{})
+	if err == nil {
+		t.Fatal("expected error for empty commits list")
+	}
+	if !strings.Contains(err.Error(), "no commits specified") {
+		t.Errorf("expected 'no commits specified' error, got: %v", err)
+	}
+}
+
+func TestCherryPick_FetchFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{
+		Err: fmt.Errorf("network error"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234"})
+	if err == nil {
+		t.Fatal("expected error when fetch fails")
+	}
+	if !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("expected fetch error, got: %v", err)
+	}
+}
+
+func TestCherryPick_CheckoutFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"checkout", "release-v2"}, pexec.MockResponse{
+		Err: fmt.Errorf("branch not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234"})
+	if err == nil {
+		t.Fatal("expected error when checkout fails")
+	}
+	if !strings.Contains(err.Error(), "git checkout") {
+		t.Errorf("expected checkout error, got: %v", err)
+	}
+}
+
+func TestCherryPick_ConflictAbortsAndErrors(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"checkout", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"cherry-pick", "abc1234"}, pexec.MockResponse{
+		Err: fmt.Errorf("merge conflict"),
+	})
+	mock.AddExactMatch("git", []string{"cherry-pick", "--abort"}, pexec.MockResponse{})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234"})
+	if err == nil {
+		t.Fatal("expected error when cherry-pick conflicts")
+	}
+	if !strings.Contains(err.Error(), "cherry-pick failed") {
+		t.Errorf("expected cherry-pick conflict error, got: %v", err)
+	}
+
+	// Verify cherry-pick --abort was called
+	calls := mock.GetCalls()
+	aborted := false
+	for _, c := range calls {
+		if c.Name == "git" && len(c.Args) >= 2 && c.Args[0] == "cherry-pick" && c.Args[1] == "--abort" {
+			aborted = true
+		}
+	}
+	if !aborted {
+		t.Error("expected git cherry-pick --abort to be called")
+	}
+}
+
+func TestCherryPick_PushFails(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"checkout", "release-v2"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"cherry-pick", "abc1234"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"push", "origin", "release-v2"}, pexec.MockResponse{
+		Err: fmt.Errorf("push rejected"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.CherryPick(context.Background(), "/repo", "release-v2", []string{"abc1234"})
+	if err == nil {
+		t.Fatal("expected error when push fails")
+	}
+	if !strings.Contains(err.Error(), "git push") {
+		t.Errorf("expected push error, got: %v", err)
+	}
+}
