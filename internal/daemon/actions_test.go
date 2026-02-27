@@ -3576,6 +3576,141 @@ func TestGetRebaseRounds(t *testing.T) {
 	}
 }
 
+// --- squashAction tests ---
+
+func TestSquashAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &squashAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     workflow.NewParamHelper(map[string]any{}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestSquashAction_Execute_SessionNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "missing-session",
+		Branch:    "feature-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &squashAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when session not found")
+	}
+	if result.Error == nil {
+		t.Error("expected error when session not found")
+	}
+}
+
+func TestSquashAction_Execute_Success(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock the git commands called by SquashBranch
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, exec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mockExec.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"commit", "-m", "squash commit"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-sess-1"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &squashAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"message": "squash commit"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+}
+
+func TestSquashAction_Execute_SquashFails(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Fetch fails and local merge-base also fails
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{
+		Err: fmt.Errorf("network error"),
+	})
+	mockExec.AddExactMatch("git", []string{"merge-base", "HEAD", "main"}, exec.MockResponse{
+		Err: fmt.Errorf("branch not found"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &squashAction{daemon: d}
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     workflow.NewParamHelper(map[string]any{"message": "squash commit"}),
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when squash fails")
+	}
+	if result.Error == nil {
+		t.Error("expected error when squash fails")
+	}
+	if !strings.Contains(result.Error.Error(), "squash failed") {
+		t.Errorf("expected 'squash failed' error, got: %v", result.Error)
+	}
+}
+
 // --- resolveConflictsAction tests ---
 
 func TestResolveConflictsAction_WorkItemNotFound(t *testing.T) {
