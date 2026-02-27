@@ -345,9 +345,9 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 		}`),
 	})
 
-	// Mock gh issue edit (remove label) and gh issue comment (best-effort).
-	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
-	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+	// No gh issue edit / gh issue comment mocks — open PRs should NOT
+	// have their queued label removed. The label is kept as a durable
+	// safety net so the issue is rediscovered if the daemon crashes.
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
 	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
@@ -407,6 +407,13 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 	}
 	if !sess.PRCreated {
 		t.Error("expected session to have PRCreated=true")
+	}
+
+	// Verify no label removal calls were made (only graphql + git remote calls expected).
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) > 1 && call.Args[1] == "edit" {
+			t.Error("expected no gh issue edit call for open PR adoption (label should be preserved)")
+		}
 	}
 }
 
