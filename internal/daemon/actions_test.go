@@ -1374,6 +1374,88 @@ func TestRequestReviewAction_Execute_MissingReviewerParam(t *testing.T) {
 	}
 }
 
+// --- assignPRAction tests ---
+
+func TestAssignPRAction_Execute_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &assignPRAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"assignee": "octocat"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "nonexistent",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing work item")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestAssignPRAction_Execute_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "nonexistent-session",
+		Branch:    "feature-1",
+	})
+
+	action := &assignPRAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"assignee": "octocat"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing session")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing session")
+	}
+}
+
+func TestAssignPRAction_Execute_MissingAssigneeParam(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+	})
+
+	action := &assignPRAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure for missing assignee parameter")
+	}
+	if result.Error == nil {
+		t.Error("expected error for missing assignee parameter")
+	}
+}
+
 // --- commentPRAction tests ---
 
 func TestCommentPRAction_Execute_WorkItemNotFound(t *testing.T) {
