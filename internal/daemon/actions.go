@@ -88,6 +88,11 @@ Use the comment_issue MCP tool to post the plan to the issue. Do NOT use "gh iss
 any other CLI command. The comment_issue tool routes through the daemon and handles authentication
 automatically.
 
+CRITICAL: You MUST call comment_issue exactly once before finishing, in ALL cases — even if you
+believe the issue is already resolved by existing code or a prior commit. In that case, post a
+comment explaining what you found (e.g., which commit or code already addresses it) and recommend
+closing the issue. The downstream workflow always expects a plan comment to exist.
+
 IMPORTANT: Post the plan before finishing. The system will wait for human approval (via label or
 comment) before proceeding to implementation.
 

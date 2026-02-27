@@ -568,6 +568,10 @@ func (w *SessionWorker) handleCommentIssue(req mcp.CommentIssueRequest) {
 		return
 	}
 
+	// Record that a comment was posted so the daemon can detect if a planning
+	// session completes without ever calling comment_issue.
+	_ = w.host.SetWorkItemData(w.sessionID, "plan_comment_posted", true)
+
 	w.runner.SendCommentIssueResponse(mcp.CommentIssueResponse{
 		ID:      req.ID,
 		Success: true,

@@ -7104,6 +7104,15 @@ func TestDefaultPlanningSystemPrompt_InstructsToPostComment(t *testing.T) {
 	}
 }
 
+func TestDefaultPlanningSystemPrompt_RequiresCommentInAllCases(t *testing.T) {
+	if !strings.Contains(DefaultPlanningSystemPrompt, "MUST call comment_issue exactly once") {
+		t.Error("DefaultPlanningSystemPrompt should require calling comment_issue in all cases")
+	}
+	if !strings.Contains(DefaultPlanningSystemPrompt, "already resolved") {
+		t.Error("DefaultPlanningSystemPrompt should handle the 'already resolved' case")
+	}
+}
+
 func TestDefaultPlanningSystemPrompt_ContainerEnvironment(t *testing.T) {
 	if !strings.Contains(DefaultPlanningSystemPrompt, "CONTAINER ENVIRONMENT") {
 		t.Error("DefaultPlanningSystemPrompt should contain CONTAINER ENVIRONMENT section")

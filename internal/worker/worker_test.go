@@ -835,6 +835,54 @@ func TestSessionWorker_HandleCommentIssue_Success(t *testing.T) {
 	}
 }
 
+func TestSessionWorker_HandleCommentIssue_SetsPlanCommentPosted(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+	w.ctx = context.Background()
+
+	w.handleCommentIssue(mcp.CommentIssueRequest{ID: 1, Body: "Here is the plan"})
+
+	// Verify plan_comment_posted was set via SetWorkItemData.
+	data := h.workItemData["s1"]
+	if data == nil {
+		t.Fatal("expected work item data to be set for session s1")
+	}
+	if posted, ok := data["plan_comment_posted"].(bool); !ok || !posted {
+		t.Errorf("expected plan_comment_posted=true, got %v", data["plan_comment_posted"])
+	}
+}
+
+func TestSessionWorker_HandleCommentIssue_NoFlagOnError(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.commentOnIssueErr = fmt.Errorf("provider not registered")
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+	w.ctx = context.Background()
+
+	w.handleCommentIssue(mcp.CommentIssueRequest{ID: 1, Body: "Hello"})
+
+	// When CommentOnIssue fails, plan_comment_posted should NOT be set.
+	data := h.workItemData["s1"]
+	if data != nil {
+		if _, ok := data["plan_comment_posted"]; ok {
+			t.Error("expected plan_comment_posted to NOT be set when comment fails")
+		}
+	}
+}
+
 func TestSessionWorker_HandleCommentIssue_HostError(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 	h := newMockHost(mockExec)

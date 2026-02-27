@@ -2870,6 +2870,133 @@ func TestHandleAsyncComplete_Plan_CleansUpSession(t *testing.T) {
 	}
 }
 
+func TestHandleAsyncComplete_Plan_PostsFallbackWhenNoComment(t *testing.T) {
+	// When ai.plan completes but plan_comment_posted is not set in StepData,
+	// the daemon should post a fallback comment on the issue.
+	mockExec := exec.NewMockExecutor(nil) // all commands succeed (including gh issue comment)
+	cfg := testConfig()
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := &config.Session{
+		ID:            "sess-plan-fallback",
+		RepoPath:      "/test/repo",
+		WorkTree:      "/test/worktree-plan-fallback",
+		Branch:        "main",
+		Started:       true,
+		Autonomous:    true,
+		Containerized: true,
+		IssueRef:      &config.IssueRef{Source: "github", ID: "500", Title: "Test issue"},
+	}
+	cfg.AddSession(*sess)
+
+	customCfg := &workflow.Config{
+		Start: "planning",
+		States: map[string]*workflow.State{
+			"planning": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.plan",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-plan-fallback",
+		IssueRef:    config.IssueRef{Source: "github", ID: "500"},
+		SessionID:   "sess-plan-fallback",
+		Branch:      "main",
+		CurrentStep: "planning",
+		StepData:    map[string]any{},
+		// Note: plan_comment_posted is NOT set — simulates Claude not calling comment_issue
+	})
+	d.state.AdvanceWorkItem("item-plan-fallback", "planning", "async_pending")
+	d.workers["item-plan-fallback"] = newMockDoneWorker()
+
+	d.collectCompletedWorkers(context.Background())
+
+	// Verify that gh issue comment was called (fallback comment)
+	calls := mockExec.GetCalls()
+	found := false
+	for _, c := range calls {
+		for i, arg := range c.Args {
+			if arg == "comment" && i > 0 && c.Args[i-1] == "issue" {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("expected fallback comment to be posted via gh issue comment")
+	}
+}
+
+func TestHandleAsyncComplete_Plan_SkipsFallbackWhenCommentPosted(t *testing.T) {
+	// When ai.plan completes and plan_comment_posted IS set, no fallback comment is posted.
+	mockExec := exec.NewMockExecutor(nil)
+	cfg := testConfig()
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := &config.Session{
+		ID:            "sess-plan-posted",
+		RepoPath:      "/test/repo",
+		WorkTree:      "/test/worktree-plan-posted",
+		Branch:        "main",
+		Started:       true,
+		Autonomous:    true,
+		Containerized: true,
+		IssueRef:      &config.IssueRef{Source: "github", ID: "501", Title: "Test issue"},
+	}
+	cfg.AddSession(*sess)
+
+	customCfg := &workflow.Config{
+		Start: "planning",
+		States: map[string]*workflow.State{
+			"planning": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.plan",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-plan-posted",
+		IssueRef:    config.IssueRef{Source: "github", ID: "501"},
+		SessionID:   "sess-plan-posted",
+		Branch:      "main",
+		CurrentStep: "planning",
+		StepData: map[string]any{
+			"plan_comment_posted": true, // Claude DID call comment_issue
+		},
+	})
+	d.state.AdvanceWorkItem("item-plan-posted", "planning", "async_pending")
+	d.workers["item-plan-posted"] = newMockDoneWorker()
+
+	d.collectCompletedWorkers(context.Background())
+
+	// Verify that no gh issue comment was called (no fallback needed)
+	calls := mockExec.GetCalls()
+	for _, c := range calls {
+		for i, arg := range c.Args {
+			if arg == "comment" && i > 0 && c.Args[i-1] == "issue" {
+				t.Error("expected NO fallback comment when plan_comment_posted is true")
+			}
+		}
+	}
+}
+
 func TestCleanupPlanningSession_DoesNotDeleteGit(t *testing.T) {
 	// cleanupPlanningSession should clean up the session from config
 	// but NOT call sessionService.Delete (which removes worktrees/branches).

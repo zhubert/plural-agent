@@ -206,6 +206,22 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 			}
 			it.StepData["_repo_path"] = sess.RepoPath
 		})
+
+		// Safety net: if Claude never called comment_issue during planning,
+		// post a fallback comment so the plan-review state has something to review.
+		// Must happen before cleanupPlanningSession (which removes the session).
+		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+			if _, posted := fresh.StepData["plan_comment_posted"].(bool); !posted {
+				log.Warn("planning session completed without posting a plan comment, posting fallback")
+				fallbackBody := "The planning agent completed without posting a plan. " +
+					"This may indicate the issue was already resolved or could not be analyzed. " +
+					"Please review the issue and either approve to proceed with coding, or close the issue."
+				if err := d.CommentOnIssue(ctx, item.SessionID, fallbackBody); err != nil {
+					log.Warn("failed to post fallback plan comment", "error", err)
+				}
+			}
+		}
+
 		d.cleanupPlanningSession(ctx, item.SessionID)
 		// Re-fetch item so workItemView sees the updated StepData.
 		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
