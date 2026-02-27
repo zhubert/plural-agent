@@ -692,6 +692,35 @@ func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.Wor
 	return nil
 }
 
+// waitAction implements the workflow.wait action.
+type waitAction struct {
+	daemon *Daemon
+}
+
+// Execute pauses for the configured duration, cancelling cleanly on shutdown.
+// Required params:
+//   - duration: pause length as a Go duration string, e.g. "30s", "5m" (default: 0)
+func (a *waitAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	duration := ac.Params.Duration("duration", 0)
+	if duration <= 0 {
+		return workflow.ActionResult{Success: true}
+	}
+
+	a.daemon.logger.Info("workflow.wait: pausing", "workItem", ac.WorkItemID, "duration", duration)
+
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		a.daemon.logger.Info("workflow.wait: pause complete", "workItem", ac.WorkItemID, "duration", duration)
+		return workflow.ActionResult{Success: true}
+	case <-ctx.Done():
+		a.daemon.logger.Info("workflow.wait: cancelled", "workItem", ac.WorkItemID, "duration", duration)
+		return workflow.ActionResult{Error: ctx.Err()}
+	}
+}
+
 // webhookHTTPClient is the shared HTTP client used by webhook.post actions.
 // A custom transport with explicit connection pooling is used for production robustness.
 var webhookHTTPClient = &http.Client{

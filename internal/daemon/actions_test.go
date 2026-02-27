@@ -5237,3 +5237,89 @@ func TestActionErrorWrapping(t *testing.T) {
 		}
 	})
 }
+
+func TestWaitAction_Execute(t *testing.T) {
+	t.Run("completes after duration", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"duration": "10ms"}),
+		}
+
+		start := time.Now()
+		result := action.Execute(context.Background(), ac)
+		elapsed := time.Since(start)
+
+		if !result.Success {
+			t.Errorf("expected success, got error: %v", result.Error)
+		}
+		if elapsed < 10*time.Millisecond {
+			t.Errorf("expected to wait at least 10ms, but only waited %v", elapsed)
+		}
+	})
+
+	t.Run("zero duration returns immediately", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{}),
+		}
+
+		result := action.Execute(context.Background(), ac)
+
+		if !result.Success {
+			t.Errorf("expected success for zero duration, got error: %v", result.Error)
+		}
+		if result.Error != nil {
+			t.Errorf("expected no error for zero duration, got: %v", result.Error)
+		}
+	})
+
+	t.Run("cancels on context done", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		action := &waitAction{daemon: d}
+		ac := &workflow.ActionContext{
+			WorkItemID: "item-1",
+			Params:     workflow.NewParamHelper(map[string]any{"duration": "10s"}),
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// Cancel after a short delay.
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel()
+		}()
+
+		start := time.Now()
+		result := action.Execute(ctx, ac)
+		elapsed := time.Since(start)
+
+		if result.Success {
+			t.Error("expected failure when context is cancelled")
+		}
+		if result.Error == nil {
+			t.Error("expected error when context is cancelled")
+		}
+		if !errors.Is(result.Error, context.Canceled) {
+			t.Errorf("expected context.Canceled, got: %v", result.Error)
+		}
+		// Should have been cancelled well before the 10s duration.
+		if elapsed >= 1*time.Second {
+			t.Errorf("expected cancellation within 1s, took %v", elapsed)
+		}
+	})
+
+	t.Run("registered in action registry", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		registry := d.buildActionRegistry()
+		if registry.Get("workflow.wait") == nil {
+			t.Error("workflow.wait not registered in action registry")
+		}
+	})
+}
