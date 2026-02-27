@@ -3,7 +3,7 @@ package agentconfig
 import (
 	"sync"
 
-	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/model"
 )
 
 // Default values for AgentConfig.
@@ -21,7 +21,7 @@ const (
 // settings come from workflow YAML and CLI flags rather than config.json.
 type AgentConfig struct {
 	mu       sync.RWMutex
-	sessions []config.Session
+	sessions []model.Session
 
 	repos          []string
 	branchPrefix   string
@@ -97,7 +97,7 @@ func NewAgentConfig(opts ...AgentConfigOption) *AgentConfig {
 
 // --- Session CRUD ---
 
-func (c *AgentConfig) GetSession(id string) *config.Session {
+func (c *AgentConfig) GetSession(id string) *model.Session {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for i := range c.sessions {
@@ -109,15 +109,15 @@ func (c *AgentConfig) GetSession(id string) *config.Session {
 	return nil
 }
 
-func (c *AgentConfig) GetSessions() []config.Session {
+func (c *AgentConfig) GetSessions() []model.Session {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	out := make([]config.Session, len(c.sessions))
+	out := make([]model.Session, len(c.sessions))
 	copy(out, c.sessions)
 	return out
 }
 
-func (c *AgentConfig) AddSession(session config.Session) {
+func (c *AgentConfig) AddSession(session model.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sessions = append(c.sessions, session)
@@ -229,7 +229,7 @@ func (c *AgentConfig) GetAllowedToolsForRepo(_ string) []string {
 	return nil // Container mode uses --dangerously-skip-permissions
 }
 
-func (c *AgentConfig) GetMCPServersForRepo(_ string) []config.MCPServer {
+func (c *AgentConfig) GetMCPServersForRepo(_ string) []model.MCPServer {
 	return nil // Container mode handles MCP internally
 }
 

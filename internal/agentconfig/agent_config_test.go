@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/model"
 )
 
 // Compile-time interface checks.
@@ -115,7 +115,7 @@ func TestAgentConfig_SessionCRUD(t *testing.T) {
 	}
 
 	// Add a session
-	s1 := config.Session{
+	s1 := model.Session{
 		ID:       "s1",
 		RepoPath: "/repo",
 		Branch:   "feature/test",
@@ -135,7 +135,7 @@ func TestAgentConfig_SessionCRUD(t *testing.T) {
 	}
 
 	// Add a second session
-	s2 := config.Session{ID: "s2", RepoPath: "/repo", Branch: "feature/other"}
+	s2 := model.Session{ID: "s2", RepoPath: "/repo", Branch: "feature/other"}
 	c.AddSession(s2)
 
 	if sessions := c.GetSessions(); len(sessions) != 2 {
@@ -159,17 +159,17 @@ func TestAgentConfig_SessionCRUD(t *testing.T) {
 
 func TestAgentConfig_MarkSessionMethods(t *testing.T) {
 	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1"})
+	c.AddSession(model.Session{ID: "s1"})
 
 	tests := []struct {
 		name   string
 		markFn func(string) bool
-		checkFn func(*config.Session) bool
+		checkFn func(*model.Session) bool
 	}{
-		{"Started", c.MarkSessionStarted, func(s *config.Session) bool { return s.Started }},
-		{"PRCreated", c.MarkSessionPRCreated, func(s *config.Session) bool { return s.PRCreated }},
-		{"PRMerged", c.MarkSessionPRMerged, func(s *config.Session) bool { return s.PRMerged }},
-		{"MergedToParent", c.MarkSessionMergedToParent, func(s *config.Session) bool { return s.MergedToParent }},
+		{"Started", c.MarkSessionStarted, func(s *model.Session) bool { return s.Started }},
+		{"PRCreated", c.MarkSessionPRCreated, func(s *model.Session) bool { return s.PRCreated }},
+		{"PRMerged", c.MarkSessionPRMerged, func(s *model.Session) bool { return s.PRMerged }},
+		{"MergedToParent", c.MarkSessionMergedToParent, func(s *model.Session) bool { return s.MergedToParent }},
 	}
 
 	for _, tt := range tests {
@@ -192,9 +192,9 @@ func TestAgentConfig_MarkSessionMethods(t *testing.T) {
 
 func TestAgentConfig_ClearOrphanedParentIDs(t *testing.T) {
 	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1", ParentID: "deleted-parent"})
-	c.AddSession(config.Session{ID: "s2", ParentID: "existing-parent"})
-	c.AddSession(config.Session{ID: "s3", ParentID: "deleted-parent"})
+	c.AddSession(model.Session{ID: "s1", ParentID: "deleted-parent"})
+	c.AddSession(model.Session{ID: "s2", ParentID: "existing-parent"})
+	c.AddSession(model.Session{ID: "s3", ParentID: "deleted-parent"})
 
 	c.ClearOrphanedParentIDs([]string{"deleted-parent"})
 
@@ -211,7 +211,7 @@ func TestAgentConfig_ClearOrphanedParentIDs(t *testing.T) {
 
 func TestAgentConfig_PRCommentsAddressedCount(t *testing.T) {
 	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1"})
+	c.AddSession(model.Session{ID: "s1"})
 
 	if c.UpdateSessionPRCommentsAddressedCount("nonexistent", 3) {
 		t.Error("expected false for nonexistent")
@@ -269,7 +269,7 @@ func TestAgentConfig_GetRepos_ReturnsCopy(t *testing.T) {
 
 func TestAgentConfig_GetSessions_ReturnsCopy(t *testing.T) {
 	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1", Name: "original"})
+	c.AddSession(model.Session{ID: "s1", Name: "original"})
 
 	sessions := c.GetSessions()
 	sessions[0].Name = "modified"
@@ -281,7 +281,7 @@ func TestAgentConfig_GetSessions_ReturnsCopy(t *testing.T) {
 
 func TestAgentConfig_GetSession_ReturnsCopy(t *testing.T) {
 	c := NewAgentConfig()
-	c.AddSession(config.Session{ID: "s1", Name: "original"})
+	c.AddSession(model.Session{ID: "s1", Name: "original"})
 
 	s := c.GetSession("s1")
 	s.Name = "modified"

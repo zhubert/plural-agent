@@ -1,13 +1,13 @@
 package config
 
-import "slices"
+import (
+	"slices"
 
-// MCPServer represents an MCP server configuration
-type MCPServer struct {
-	Name    string   `json:"name"`    // Unique identifier for the server
-	Command string   `json:"command"` // Executable command (e.g., "npx", "node")
-	Args    []string `json:"args"`    // Command arguments
-}
+	"github.com/zhubert/erg/internal/model"
+)
+
+// MCPServer is an alias for model.MCPServer, keeping all existing config.MCPServer references working.
+type MCPServer = model.MCPServer
 
 // AddGlobalMCPServer adds a global MCP server (returns false if name already exists)
 func (c *Config) AddGlobalMCPServer(server MCPServer) bool {

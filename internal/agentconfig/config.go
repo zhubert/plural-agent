@@ -1,6 +1,6 @@
 package agentconfig
 
-import "github.com/zhubert/erg/internal/config"
+import "github.com/zhubert/erg/internal/model"
 
 // Config defines the configuration interface required by the agent and worker packages.
 // This decouples them from the concrete config.Config struct, allowing them
@@ -9,9 +9,9 @@ import "github.com/zhubert/erg/internal/config"
 // *config.Config satisfies this interface implicitly.
 type Config interface {
 	// Session CRUD
-	GetSession(id string) *config.Session
-	GetSessions() []config.Session
-	AddSession(session config.Session)
+	GetSession(id string) *model.Session
+	GetSessions() []model.Session
+	AddSession(session model.Session)
 	RemoveSession(id string) bool
 	ClearOrphanedParentIDs(deletedIDs []string)
 	MarkSessionStarted(sessionID string) bool
@@ -25,7 +25,7 @@ type Config interface {
 	GetDefaultBranchPrefix() string
 	GetContainerImage() string
 	GetAllowedToolsForRepo(repoPath string) []string
-	GetMCPServersForRepo(repoPath string) []config.MCPServer
+	GetMCPServersForRepo(repoPath string) []model.MCPServer
 	AddRepoAllowedTool(repoPath, tool string) bool
 
 	// Automation settings
