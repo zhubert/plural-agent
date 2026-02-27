@@ -568,6 +568,82 @@ func (s *GitService) CheckPRMergeableStatus(ctx context.Context, repoPath, branc
 	}
 }
 
+// SquashBranch squashes all commits on the branch (since divergence from baseBranch)
+// into a single commit, then force-pushes. This is useful for teams that prefer a
+// clean single-commit-per-PR history without relying on GitHub's squash-merge setting.
+//
+// If message is provided, it is used as the squashed commit message. Otherwise, the
+// subject lines of all branch commits are collected (oldest-first) and combined: the
+// first subject becomes the title and subsequent subjects are listed in the body.
+func (s *GitService) SquashBranch(ctx context.Context, worktreePath, branch, baseBranch, message string) error {
+	log := logger.WithComponent("git")
+
+	// Best-effort fetch so merge-base calculation uses up-to-date remote refs.
+	_, fetchErr := s.executor.CombinedOutput(ctx, worktreePath, "git", "fetch", "origin", baseBranch)
+
+	// Find the common ancestor between HEAD and the base branch.
+	var mergeBaseRef string
+	if fetchErr == nil {
+		out, err := s.executor.Output(ctx, worktreePath, "git", "merge-base", "HEAD", "origin/"+baseBranch)
+		if err == nil {
+			mergeBaseRef = strings.TrimSpace(string(out))
+		}
+	}
+	if mergeBaseRef == "" {
+		// Fallback to local branch ref when remote is unavailable.
+		out, err := s.executor.Output(ctx, worktreePath, "git", "merge-base", "HEAD", baseBranch)
+		if err != nil {
+			return fmt.Errorf("failed to find merge base with %s: %w", baseBranch, err)
+		}
+		mergeBaseRef = strings.TrimSpace(string(out))
+	}
+
+	// Collect commit subjects when no explicit message is provided.
+	if message == "" {
+		out, err := s.executor.Output(ctx, worktreePath, "git", "log", "--format=%s", mergeBaseRef+"..HEAD")
+		if err != nil {
+			return fmt.Errorf("failed to get commit log: %w", err)
+		}
+		subjects := strings.TrimSpace(string(out))
+		if subjects == "" {
+			return fmt.Errorf("no commits to squash on branch %s", branch)
+		}
+		lines := strings.Split(subjects, "\n")
+		// git log outputs newest-first; reverse to chronological order.
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+		if len(lines) == 1 {
+			message = lines[0]
+		} else {
+			message = lines[0] + "\n\n" + strings.Join(lines[1:], "\n")
+		}
+	}
+
+	shortRef := mergeBaseRef
+	if len(shortRef) > 8 {
+		shortRef = shortRef[:8]
+	}
+	log.Info("squashing branch commits", "branch", branch, "mergeBase", shortRef, "title", strings.SplitN(message, "\n", 2)[0])
+
+	// Soft-reset to merge base: all changes remain staged, commits are removed.
+	if _, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "reset", "--soft", mergeBaseRef); err != nil {
+		return fmt.Errorf("git reset --soft failed: %w", err)
+	}
+
+	// Commit the squashed changes.
+	if _, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "commit", "-m", message); err != nil {
+		return fmt.Errorf("git commit after squash failed: %w", err)
+	}
+
+	// Force-push with lease to update the remote branch safely.
+	if _, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "push", "--force-with-lease", "origin", branch); err != nil {
+		return fmt.Errorf("git push --force-with-lease after squash failed: %w", err)
+	}
+
+	return nil
+}
+
 // RebaseBranch rebases a branch onto the latest base branch and force-pushes.
 // This is a mechanical rebase (no Claude needed). If real file-level conflicts
 // exist, the rebase is aborted and an error is returned.
