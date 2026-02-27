@@ -1,0 +1,243 @@
+# Plan-then-code workflow — Claude creates a plan for human approval before coding.
+#
+# Label flow: plan → plan-review → plan-approved → in-progress
+#
+# 1. User adds "plan" label to an issue
+# 2. Claude analyzes the issue, explores the codebase, and posts a plan as a comment
+# 3. Label changes to "plan-review" — waiting for human approval
+# 4. User replaces "plan-review" with "plan-approved"
+# 5. Workflow resumes: label changes to "in-progress", Claude codes the solution
+# 6. PR opened, CI checked, reviewer assigned, merged on approval
+
+workflow: plan-then-code
+start: planning
+
+source:
+  provider: github
+  filter:
+    label: plan
+
+states:
+  # ── Planning phase ──────────────────────────────────────────────
+
+  planning:
+    type: task
+    action: ai.plan
+    params:
+      max_turns: 30
+      max_duration: 15m
+    next: remove_plan_label
+    error: notify_failed
+
+  # Swap "plan" for "plan-review" to signal the plan is ready
+  remove_plan_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan
+    next: add_plan_review_label
+    error: add_plan_review_label
+
+  add_plan_review_label:
+    type: task
+    action: github.add_label
+    params:
+      label: plan-review
+    next: await_plan_approval
+    error: await_plan_approval
+
+  # Wait for the human to add "plan-approved" label
+  await_plan_approval:
+    type: wait
+    event: gate.approved
+    params:
+      trigger: label_added
+      label: plan-approved
+    timeout: 72h
+    timeout_next: plan_expired
+    next: remove_plan_review_label
+    error: notify_failed
+
+  # ── Transition to coding ────────────────────────────────────────
+
+  # Clean up approval labels, add "in-progress"
+  remove_plan_review_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan-review
+    next: remove_plan_approved_label
+    error: remove_plan_approved_label
+
+  remove_plan_approved_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan-approved
+    next: add_in_progress_label
+    error: add_in_progress_label
+
+  add_in_progress_label:
+    type: task
+    action: github.add_label
+    params:
+      label: in-progress
+    next: coding
+    error: coding
+
+  # ── Coding phase (same as before) ──────────────────────────────
+
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: notify_failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci
+    error: notify_failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 2h
+    timeout_next: ci_timed_out
+    params:
+      on_failure: fix
+    next: check_ci
+    error: notify_failed
+
+  check_ci:
+    type: choice
+    choices:
+      - variable: conflicting
+        equals: true
+        next: rebase
+      - variable: ci_passed
+        equals: true
+        next: request_reviewer
+      - variable: ci_notify_failed
+        equals: true
+        next: fix_ci
+    default: notify_failed
+
+  rebase:
+    type: task
+    action: git.rebase
+    params:
+      max_rebase_rounds: 3
+    next: await_ci
+    error: resolve_conflicts
+
+  resolve_conflicts:
+    type: task
+    action: ai.resolve_conflicts
+    params:
+      max_conflict_rounds: 3
+    next: push_conflict_fix
+    error: notify_failed
+
+  push_conflict_fix:
+    type: task
+    action: github.push
+    next: await_ci
+    error: notify_failed
+
+  fix_ci:
+    type: task
+    action: ai.fix_ci
+    params:
+      max_ci_fix_rounds: 3
+    next: push_ci_fix
+    error: ci_unfixable
+
+  push_ci_fix:
+    type: task
+    action: github.push
+    next: await_ci
+    error: notify_failed
+
+  ci_unfixable:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
+    next: notify_failed
+    error: notify_failed
+
+  ci_timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI has been running for over 2h. Please check the CI pipeline."
+    next: notify_failed
+    error: notify_failed
+
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: zhubert
+    next: await_review
+    error: await_review
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge
+    error: notify_failed
+
+  review_overdue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: done
+    error: rebase
+
+  # ── Planning timeout ────────────────────────────────────────────
+
+  plan_expired:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "The implementation plan has been awaiting approval for 72h. Removing from queue."
+    next: failed
+    error: failed
+
+  # ── Terminal states ─────────────────────────────────────────────
+
+  done:
+    type: succeed
+
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
+  failed:
+    type: fail
