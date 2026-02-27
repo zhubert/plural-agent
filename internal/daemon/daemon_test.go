@@ -2581,3 +2581,362 @@ func TestHandleAsyncComplete_AIReview_StepDataVisibleAfterUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessWaitItems_GateApproved(t *testing.T) {
+	// Verify that processWaitItems processes gate.approved events
+	// (previously it only processed pr.reviewed and pr.mergeable).
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-gate")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-gate",
+		IssueRef:    config.IssueRef{Source: "github", ID: "300"},
+		SessionID:   "sess-gate",
+		Branch:      "feature-sess-gate",
+		CurrentStep: "await_plan_approval",
+	})
+	d.state.UpdateWorkItem("item-gate", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+	d.state.AdvanceWorkItem("item-gate", "await_plan_approval", "idle")
+
+	// Custom workflow with gate.approved wait state that always fires.
+	customCfg := &workflow.Config{
+		Start: "await_plan_approval",
+		States: map[string]*workflow.State{
+			"await_plan_approval": {
+				Type:  workflow.StateTypeWait,
+				Event: "gate.approved",
+				Next:  "done",
+			},
+			"done": {Type: workflow.StateTypeSucceed},
+		},
+	}
+	// Use an event checker that always fires.
+	alwaysFires := &alwaysFiresEventChecker{}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, alwaysFires, d.logger)
+	d.engines = map[string]*workflow.Engine{"/test/repo": engine}
+
+	d.lastReviewPollAt = time.Time{} // Ensure processWaitItems runs
+	d.processWaitItems(context.Background())
+
+	item, _ := d.state.GetWorkItem("item-gate")
+	// gate.approved should have fired, advancing through "done" (succeed) to terminal.
+	if !item.IsTerminal() {
+		t.Errorf("expected gate.approved to advance item to terminal, got State=%s Phase=%s Step=%s", item.State, item.Phase, item.CurrentStep)
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed state, got %q", item.State)
+	}
+}
+
+// alwaysFiresEventChecker is an event checker that always reports the event as fired.
+type alwaysFiresEventChecker struct{}
+
+func (c *alwaysFiresEventChecker) CheckEvent(ctx context.Context, event string, params *workflow.ParamHelper, view *workflow.WorkItemView) (bool, map[string]any, error) {
+	return true, nil, nil
+}
+
+func TestHandleAsyncComplete_AIReview_ViaStepData(t *testing.T) {
+	// When the submit_review MCP tool has already stored review_passed in StepData,
+	// handleAsyncComplete should use it directly rather than reading the file.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-review-sd")
+	cfg.AddSession(*sess)
+
+	customCfg := &workflow.Config{
+		Start: "ai_review",
+		States: map[string]*workflow.State{
+			"ai_review": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.review",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-review-sd",
+		IssueRef:    config.IssueRef{Source: "github", ID: "201"},
+		SessionID:   "sess-review-sd",
+		Branch:      "feature-sess-review-sd",
+		CurrentStep: "ai_review",
+		StepData: map[string]any{
+			"review_passed":     true,
+			"ai_review_summary": "looks good via MCP",
+		},
+	})
+	d.state.AdvanceWorkItem("item-review-sd", "ai_review", "async_pending")
+	d.workers["item-review-sd"] = newMockDoneWorker()
+
+	d.collectCompletedWorkers(context.Background())
+
+	item, _ := d.state.GetWorkItem("item-review-sd")
+	if !item.IsTerminal() {
+		t.Errorf("expected terminal, got State=%s Phase=%s", item.State, item.Phase)
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed, got %q", item.State)
+	}
+	if got, _ := item.StepData["ai_review_summary"].(string); got != "looks good via MCP" {
+		t.Errorf("expected MCP summary preserved, got %q", got)
+	}
+}
+
+func TestHandleAsyncComplete_AIReview_FileFallback(t *testing.T) {
+	// When StepData has no review_passed, fall back to reading .erg/ai_review.json.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	worktreeDir := t.TempDir()
+	ergDir := filepath.Join(worktreeDir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatalf("mkdir .erg: %v", err)
+	}
+	resultData, _ := json.Marshal(aiReviewResult{Passed: false, Summary: "file fallback"})
+	if err := os.WriteFile(filepath.Join(ergDir, "ai_review.json"), resultData, 0o644); err != nil {
+		t.Fatalf("write ai_review.json: %v", err)
+	}
+
+	sess := testSession("sess-review-file")
+	sess.WorkTree = worktreeDir
+	cfg.AddSession(*sess)
+
+	customCfg := &workflow.Config{
+		Start: "ai_review",
+		States: map[string]*workflow.State{
+			"ai_review": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.review",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-review-file",
+		IssueRef:    config.IssueRef{Source: "github", ID: "202"},
+		SessionID:   "sess-review-file",
+		Branch:      "feature-sess-review-file",
+		CurrentStep: "ai_review",
+		StepData:    map[string]any{}, // No review_passed — triggers file fallback
+	})
+	d.state.AdvanceWorkItem("item-review-file", "ai_review", "async_pending")
+	d.workers["item-review-file"] = newMockDoneWorker()
+
+	d.collectCompletedWorkers(context.Background())
+
+	item, _ := d.state.GetWorkItem("item-review-file")
+	if !item.IsTerminal() {
+		t.Errorf("expected terminal, got State=%s Phase=%s", item.State, item.Phase)
+	}
+	if item.State != daemonstate.WorkItemFailed {
+		t.Errorf("expected failed (review blocked), got %q", item.State)
+	}
+	if got, _ := item.StepData["ai_review_summary"].(string); got != "file fallback" {
+		t.Errorf("expected summary from file, got %q", got)
+	}
+}
+
+func TestHandleAsyncComplete_Plan_CleansUpSession(t *testing.T) {
+	// When ai.plan completes, the planning session should be cleaned up
+	// and _repo_path should be stored in StepData.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-plan")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	customCfg := &workflow.Config{
+		Start: "planning",
+		States: map[string]*workflow.State{
+			"planning": {
+				Type:   workflow.StateTypeTask,
+				Action: "ai.plan",
+				Next:   "done",
+				Error:  "failed",
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, nil, d.logger)
+	d.engines = map[string]*workflow.Engine{sess.RepoPath: engine}
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-plan",
+		IssueRef:    config.IssueRef{Source: "github", ID: "300"},
+		SessionID:   "sess-plan",
+		Branch:      "feature-sess-plan",
+		CurrentStep: "planning",
+		StepData:    map[string]any{},
+	})
+	d.state.AdvanceWorkItem("item-plan", "planning", "async_pending")
+	d.workers["item-plan"] = newMockDoneWorker()
+
+	d.collectCompletedWorkers(context.Background())
+
+	// Verify session was cleaned up
+	if cfg.GetSession("sess-plan") != nil {
+		t.Error("expected planning session to be removed from config")
+	}
+
+	// Verify _repo_path is stored
+	item, _ := d.state.GetWorkItem("item-plan")
+	if rp, _ := item.StepData["_repo_path"].(string); rp != "/test/repo" {
+		t.Errorf("expected _repo_path='/test/repo', got %q", rp)
+	}
+
+	// Item should advance through done (succeed) to terminal completed state.
+	if !item.IsTerminal() {
+		t.Errorf("expected terminal, got State=%s Phase=%s", item.State, item.Phase)
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed, got %q", item.State)
+	}
+}
+
+func TestCleanupPlanningSession_DoesNotDeleteGit(t *testing.T) {
+	// cleanupPlanningSession should clean up the session from config
+	// but NOT call sessionService.Delete (which removes worktrees/branches).
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := testSession("sess-plan-cleanup")
+	cfg.AddSession(*sess)
+
+	// Verify session exists before cleanup
+	if cfg.GetSession("sess-plan-cleanup") == nil {
+		t.Fatal("session should exist before cleanup")
+	}
+
+	d.cleanupPlanningSession(context.Background(), "sess-plan-cleanup")
+
+	// Verify session is removed from config
+	if cfg.GetSession("sess-plan-cleanup") != nil {
+		t.Error("expected session to be removed from config")
+	}
+}
+
+func TestSetWorkItemData(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-data",
+		IssueRef:  config.IssueRef{Source: "github", ID: "400"},
+		SessionID: "sess-data",
+		StepData:  map[string]any{},
+	})
+	d.state.UpdateWorkItem("item-data", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+
+	d.SetWorkItemData("sess-data", "review_passed", true)
+	d.SetWorkItemData("sess-data", "ai_review_summary", "all good")
+
+	item, _ := d.state.GetWorkItem("item-data")
+	if got, ok := item.StepData["review_passed"].(bool); !ok || !got {
+		t.Errorf("expected review_passed=true, got %v", item.StepData["review_passed"])
+	}
+	if got, ok := item.StepData["ai_review_summary"].(string); !ok || got != "all good" {
+		t.Errorf("expected ai_review_summary='all good', got %v", item.StepData["ai_review_summary"])
+	}
+}
+
+func TestSetWorkItemData_NoMatchingSession(t *testing.T) {
+	// Should not panic when no work item matches the session ID.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.SetWorkItemData("nonexistent-session", "key", "value")
+	// No panic = success
+}
+
+func TestCommentOnIssue_GitHub_FallbackToGitService(t *testing.T) {
+	// When no GitHub provider is registered, CommentOnIssue falls back to GitService.
+	mockExec := exec.NewMockExecutor(nil) // all commands succeed
+	cfg := testConfig()
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := &config.Session{
+		ID:       "sess-comment",
+		RepoPath: "/test/repo",
+		Branch:   "feat-1",
+		IssueRef: &config.IssueRef{Source: "github", ID: "42", Title: "Test issue"},
+	}
+	cfg.AddSession(*sess)
+
+	err := d.CommentOnIssue(context.Background(), "sess-comment", "Here is the plan")
+	if err != nil {
+		t.Errorf("expected success, got error: %v", err)
+	}
+}
+
+func TestCommentOnIssue_NoSession(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	err := d.CommentOnIssue(context.Background(), "nonexistent", "hello")
+	if err == nil {
+		t.Error("expected error for missing session")
+	}
+}
+
+func TestCommentOnIssue_NoIssueRef(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:       "sess-no-issue",
+		RepoPath: "/test/repo",
+		Branch:   "feat-1",
+		// No IssueRef
+	}
+	cfg.AddSession(*sess)
+
+	err := d.CommentOnIssue(context.Background(), "sess-no-issue", "hello")
+	if err == nil {
+		t.Error("expected error for missing issue ref")
+	}
+}
+
+func TestCommentOnIssue_UnregisteredProvider(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	sess := &config.Session{
+		ID:       "sess-unknown",
+		RepoPath: "/test/repo",
+		Branch:   "feat-1",
+		IssueRef: &config.IssueRef{Source: "jira", ID: "PROJ-123"},
+	}
+	cfg.AddSession(*sess)
+
+	err := d.CommentOnIssue(context.Background(), "sess-unknown", "hello")
+	if err == nil {
+		t.Error("expected error for unregistered provider")
+	}
+}

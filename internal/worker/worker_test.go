@@ -36,6 +36,15 @@ type mockHost struct {
 
 	pendingMu       sync.Mutex
 	pendingMessages map[string]string
+
+	workItemData        map[string]map[string]any // sessionID -> key -> value
+	commentOnIssueErr   error                     // error to return from CommentOnIssue
+	commentOnIssueCalls []commentOnIssueCall       // recorded calls
+}
+
+type commentOnIssueCall struct {
+	SessionID string
+	Body      string
 }
 
 func newMockHost(mockExec *exec.MockExecutor) *mockHost {
@@ -97,6 +106,21 @@ func (h *mockHost) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
 	h.recordedCostUSD += costUSD
 	h.recordedOutputTokens += outputTokens
 	h.recordedInputTokens += inputTokens
+}
+
+func (h *mockHost) CommentOnIssue(ctx context.Context, sessionID, body string) error {
+	h.commentOnIssueCalls = append(h.commentOnIssueCalls, commentOnIssueCall{SessionID: sessionID, Body: body})
+	return h.commentOnIssueErr
+}
+
+func (h *mockHost) SetWorkItemData(sessionID, key string, value any) {
+	if h.workItemData == nil {
+		h.workItemData = make(map[string]map[string]any)
+	}
+	if h.workItemData[sessionID] == nil {
+		h.workItemData[sessionID] = make(map[string]any)
+	}
+	h.workItemData[sessionID][key] = value
 }
 
 func TestNewSessionWorker(t *testing.T) {
@@ -780,5 +804,100 @@ func TestSessionWorker_ExitError_ConcurrentAccess(t *testing.T) {
 
 	if w.ExitError() == nil {
 		t.Fatal("expected ExitError to be set")
+	}
+}
+
+func TestSessionWorker_HandleCommentIssue_Success(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+	w.ctx = context.Background()
+
+	w.handleCommentIssue(mcp.CommentIssueRequest{ID: 1, Body: "Here is the plan"})
+
+	// Verify the call was delegated to the host.
+	if len(h.commentOnIssueCalls) != 1 {
+		t.Fatalf("expected 1 CommentOnIssue call, got %d", len(h.commentOnIssueCalls))
+	}
+	call := h.commentOnIssueCalls[0]
+	if call.SessionID != "s1" {
+		t.Errorf("expected sessionID 's1', got %q", call.SessionID)
+	}
+	if call.Body != "Here is the plan" {
+		t.Errorf("expected body 'Here is the plan', got %q", call.Body)
+	}
+}
+
+func TestSessionWorker_HandleCommentIssue_HostError(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+	h.commentOnIssueErr = fmt.Errorf("provider not registered")
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+	w.ctx = context.Background()
+
+	w.handleCommentIssue(mcp.CommentIssueRequest{ID: 1, Body: "Hello"})
+	// Should not panic; error response sent to runner.
+}
+
+func TestSessionWorker_HandleSubmitReview_StoresInStepData(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	w.handleSubmitReview(mcp.SubmitReviewRequest{ID: 1, Passed: false, Summary: "missing tests"})
+
+	// Verify the data was stored via SetWorkItemData
+	data := h.workItemData["s1"]
+	if data == nil {
+		t.Fatal("expected work item data to be set for session s1")
+	}
+	if passed, ok := data["review_passed"].(bool); !ok || passed {
+		t.Errorf("expected review_passed=false, got %v", data["review_passed"])
+	}
+	if summary, ok := data["ai_review_summary"].(string); !ok || summary != "missing tests" {
+		t.Errorf("expected ai_review_summary='missing tests', got %v", data["ai_review_summary"])
+	}
+}
+
+func TestSessionWorker_HandleSubmitReview_Passed(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+
+	w.handleSubmitReview(mcp.SubmitReviewRequest{ID: 1, Passed: true, Summary: "looks good"})
+
+	data := h.workItemData["s1"]
+	if data == nil {
+		t.Fatal("expected work item data to be set for session s1")
+	}
+	if passed, ok := data["review_passed"].(bool); !ok || !passed {
+		t.Errorf("expected review_passed=true, got %v", data["review_passed"])
+	}
+	if summary, ok := data["ai_review_summary"].(string); !ok || summary != "looks good" {
+		t.Errorf("expected ai_review_summary='looks good', got %v", data["ai_review_summary"])
 	}
 }

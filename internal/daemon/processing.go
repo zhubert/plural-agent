@@ -159,20 +159,52 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 		}
 	}
 
-	// For ai.review steps, read the review result file written by Claude and
-	// update step data. If the review blocked (passed=false), treat as failure
+	// For ai.review steps, check review result from MCP tool (StepData) first,
+	// then fall back to reading the .erg/ai_review.json file for backward compat
+	// with custom prompts. If the review blocked (passed=false), treat as failure
 	// so the engine follows the error edge.
 	if exitErr == nil && state != nil && state.Action == "ai.review" && sess != nil {
-		reviewPassed, reviewSummary := d.readAIReviewResult(sess)
-		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.StepData["review_passed"] = reviewPassed
-			it.StepData["ai_review_summary"] = reviewSummary
-		})
+		// Re-fetch item to see StepData updated by the submit_review MCP tool handler.
+		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+			item = fresh
+		}
+
+		reviewPassed := true
+		reviewSummary := ""
+
+		// Check if submit_review MCP tool already stored the result in StepData.
+		if rp, ok := item.StepData["review_passed"].(bool); ok {
+			reviewPassed = rp
+			reviewSummary, _ = item.StepData["ai_review_summary"].(string)
+		} else {
+			// Fall back to reading .erg/ai_review.json (backward compat with custom prompts)
+			reviewPassed, reviewSummary = d.readAIReviewResult(sess)
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				it.StepData["review_passed"] = reviewPassed
+				it.StepData["ai_review_summary"] = reviewSummary
+			})
+		}
+
 		if !reviewPassed {
 			exitErr = fmt.Errorf("AI review blocked: %s", reviewSummary)
 		}
-		// Re-fetch item so workItemView sees the updated StepData rather than
-		// the snapshot captured at collection time.
+		// Re-fetch item so workItemView sees the updated StepData.
+		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+			item = fresh
+		}
+	}
+
+	// For ai.plan steps, store the repo path in StepData (so workItemView can
+	// resolve it after the planning session is cleaned up) and release the session.
+	if exitErr == nil && state != nil && state.Action == "ai.plan" && sess != nil {
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			if it.StepData == nil {
+				it.StepData = make(map[string]any)
+			}
+			it.StepData["_repo_path"] = sess.RepoPath
+		})
+		d.cleanupPlanningSession(ctx, item.SessionID)
+		// Re-fetch item so workItemView sees the updated StepData.
 		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
 			item = fresh
 		}
@@ -383,8 +415,8 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			continue
 		}
 
-		// Only process pr.reviewed and pr.mergeable events here
-		if state.Event != "pr.reviewed" && state.Event != "pr.mergeable" {
+		// Skip CI events — they're handled by processCIItems at higher frequency
+		if state.Event == "ci.complete" || state.Event == "ci.wait_for_checks" {
 			continue
 		}
 
@@ -440,7 +472,10 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 		}
 
 		state := engine.GetState(item.CurrentStep)
-		if state == nil || state.Type != workflow.StateTypeWait || state.Event != "ci.complete" {
+		if state == nil || state.Type != workflow.StateTypeWait {
+			continue
+		}
+		if state.Event != "ci.complete" && state.Event != "ci.wait_for_checks" {
 			continue
 		}
 

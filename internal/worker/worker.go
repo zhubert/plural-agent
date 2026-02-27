@@ -275,6 +275,18 @@ func (w *SessionWorker) processOneResponse(responseChan <-chan claude.ResponseCh
 				continue
 			}
 			w.handleGetReviewComments(req)
+
+		case req, ok := <-w.safeChanCommentIssue():
+			if !ok {
+				continue
+			}
+			w.handleCommentIssue(req)
+
+		case req, ok := <-w.safeChanSubmitReview():
+			if !ok {
+				continue
+			}
+			w.handleSubmitReview(req)
 		}
 	}
 }
@@ -298,6 +310,22 @@ func (w *SessionWorker) safeChanPushBranch() <-chan mcp.PushBranchRequest {
 
 func (w *SessionWorker) safeChanGetReviewComments() <-chan mcp.GetReviewCommentsRequest {
 	ch := w.runner.GetReviewCommentsRequestChan()
+	if ch == nil {
+		return nil
+	}
+	return ch
+}
+
+func (w *SessionWorker) safeChanCommentIssue() <-chan mcp.CommentIssueRequest {
+	ch := w.runner.CommentIssueRequestChan()
+	if ch == nil {
+		return nil
+	}
+	return ch
+}
+
+func (w *SessionWorker) safeChanSubmitReview() <-chan mcp.SubmitReviewRequest {
+	ch := w.runner.SubmitReviewRequestChan()
 	if ch == nil {
 		return nil
 	}
@@ -525,4 +553,38 @@ func (w *SessionWorker) handleGetReviewComments(req mcp.GetReviewCommentsRequest
 	})
 }
 
+// handleCommentIssue handles a comment_issue MCP tool call.
+// It posts a comment to the issue/task associated with the current session,
+// routing through the appropriate provider (GitHub, Asana, Linear).
+func (w *SessionWorker) handleCommentIssue(req mcp.CommentIssueRequest) {
+	log := w.host.Logger().With("sessionID", w.sessionID)
+	log.Info("posting issue comment via MCP tool")
 
+	if err := w.host.CommentOnIssue(w.ctx, w.sessionID, req.Body); err != nil {
+		w.runner.SendCommentIssueResponse(mcp.CommentIssueResponse{
+			ID:    req.ID,
+			Error: fmt.Sprintf("Failed to post comment: %v", err),
+		})
+		return
+	}
+
+	w.runner.SendCommentIssueResponse(mcp.CommentIssueResponse{
+		ID:      req.ID,
+		Success: true,
+	})
+}
+
+// handleSubmitReview handles a submit_review MCP tool call.
+// It stores the review result in the work item's StepData so the daemon can read it.
+func (w *SessionWorker) handleSubmitReview(req mcp.SubmitReviewRequest) {
+	log := w.host.Logger().With("sessionID", w.sessionID)
+	log.Info("storing review result via MCP tool", "passed", req.Passed)
+
+	w.host.SetWorkItemData(w.sessionID, "review_passed", req.Passed)
+	w.host.SetWorkItemData(w.sessionID, "ai_review_summary", req.Summary)
+
+	w.runner.SendSubmitReviewResponse(mcp.SubmitReviewResponse{
+		ID:      req.ID,
+		Success: true,
+	})
+}

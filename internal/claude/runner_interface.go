@@ -49,6 +49,10 @@ type RunnerSession interface {
 	SendPushBranchResponse(resp mcp.PushBranchResponse)
 	GetReviewCommentsRequestChan() <-chan mcp.GetReviewCommentsRequest
 	SendGetReviewCommentsResponse(resp mcp.GetReviewCommentsResponse)
+	CommentIssueRequestChan() <-chan mcp.CommentIssueRequest
+	SendCommentIssueResponse(resp mcp.CommentIssueResponse)
+	SubmitReviewRequestChan() <-chan mcp.SubmitReviewRequest
+	SendSubmitReviewResponse(resp mcp.SubmitReviewResponse)
 
 	// Lifecycle
 	Stop()

@@ -432,8 +432,9 @@ func TestConfigureRunner_ContainerMode_Disabled(t *testing.T) {
 	}
 }
 
-func TestConfigureRunner_NoHostTools(t *testing.T) {
-	// Daemon should NEVER set host tools — workflow actions handle push/PR/merge
+func TestConfigureRunner_HostToolsEnabled(t *testing.T) {
+	// Daemon enables host tools so Claude can use comment_issue and submit_review.
+	// The worker rejects create_pr and push_branch with helpful error messages.
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
@@ -446,8 +447,8 @@ func TestConfigureRunner_NoHostTools(t *testing.T) {
 
 	d.configureRunner(runner, sess, "")
 
-	if runner.hostToolsEnabled {
-		t.Error("daemon configureRunner should NEVER enable host tools")
+	if !runner.hostToolsEnabled {
+		t.Error("daemon configureRunner should enable host tools")
 	}
 }
 
