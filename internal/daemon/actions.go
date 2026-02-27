@@ -93,6 +93,7 @@ type createPRAction struct {
 }
 
 // Execute creates a PR. This is a synchronous action.
+// Supports an optional boolean param "draft" (default false) to create a draft PR.
 func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
 	d := a.daemon
 	item, ok := d.state.GetWorkItem(ac.WorkItemID)
@@ -100,7 +101,8 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	prURL, err := d.createPR(ctx, item)
+	draft := ac.Params.Bool("draft", false)
+	prURL, err := d.createPR(ctx, item, draft)
 	if err != nil {
 		if errors.Is(err, errNoChanges) {
 			// Coding session made no changes — unqueue the issue (remove label +
@@ -111,6 +113,37 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 			return workflow.ActionResult{Success: true, OverrideNext: "done"}
 		}
 		return workflow.ActionResult{Error: fmt.Errorf("PR creation failed: %w", err)}
+	}
+
+	return workflow.ActionResult{
+		Success: true,
+		Data:    map[string]any{"pr_url": prURL},
+	}
+}
+
+// createDraftPRAction implements the github.create_draft_pr action.
+// It is equivalent to github.create_pr with draft=true.
+type createDraftPRAction struct {
+	daemon *Daemon
+}
+
+// Execute creates a draft PR. This is a synchronous action.
+func (a *createDraftPRAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	prURL, err := d.createPR(ctx, item, true)
+	if err != nil {
+		if errors.Is(err, errNoChanges) {
+			repoPath := d.resolveRepoPath(ctx, item)
+			label := d.resolveQueueLabel(repoPath)
+			d.unqueueIssue(ctx, item, fmt.Sprintf("The coding session made no changes. Removing from the queue — re-add the '%s' label if this still needs work.", label))
+			return workflow.ActionResult{Success: true, OverrideNext: "done"}
+		}
+		return workflow.ActionResult{Error: fmt.Errorf("draft PR creation failed: %w", err)}
 	}
 
 	return workflow.ActionResult{
