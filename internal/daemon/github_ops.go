@@ -153,12 +153,57 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 		return fmt.Errorf("session not found")
 	}
 
+	method := d.getEffectiveMergeMethod(sess.RepoPath)
+
 	mergeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	err := d.gitService.MergePR(mergeCtx, sess.RepoPath, item.Branch, false, d.getEffectiveMergeMethod(sess.RepoPath))
-	if err != nil {
-		return err
+	mergeErr := d.gitService.MergePR(mergeCtx, sess.RepoPath, item.Branch, false, method)
+	if mergeErr != nil {
+		// When using rebase merge, GitHub rejects branches with merge commits
+		// (rebaseable=false). Linearize the branch locally and retry.
+		if method != "rebase" {
+			return mergeErr
+		}
+
+		log := d.logger.With("workItem", item.ID, "branch", item.Branch)
+		log.Info("rebase merge failed, attempting to linearize branch", "error", mergeErr)
+
+		// Get or recreate a worktree for rebasing
+		worktree := sess.WorkTree
+		if worktree == "" {
+			var wtErr error
+			worktree, wtErr = d.recreateWorktree(ctx, sess.RepoPath, sess.Branch, item.SessionID)
+			if wtErr != nil {
+				log.Warn("failed to create worktree for linearization", "error", wtErr)
+				return mergeErr
+			}
+		}
+
+		// Determine base branch
+		baseBranch := sess.BaseBranch
+		if baseBranch == "" {
+			baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+		}
+
+		// Rebase to linearize history and force-push
+		rebaseCtx, rebaseCancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer rebaseCancel()
+
+		if rebaseErr := d.gitService.RebaseBranch(rebaseCtx, worktree, sess.Branch, baseBranch); rebaseErr != nil {
+			log.Warn("linearization rebase failed, returning original merge error", "rebaseError", rebaseErr)
+			return mergeErr
+		}
+
+		log.Info("branch linearized successfully, retrying merge")
+
+		// Retry merge
+		retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
+		defer retryCancel()
+
+		if retryErr := d.gitService.MergePR(retryCtx, sess.RepoPath, item.Branch, false, method); retryErr != nil {
+			return retryErr
+		}
 	}
 
 	// Mark session as merged
