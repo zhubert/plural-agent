@@ -446,9 +446,9 @@ func TestValidateBranchName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateBranchName(tt.branch)
+			err := validateBranchName(tt.branch)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateBranchName(%q) error = %v, wantErr %v", tt.branch, err, tt.wantErr)
+				t.Errorf("validateBranchName(%q) error = %v, wantErr %v", tt.branch, err, tt.wantErr)
 			}
 		})
 	}
@@ -574,9 +574,9 @@ func TestFindOrphanedWorktrees(t *testing.T) {
 	}
 
 	// Find orphans - there should be none since the session is in config
-	orphans, err := FindOrphanedWorktrees(cfg)
+	orphans, err := findOrphanedWorktrees(cfg)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	if len(orphans) != 0 {
@@ -589,9 +589,9 @@ func TestFindOrphanedWorktrees(t *testing.T) {
 		Sessions: []config.Session{},
 	}
 
-	orphans, err = FindOrphanedWorktrees(emptyConfig)
+	orphans, err = findOrphanedWorktrees(emptyConfig)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	if len(orphans) != 1 {
@@ -613,9 +613,9 @@ func TestFindOrphanedWorktrees_NoWorktrees(t *testing.T) {
 		Sessions: []config.Session{},
 	}
 
-	orphans, err := FindOrphanedWorktrees(cfg)
+	orphans, err := findOrphanedWorktrees(cfg)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	// No worktrees directory exists, so no orphans
@@ -794,7 +794,7 @@ func TestDetectWorktreeBranch(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	orphan := OrphanedWorktree{
+	orphan := orphanedWorktree{
 		Path:     session.WorkTree,
 		RepoPath: repoPath,
 		ID:       session.ID,
@@ -829,7 +829,7 @@ func TestDetectWorktreeBranch(t *testing.T) {
 }
 
 func TestDetectWorktreeBranch_InvalidPath(t *testing.T) {
-	orphan := OrphanedWorktree{
+	orphan := orphanedWorktree{
 		Path:     "/nonexistent/path",
 		RepoPath: "/nonexistent/repo",
 		ID:       "fake-id",
@@ -946,9 +946,9 @@ func TestFindOrphanedWorktrees_SharedParentDirectory(t *testing.T) {
 	}
 
 	// Find orphans
-	orphans, err := FindOrphanedWorktrees(cfg)
+	orphans, err := findOrphanedWorktrees(cfg)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	// Should find exactly one orphan (session1)
@@ -973,9 +973,9 @@ func TestFindOrphanedWorktrees_SharedParentDirectory(t *testing.T) {
 
 	// Now make both sessions orphaned
 	cfg.Sessions = []config.Session{}
-	orphans, err = FindOrphanedWorktrees(cfg)
+	orphans, err = findOrphanedWorktrees(cfg)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	// Should find both orphans
@@ -984,7 +984,7 @@ func TestFindOrphanedWorktrees_SharedParentDirectory(t *testing.T) {
 	}
 
 	// Verify both are correctly attributed
-	orphansByID := make(map[string]OrphanedWorktree)
+	orphansByID := make(map[string]orphanedWorktree)
 	for _, orphan := range orphans {
 		orphansByID[orphan.ID] = orphan
 	}
@@ -1121,7 +1121,7 @@ func TestGetWorktreeRepoPath_RelativePath(t *testing.T) {
 }
 
 func TestOrphanedWorktree_Fields(t *testing.T) {
-	orphan := OrphanedWorktree{
+	orphan := orphanedWorktree{
 		Path:     "/path/to/worktree",
 		RepoPath: "/path/to/repo",
 		ID:       "session-id-123",
@@ -1809,7 +1809,7 @@ func TestCreateFromBranch_BaseBranch(t *testing.T) {
 
 func TestPruneOrphanedWorktrees_LogsGitErrors(t *testing.T) {
 	setupTestPaths(t)
-	// Create a real repo + orphan worktree directory so FindOrphanedWorktrees finds it
+	// Create a real repo + orphan worktree directory so findOrphanedWorktrees finds it
 	repoPath := createTestRepo(t)
 	defer os.RemoveAll(repoPath)
 	defer cleanupWorktrees(t, repoPath)
@@ -2070,10 +2070,10 @@ func TestFindOrphanedWorktrees_LegacyLocation(t *testing.T) {
 		Sessions: []config.Session{},
 	}
 
-	// FindOrphanedWorktrees should find it in the legacy location
-	orphans, err := FindOrphanedWorktrees(cfg)
+	// findOrphanedWorktrees should find it in the legacy location
+	orphans, err := findOrphanedWorktrees(cfg)
 	if err != nil {
-		t.Fatalf("FindOrphanedWorktrees failed: %v", err)
+		t.Fatalf("findOrphanedWorktrees failed: %v", err)
 	}
 
 	if len(orphans) != 1 {

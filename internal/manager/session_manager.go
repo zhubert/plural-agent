@@ -22,8 +22,8 @@ import (
 // Compile-time interface satisfaction check.
 var _ SessionManagerConfig = (*config.Config)(nil)
 
-// DiffStats holds file change statistics for the header display
-type DiffStats struct {
+// diffStats holds file change statistics for the header display
+type diffStats struct {
 	FilesChanged int
 	Additions    int
 	Deletions    int
@@ -36,7 +36,7 @@ type SelectResult struct {
 	Messages   []claude.Message
 	HeaderName string     // Branch name if custom, otherwise session name
 	BaseBranch string     // Base branch this session was created from
-	DiffStats  *DiffStats // Git diff statistics for the worktree
+	diffStats  *diffStats // Git diff statistics for the worktree
 
 	// State to restore
 	WaitStart             time.Time
@@ -128,10 +128,10 @@ func (sm *SessionManager) GetRunner(sessionID string) claude.RunnerInterface {
 	return sm.runners[sessionID]
 }
 
-// GetRunners returns a copy of all runners (for safe iteration).
+// getRunners returns a copy of all runners (for safe iteration).
 // The returned map is a snapshot - concurrent modifications to the original
 // will not affect it.
-func (sm *SessionManager) GetRunners() map[string]claude.RunnerInterface {
+func (sm *SessionManager) getRunners() map[string]claude.RunnerInterface {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	copy := make(map[string]claude.RunnerInterface, len(sm.runners))
@@ -183,10 +183,10 @@ func (sm *SessionManager) Select(ctx context.Context, sess *config.Session, prev
 	}
 
 	// Get diff stats for the worktree
-	var diffStats *DiffStats
+	var ds *diffStats
 	if sess.WorkTree != "" && sm.gitService != nil {
 		if gitStats, err := sm.gitService.GetDiffStats(ctx, sess.WorkTree); err == nil {
-			diffStats = &DiffStats{
+			ds = &diffStats{
 				FilesChanged: gitStats.FilesChanged,
 				Additions:    gitStats.Additions,
 				Deletions:    gitStats.Deletions,
@@ -202,7 +202,7 @@ func (sm *SessionManager) Select(ctx context.Context, sess *config.Session, prev
 		Messages:   runner.GetMessages(),
 		HeaderName: headerName,
 		BaseBranch: sess.BaseBranch,
-		DiffStats:  diffStats,
+		diffStats:  ds,
 	}
 
 	// Get state for all fields - use WithLock to get streaming state atomically

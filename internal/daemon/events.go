@@ -10,18 +10,18 @@ import (
 	"github.com/zhubert/erg/internal/workflow"
 )
 
-// EventChecker implements workflow.EventChecker for the daemon.
-type EventChecker struct {
+// eventChecker implements workflow.EventChecker for the daemon.
+type eventChecker struct {
 	daemon *Daemon
 }
 
-// NewEventChecker creates a new event checker backed by the daemon.
-func NewEventChecker(d *Daemon) *EventChecker {
-	return &EventChecker{daemon: d}
+// newEventChecker creates a new event checker backed by the daemon.
+func newEventChecker(d *Daemon) *eventChecker {
+	return &eventChecker{daemon: d}
 }
 
 // CheckEvent checks whether an event has fired for a work item.
-func (c *EventChecker) CheckEvent(ctx context.Context, event string, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+func (c *eventChecker) CheckEvent(ctx context.Context, event string, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	switch event {
 	case "pr.reviewed":
 		return c.checkPRReviewed(ctx, params, item)
@@ -37,7 +37,7 @@ func (c *EventChecker) CheckEvent(ctx context.Context, event string, params *wor
 }
 
 // checkPRReviewed checks for PR review status.
-func (c *EventChecker) checkPRReviewed(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+func (c *eventChecker) checkPRReviewed(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "pr.reviewed")
 
@@ -146,7 +146,7 @@ func (c *EventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 // checkCIComplete checks CI status and returns true when CI has passed.
 // It first checks for merge conflicts — if the PR is CONFLICTING, it fires
 // with {conflicting: true} so the workflow can route to a rebase step.
-func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+func (c *eventChecker) checkCIComplete(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "ci.complete")
 
@@ -208,7 +208,7 @@ func (c *EventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 
 // checkPRMergeable checks if the PR is mergeable — approved review AND CI passing.
 // This is a convenience event that combines pr.reviewed (approval) and ci.complete in one check.
-func (c *EventChecker) checkPRMergeable(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+func (c *eventChecker) checkPRMergeable(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch, "event", "pr.mergeable")
 
@@ -289,7 +289,7 @@ func (c *EventChecker) checkPRMergeable(ctx context.Context, params *workflow.Pa
 //	trigger         - "label_added" (default) or "comment_match"
 //	label           - label name to check for (trigger=label_added)
 //	comment_pattern - regex pattern to match against comment bodies (trigger=comment_match)
-func (c *EventChecker) checkGateApproved(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "event", "gate.approved")
 
