@@ -1107,6 +1107,11 @@
             <a href="#actions-ai" class="sidebar-sublink">ai</a>
             <a href="#actions-github" class="sidebar-sublink">github</a>
             <a href="#actions-git" class="sidebar-sublink">git</a>
+            <a href="#actions-asana" class="sidebar-sublink">asana</a>
+            <a href="#actions-linear" class="sidebar-sublink">linear</a>
+            <a href="#actions-slack" class="sidebar-sublink">slack</a>
+            <a href="#actions-webhook" class="sidebar-sublink">webhook</a>
+            <a href="#actions-workflow" class="sidebar-sublink">workflow</a>
             <a href="#events" class="sidebar-link">Wait events</a>
             <a href="#events-pr" class="sidebar-sublink">pr</a>
             <a href="#events-ci" class="sidebar-sublink">ci</a>
@@ -1948,6 +1953,144 @@
           </div>
         </div>
 
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.address_review</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Fetches PR review comments and resumes the coding session to address
+            them. Daemon-managed transcript comments are filtered out so Claude
+            only sees human feedback. Increments <code>review_rounds</code> on
+            each invocation; returns an error when the max is reached.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_review_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>Maximum number of review-address attempts before returning an error.</td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the review-address session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_rounds</td>
+                  <td>int</td>
+                  <td>Incremented on each attempt. Inspect in <code>choice</code> states to check round count.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.write_pr_description</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Generates a rich PR description from the branch diff using Claude
+            and updates the open PR body. Useful after coding to produce a
+            concise, human-readable summary before requesting review.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.resolve_conflicts</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Merges the base branch into the feature branch (leaving conflict
+            markers in place), then starts a Claude session to resolve the
+            conflicts. Claude reads each conflicted file, resolves the markers,
+            stages the files, and commits the merge.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_conflict_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>Maximum number of conflict resolution attempts before returning an error.</td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the resolution session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>conflict_rounds</td>
+                  <td>int</td>
+                  <td>Incremented on each attempt. Inspect in <code>choice</code> states to check round count.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <h3 id="actions-github">GitHub actions</h3>
 
         <div class="action-ref">
@@ -2018,6 +2161,59 @@
                 automatically and the workflow skips to <code>done</code>.
               </li>
             </ul>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.create_draft_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Opens a draft pull request from the working branch. Equivalent to
+            <code>github.create_pr</code> with <code>draft: true</code>. Use
+            when you want the PR visible for early feedback but not yet ready
+            for formal review.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>link_issue</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Add a closing reference to the source issue in the PR body (e.g. <code>Closes #42</code>).</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>pr_url</td>
+                  <td>string</td>
+                  <td>URL of the created draft pull request.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -2283,7 +2479,124 @@
           </div>
         </div>
 
-        <h3>Asana actions</h3>
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.assign_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Assigns the pull request to a specific GitHub user. Useful for
+            routing work to the right person after coding completes.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>assignee</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>GitHub username to assign the PR to.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.create_release</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Creates a GitHub release for the repository. Typically used in
+            post-merge workflows to publish a tagged release after a PR lands.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>tag</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Git tag for the release, e.g. <code>v1.2.0</code>.</td>
+                </tr>
+                <tr>
+                  <td>title</td>
+                  <td>string</td>
+                  <td><em>same as tag</em></td>
+                  <td>Release title displayed on GitHub.</td>
+                </tr>
+                <tr>
+                  <td>notes</td>
+                  <td>string</td>
+                  <td><em>empty</em></td>
+                  <td>Release body / change notes.</td>
+                </tr>
+                <tr>
+                  <td>draft</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>Create the release as a draft (not publicly visible).</td>
+                </tr>
+                <tr>
+                  <td>prerelease</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>Mark the release as a pre-release.</td>
+                </tr>
+                <tr>
+                  <td>target</td>
+                  <td>string</td>
+                  <td><em>default branch</em></td>
+                  <td>Target branch or commit SHA for the release tag.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>release_url</td>
+                  <td>string</td>
+                  <td>URL of the created GitHub release.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-asana">Asana actions</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -2326,7 +2639,7 @@
           </div>
         </div>
 
-        <h3>Linear actions</h3>
+        <h3 id="actions-linear">Linear actions</h3>
 
         <div class="action-ref">
           <div class="action-header">
@@ -2475,18 +2788,15 @@
           </div>
         </div>
 
-        <h3 id="actions-ai-resolve">AI conflict resolution</h3>
-
         <div class="action-ref">
           <div class="action-header">
-            <span class="action-title">ai.resolve_conflicts</span>
-            <span class="badge badge-async">async</span>
+            <span class="action-title">git.squash</span>
+            <span class="badge badge-sync">sync</span>
           </div>
           <p class="action-desc">
-            Merges the base branch into the feature branch (leaving conflict
-            markers in place), then starts a Claude session to resolve the
-            conflicts. Claude reads each conflicted file, resolves the markers,
-            stages the files, and commits the merge.
+            Squashes all commits on the feature branch since it diverged from
+            the base branch into a single commit. Useful before opening a PR
+            when you want a clean, single-commit history.
           </p>
           <div class="param-section">
             <div class="param-section-title">Params</div>
@@ -2501,19 +2811,83 @@
               </thead>
               <tbody>
                 <tr>
-                  <td>max_conflict_rounds</td>
+                  <td>message</td>
+                  <td>string</td>
+                  <td><em>auto-generated</em></td>
+                  <td>Commit message for the squashed commit. Defaults to a summary generated from the original commit messages.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.validate_diff</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Runs static validation checks on the branch diff before pushing or
+            opening a PR. All params are optional; with no params the check
+            always passes. Returns an error listing all violations found.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_diff_lines</td>
                   <td>int</td>
-                  <td>3</td>
-                  <td>
-                    Maximum number of conflict resolution attempts before
-                    returning an error.
-                  </td>
+                  <td>0 (disabled)</td>
+                  <td>Fail if total added + deleted lines exceed this value.</td>
                 </tr>
                 <tr>
-                  <td>system_prompt</td>
-                  <td>string</td>
-                  <td><em>built-in</em></td>
-                  <td>Custom system prompt for the resolution session.</td>
+                  <td>forbidden_patterns</td>
+                  <td>[]string</td>
+                  <td><em>none</em></td>
+                  <td>Fail if any changed file matches one of these glob patterns, e.g. <code>[".env", "*.pem"]</code>.</td>
+                </tr>
+                <tr>
+                  <td>require_tests</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>Fail if source files were modified but no test files appear in the diff.</td>
+                </tr>
+                <tr>
+                  <td>source_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common extensions</em></td>
+                  <td>Glob patterns identifying source files for the <code>require_tests</code> check. Defaults to <code>*.go</code>, <code>*.py</code>, <code>*.js</code>, etc.</td>
+                </tr>
+                <tr>
+                  <td>test_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common patterns</em></td>
+                  <td>Glob patterns identifying test files. Defaults to <code>*_test.go</code>, <code>test_*.py</code>, <code>*.test.js</code>, etc.</td>
+                </tr>
+                <tr>
+                  <td>max_lock_file_lines</td>
+                  <td>int</td>
+                  <td>0 (disabled)</td>
+                  <td>Fail if any single lock file has more than this many lines changed.</td>
+                </tr>
+                <tr>
+                  <td>lock_file_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common lock files</em></td>
+                  <td>Glob patterns for lock files. Defaults to <code>go.sum</code>, <code>package-lock.json</code>, <code>yarn.lock</code>, etc.</td>
                 </tr>
               </tbody>
             </table>
@@ -2530,15 +2904,302 @@
               </thead>
               <tbody>
                 <tr>
-                  <td>conflict_rounds</td>
-                  <td>int</td>
-                  <td>
-                    Incremented on each attempt. Inspect in
-                    <code>choice</code> states to check round count.
-                  </td>
+                  <td>violations</td>
+                  <td>[]string</td>
+                  <td>List of violation messages when checks fail.</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.cherry_pick</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Cherry-picks one or more commits onto a target branch. Designed for
+            backport workflows where merged changes need to be applied to a
+            release or maintenance branch.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>commits</td>
+                  <td>[]string | string</td>
+                  <td><em>required</em></td>
+                  <td>List of commit SHAs to cherry-pick. Accepts a YAML sequence or a space-separated string.</td>
+                </tr>
+                <tr>
+                  <td>target_branch</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Branch to cherry-pick the commits onto.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3 id="actions-slack">Slack actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">slack.notify</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a notification to a Slack channel via an incoming webhook.
+            The message supports Go <code>text/template</code> syntax with
+            work item variables. The webhook URL supports
+            <code>$ENV_VAR</code> expansion so secrets stay out of config
+            files.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>webhook_url</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Slack incoming webhook URL. Supports <code>$ENV_VAR</code> substitution, e.g. <code>$SLACK_WEBHOOK_URL</code>.</td>
+                </tr>
+                <tr>
+                  <td>message</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Message text. Go <code>text/template</code> variables: <code>{{.Title}}</code>, <code>{{.IssueID}}</code>, <code>{{.IssueURL}}</code>, <code>{{.PRURL}}</code>, <code>{{.Branch}}</code>, <code>{{.Status}}</code>.</td>
+                </tr>
+                <tr>
+                  <td>username</td>
+                  <td>string</td>
+                  <td>erg</td>
+                  <td>Display name shown in Slack.</td>
+                </tr>
+                <tr>
+                  <td>icon_emoji</td>
+                  <td>string</td>
+                  <td>:robot_face:</td>
+                  <td>Emoji icon for the Slack message.</td>
+                </tr>
+                <tr>
+                  <td>channel</td>
+                  <td>string</td>
+                  <td><em>webhook default</em></td>
+                  <td>Override the channel configured in the webhook, e.g. <code>#alerts</code>.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3 id="actions-webhook">Webhook actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">webhook.post</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            POSTs a JSON body to a configurable URL. The body is a Go
+            <code>text/template</code> string interpolated with work item
+            data. Use for integrating with external systems &mdash; CI
+            triggers, deployment pipelines, or custom notification endpoints.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>url</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Destination URL for the POST request.</td>
+                </tr>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>JSON body template. Go <code>text/template</code> variables: <code>{{.IssueID}}</code>, <code>{{.IssueTitle}}</code>, <code>{{.IssueURL}}</code>, <code>{{.IssueSource}}</code>, <code>{{.PRURL}}</code>, <code>{{.Branch}}</code>, <code>{{.State}}</code>, <code>{{.WorkItemID}}</code>.</td>
+                </tr>
+                <tr>
+                  <td>headers</td>
+                  <td>map[string]string</td>
+                  <td><em>none</em></td>
+                  <td>Additional HTTP request headers, e.g. <code>Authorization: Bearer $TOKEN</code>.</td>
+                </tr>
+                <tr>
+                  <td>timeout</td>
+                  <td>duration</td>
+                  <td>30s</td>
+                  <td>Request timeout, e.g. <code>10s</code>, <code>1m</code>.</td>
+                </tr>
+                <tr>
+                  <td>expected_status</td>
+                  <td>int</td>
+                  <td>200</td>
+                  <td>HTTP status code considered a success. Non-matching codes return an error.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>response_status</td>
+                  <td>int</td>
+                  <td>HTTP status code returned by the server.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-workflow">Workflow actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">workflow.retry</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Meta-action that wraps another registered action with synchronous
+            retry logic. On failure it sleeps for the configured interval
+            (scaled by <code>backoff_rate</code> on each subsequent attempt)
+            and re-executes the inner action. Async inner actions are passed
+            through unchanged on the first attempt since they cannot be
+            retried synchronously.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>action</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Name of the inner action to execute, e.g. <code>github.push</code>.</td>
+                </tr>
+                <tr>
+                  <td>max_attempts</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>Total number of attempts (1 = no retry).</td>
+                </tr>
+                <tr>
+                  <td>interval</td>
+                  <td>duration</td>
+                  <td>0</td>
+                  <td>Base delay between retries, e.g. <code>10s</code>, <code>1m</code>.</td>
+                </tr>
+                <tr>
+                  <td>backoff_rate</td>
+                  <td>float</td>
+                  <td>1.0</td>
+                  <td>Multiplier applied to <code>interval</code> after each failed attempt. <code>1.0</code> = fixed delay; <code>2.0</code> = double each time.</td>
+                </tr>
+                <tr>
+                  <td>params</td>
+                  <td>map</td>
+                  <td><em>none</em></td>
+                  <td>Parameters forwarded to the inner action.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">Returns the output data from the inner action on success.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">workflow.wait</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Pauses workflow execution for a configurable duration. Cancels
+            cleanly on daemon shutdown. Useful as a delay between polling
+            cycles or before time-sensitive operations.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>duration</td>
+                  <td>duration</td>
+                  <td><em>required</em></td>
+                  <td>How long to pause, e.g. <code>30s</code>, <code>5m</code>, <code>1h</code>.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
           </div>
         </div>
 

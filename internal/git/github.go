@@ -1083,6 +1083,46 @@ Diff:
 	return title, body, nil
 }
 
+// CreateRelease creates a GitHub release using the gh CLI and returns the release URL.
+//
+// Parameters:
+//   - tag: the release tag (e.g., "v1.2.3") — required
+//   - title: release title; defaults to the tag name if empty
+//   - notes: release notes body; if empty, GitHub auto-generates notes from merged PRs
+//   - draft: save as a draft release (not publicly visible)
+//   - prerelease: mark as a pre-release
+//   - target: branch or SHA to tag; defaults to the repo's default branch if empty
+func (s *GitService) CreateRelease(ctx context.Context, repoPath, tag, title, notes string, draft, prerelease bool, target string) (string, error) {
+	if tag == "" {
+		return "", fmt.Errorf("tag is required")
+	}
+
+	args := []string{"release", "create", tag}
+	if title != "" {
+		args = append(args, "--title", title)
+	}
+	if notes != "" {
+		args = append(args, "--notes", notes)
+	} else {
+		args = append(args, "--generate-notes")
+	}
+	if draft {
+		args = append(args, "--draft")
+	}
+	if prerelease {
+		args = append(args, "--prerelease")
+	}
+	if target != "" {
+		args = append(args, "--target", target)
+	}
+
+	output, err := s.executor.Output(ctx, repoPath, "gh", args...)
+	if err != nil {
+		return "", fmt.Errorf("gh release create failed: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // UpdatePRBody updates the body of an existing pull request using the gh CLI.
 func (s *GitService) UpdatePRBody(ctx context.Context, repoPath, branch, body string) error {
 	_, _, err := s.executor.Run(ctx, repoPath, "gh", "pr", "edit", branch, "--body", body)

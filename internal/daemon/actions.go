@@ -656,6 +656,36 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 	return workflow.ActionResult{Success: true, Async: true}
 }
 
+// validateDiffAction implements the git.validate_diff action.
+type validateDiffAction struct {
+	daemon *Daemon
+}
+
+// Execute runs static validation checks on the branch diff.
+// All params are optional; no params means the check always passes.
+// On violation, Success is false and Error describes all violations found.
+func (a *validateDiffAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	violations, err := d.validateDiff(ctx, item, ac.Params)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("git.validate_diff: %v", err)}
+	}
+
+	if len(violations) > 0 {
+		return workflow.ActionResult{
+			Error: fmt.Errorf("diff validation failed:\n%s", strings.Join(violations, "\n")),
+			Data:  map[string]any{"violations": violations},
+		}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // formatAction implements the git.format action.
 type formatAction struct {
 	daemon *Daemon
@@ -725,6 +755,32 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 	}
 
 	return workflow.ActionResult{Success: true, Async: true}
+}
+
+// createReleaseAction implements the github.create_release action.
+type createReleaseAction struct {
+	daemon *Daemon
+}
+
+// Execute creates a GitHub release for the work item. This is a synchronous action.
+// Required params: tag. Optional: title, notes, draft, prerelease, target.
+func (a *createReleaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	releaseURL, err := d.createRelease(ctx, item, ac.Params)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("github.create_release failed: %w", err)}
+	}
+
+	d.logger.Info("github release created", "workItem", item.ID, "url", releaseURL)
+	return workflow.ActionResult{
+		Success: true,
+		Data:    map[string]any{"release_url": releaseURL},
+	}
 }
 
 // slackNotifyAction implements the slack.notify action.

@@ -1059,3 +1059,79 @@ func TestValidate_ResolveConflictsAction(t *testing.T) {
 		t.Errorf("expected validation error for max_conflict_rounds=0, got errors: %v", errs)
 	}
 }
+
+func TestValidateDiffParams(t *testing.T) {
+	tests := []struct {
+		name      string
+		params    map[string]any
+		wantError bool
+	}{
+		{"nil params", nil, false},
+		{"empty params", map[string]any{}, false},
+		{"valid max_diff_lines", map[string]any{"max_diff_lines": 500}, false},
+		{"zero max_diff_lines", map[string]any{"max_diff_lines": 0}, true},
+		{"negative max_diff_lines", map[string]any{"max_diff_lines": -1}, true},
+		{"float64 valid max_diff_lines", map[string]any{"max_diff_lines": float64(100)}, false},
+		{"float64 zero max_diff_lines", map[string]any{"max_diff_lines": float64(0)}, true},
+		{"valid max_lock_file_lines", map[string]any{"max_lock_file_lines": 200}, false},
+		{"zero max_lock_file_lines", map[string]any{"max_lock_file_lines": 0}, true},
+		{"negative max_lock_file_lines", map[string]any{"max_lock_file_lines": -5}, true},
+		{"float64 zero max_lock_file_lines", map[string]any{"max_lock_file_lines": float64(0)}, true},
+		{"require_tests only", map[string]any{"require_tests": true}, false},
+		{"forbidden_patterns only", map[string]any{"forbidden_patterns": []interface{}{".env"}}, false},
+		{"all valid params", map[string]any{
+			"max_diff_lines":      1000,
+			"max_lock_file_lines": 100,
+			"require_tests":       true,
+			"forbidden_patterns":  []interface{}{".env", "*.pem"},
+		}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateDiffParams("states.validate", tt.params)
+			if tt.wantError && len(errs) == 0 {
+				t.Error("expected validation error")
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("unexpected validation errors: %v", errs)
+			}
+		})
+	}
+}
+
+func TestValidate_ValidateDiffAction(t *testing.T) {
+	cfg := &Config{
+		Workflow: "test",
+		Start:   "validate",
+		Source:   SourceConfig{Provider: "github", Filter: FilterConfig{Label: "queued"}},
+		States: map[string]*State{
+			"validate": {
+				Type:   StateTypeTask,
+				Action: "git.validate_diff",
+				Params: map[string]any{
+					"max_diff_lines": 0,
+				},
+				Next:  "done",
+				Error: "failed",
+			},
+			"done": {
+				Type: StateTypeSucceed,
+			},
+			"failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+
+	errs := Validate(cfg)
+	found := false
+	for _, e := range errs {
+		if e.Field == "states.validate.params.max_diff_lines" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected validation error for max_diff_lines=0, got errors: %v", errs)
+	}
+}

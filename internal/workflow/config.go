@@ -145,8 +145,12 @@ var ValidActions = map[string]bool{
 	"ai.address_review":     true,
 	"git.format":            true,
 	"git.rebase":            true,
+	"git.validate_diff":     true,
 	"asana.comment":         true,
 	"linear.comment":        true,
+	"slack.notify":          true,
+	"webhook.post":          true,
+	"workflow.retry":        true,
 	"workflow.wait":         true,
 }
 

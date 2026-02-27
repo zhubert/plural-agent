@@ -109,6 +109,27 @@ func TestParamHelper_Raw(t *testing.T) {
 	}
 }
 
+func TestParamHelper_Float64(t *testing.T) {
+	p := NewParamHelper(map[string]any{
+		"rate":  2.5,
+		"count": 3,
+		"text":  "hello",
+	})
+
+	if got := p.Float64("rate", 1.0); got != 2.5 {
+		t.Errorf("expected 2.5, got %f", got)
+	}
+	if got := p.Float64("count", 1.0); got != 3.0 {
+		t.Errorf("expected 3.0 (from int), got %f", got)
+	}
+	if got := p.Float64("missing", 1.5); got != 1.5 {
+		t.Errorf("expected 1.5 (default), got %f", got)
+	}
+	if got := p.Float64("text", 1.0); got != 1.0 {
+		t.Errorf("expected 1.0 for wrong type, got %f", got)
+	}
+}
+
 func TestParamHelper_NilParams(t *testing.T) {
 	p := NewParamHelper(nil)
 
