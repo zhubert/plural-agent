@@ -147,6 +147,9 @@ var ValidActions = map[string]bool{
 	"git.validate_diff":     true,
 	"asana.comment":         true,
 	"linear.comment":        true,
+	"slack.notify":          true,
+	"webhook.post":          true,
+	"workflow.retry":        true,
 	"workflow.wait":         true,
 }
 

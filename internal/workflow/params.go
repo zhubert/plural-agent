@@ -85,6 +85,23 @@ func (p *ParamHelper) Has(key string) bool {
 	return ok
 }
 
+// Float64 returns the float64 value for key, or defaultVal if not found or wrong type.
+// Handles both float64 and int (common from YAML/JSON unmarshaling).
+func (p *ParamHelper) Float64(key string, defaultVal float64) float64 {
+	v, ok := p.params[key]
+	if !ok {
+		return defaultVal
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	default:
+		return defaultVal
+	}
+}
+
 // Raw returns the raw value for a key, or nil if not found.
 func (p *ParamHelper) Raw(key string) any {
 	return p.params[key]
