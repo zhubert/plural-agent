@@ -18,7 +18,8 @@ import (
 )
 
 // createPR creates a pull request for a work item's session.
-func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem) (string, error) {
+// When draft is true the PR is created in draft state.
+func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft bool) (string, error) {
 	sess := d.config.GetSession(item.SessionID)
 	if sess == nil {
 		return "", fmt.Errorf("session not found")
@@ -59,7 +60,7 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem) (strin
 	prCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	resultCh := d.gitService.CreatePR(prCtx, sess.RepoPath, sess.WorkTree, sess.Branch, sess.BaseBranch, "", sess.GetIssueRef(), item.SessionID)
+	resultCh := d.gitService.CreatePR(prCtx, sess.RepoPath, sess.WorkTree, sess.Branch, sess.BaseBranch, "", sess.GetIssueRef(), item.SessionID, draft)
 
 	var lastErr error
 	var prURL string

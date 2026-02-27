@@ -298,6 +298,7 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("ai.code", &codingAction{daemon: d})
 	registry.Register("ai.plan", &planningAction{daemon: d})
 	registry.Register("github.create_pr", &createPRAction{daemon: d})
+	registry.Register("github.create_draft_pr", &createDraftPRAction{daemon: d})
 	registry.Register("github.push", &pushAction{daemon: d})
 	registry.Register("github.merge", &mergeAction{daemon: d})
 	registry.Register("github.comment_issue", &commentIssueAction{daemon: d})

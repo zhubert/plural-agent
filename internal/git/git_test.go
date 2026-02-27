@@ -315,7 +315,7 @@ func TestCreatePR_NoGh(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ch := svc.CreatePR(ctx, repoPath, repoPath, "test-branch", "", "", nil, "")
+	ch := svc.CreatePR(ctx, repoPath, repoPath, "test-branch", "", "", nil, "", false)
 
 	var hadError bool
 	for result := range ch {
@@ -602,7 +602,7 @@ func TestCreatePR_WithProvidedCommitMessage(t *testing.T) {
 	defer cancel()
 
 	// CreatePR will fail without a real remote, but we can verify it tries
-	ch := svc.CreatePR(ctx, repoPath, repoPath, "feature-pr-msg", "", "Custom PR commit", nil, "")
+	ch := svc.CreatePR(ctx, repoPath, repoPath, "feature-pr-msg", "", "Custom PR commit", nil, "", false)
 
 	// Drain channel - expect an error since no remote
 	for range ch {
@@ -757,7 +757,7 @@ func TestCreatePR_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ch := svc.CreatePR(ctx, repoPath, repoPath, "pr-cancel-test", "", "", nil, "")
+	ch := svc.CreatePR(ctx, repoPath, repoPath, "pr-cancel-test", "", "", nil, "", false)
 
 	// Drain channel - should not hang
 	for range ch {
@@ -831,7 +831,7 @@ func TestCreatePR_UsesBaseBranchNotDefaultBranch(t *testing.T) {
 	defer cancel()
 
 	// Call CreatePR with baseBranch="parent-branch"
-	ch := svc.CreatePR(ctx, repoPath, worktreePath, branch, baseBranch, "", nil, "")
+	ch := svc.CreatePR(ctx, repoPath, worktreePath, branch, baseBranch, "", nil, "", false)
 
 	// Drain the channel
 	for range ch {
@@ -874,6 +874,197 @@ func TestCreatePR_UsesBaseBranchNotDefaultBranch(t *testing.T) {
 	if actualBase != baseBranch {
 		t.Errorf("gh pr create --base = %q, want %q (not %q)", actualBase, baseBranch, "main")
 		t.Errorf("Full command: gh %v", ghCall.Args)
+	}
+}
+
+func TestCreatePR_DraftFlag(t *testing.T) {
+	// Verifies that CreatePR passes --draft to gh pr create when draft=true.
+	mockExec := pexec.NewMockExecutor(nil)
+	svc := NewGitServiceWithExecutor(mockExec)
+
+	repoPath := "/test/repo"
+	worktreePath := "/test/worktree"
+	branch := "feature-branch"
+	baseBranch := "main"
+
+	// Mock GetDefaultBranch
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref", "refs/remotes/origin/HEAD"}, pexec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	// Mock worktree status check (no uncommitted changes)
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git push
+	mockExec.AddPrefixMatch("git", []string{"push", "-u", "origin", branch}, pexec.MockResponse{
+		Stdout: []byte("Branch pushed successfully\n"),
+	})
+
+	// Mock git fetch for PR generation
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", baseBranch}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git rev-parse
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/" + baseBranch}, pexec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+
+	// Mock git log for PR generation
+	mockExec.AddPrefixMatch("git", []string{"log", "origin/" + baseBranch + ".." + branch, "--oneline"}, pexec.MockResponse{
+		Stdout: []byte("abc123 Add new feature\n"),
+	})
+
+	// Mock git diff for PR generation
+	mockExec.AddPrefixMatch("git", []string{"diff", "origin/" + baseBranch + "..." + branch}, pexec.MockResponse{
+		Stdout: []byte("diff --git a/file.txt b/file.txt\n"),
+	})
+
+	// Mock Claude PR generation failure (falls back to --fill)
+	mockExec.AddPrefixMatch("claude", []string{}, pexec.MockResponse{
+		Stderr: []byte("Claude not available"),
+		Err:    fmt.Errorf("claude not available"),
+	})
+
+	// Mock gh pr create to succeed
+	mockExec.AddPrefixMatch("gh", []string{"pr", "create"}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/pull/456\n"),
+	})
+
+	// Skip this test if gh CLI is not available
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh CLI not available, skipping test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Call CreatePR with draft=true
+	ch := svc.CreatePR(ctx, repoPath, worktreePath, branch, baseBranch, "", nil, "", true)
+
+	// Drain the channel
+	for range ch {
+	}
+
+	// Get all recorded calls and find the gh pr create call
+	calls := mockExec.GetCalls()
+	var ghCall *pexec.MockCall
+	for _, call := range calls {
+		if call.Name == "gh" && len(call.Args) > 0 && call.Args[0] == "pr" {
+			ghCall = &call
+			break
+		}
+	}
+
+	if ghCall == nil {
+		t.Fatal("gh pr create was not called")
+	}
+
+	// Verify --draft flag is present
+	hasDraft := false
+	for _, arg := range ghCall.Args {
+		if arg == "--draft" {
+			hasDraft = true
+			break
+		}
+	}
+	if !hasDraft {
+		t.Errorf("expected --draft flag in gh command, got: %v", ghCall.Args)
+	}
+}
+
+func TestCreatePR_NoDraftFlag(t *testing.T) {
+	// Verifies that CreatePR does NOT pass --draft when draft=false.
+	mockExec := pexec.NewMockExecutor(nil)
+	svc := NewGitServiceWithExecutor(mockExec)
+
+	repoPath := "/test/repo"
+	worktreePath := "/test/worktree"
+	branch := "feature-branch"
+	baseBranch := "main"
+
+	// Mock GetDefaultBranch
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref", "refs/remotes/origin/HEAD"}, pexec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	// Mock worktree status (no uncommitted changes)
+	mockExec.AddPrefixMatch("git", []string{"status", "--porcelain"}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git push
+	mockExec.AddPrefixMatch("git", []string{"push", "-u", "origin", branch}, pexec.MockResponse{
+		Stdout: []byte("Branch pushed successfully\n"),
+	})
+
+	// Mock git fetch for PR generation
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin", baseBranch}, pexec.MockResponse{
+		Stdout: []byte(""),
+	})
+
+	// Mock git rev-parse
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/" + baseBranch}, pexec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+
+	// Mock git log for PR generation
+	mockExec.AddPrefixMatch("git", []string{"log", "origin/" + baseBranch + ".." + branch, "--oneline"}, pexec.MockResponse{
+		Stdout: []byte("abc123 Add feature\n"),
+	})
+
+	// Mock git diff for PR generation
+	mockExec.AddPrefixMatch("git", []string{"diff", "origin/" + baseBranch + "..." + branch}, pexec.MockResponse{
+		Stdout: []byte("diff --git a/file.txt b/file.txt\n"),
+	})
+
+	// Mock Claude PR generation failure
+	mockExec.AddPrefixMatch("claude", []string{}, pexec.MockResponse{
+		Stderr: []byte("Claude not available"),
+		Err:    fmt.Errorf("claude not available"),
+	})
+
+	// Mock gh pr create to succeed
+	mockExec.AddPrefixMatch("gh", []string{"pr", "create"}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/pull/789\n"),
+	})
+
+	// Skip this test if gh CLI is not available
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh CLI not available, skipping test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Call CreatePR with draft=false
+	ch := svc.CreatePR(ctx, repoPath, worktreePath, branch, baseBranch, "", nil, "", false)
+
+	// Drain the channel
+	for range ch {
+	}
+
+	// Find gh pr create call
+	calls := mockExec.GetCalls()
+	var ghCall *pexec.MockCall
+	for _, call := range calls {
+		if call.Name == "gh" && len(call.Args) > 0 && call.Args[0] == "pr" {
+			ghCall = &call
+			break
+		}
+	}
+
+	if ghCall == nil {
+		t.Fatal("gh pr create was not called")
+	}
+
+	// Verify --draft flag is absent
+	for _, arg := range ghCall.Args {
+		if arg == "--draft" {
+			t.Errorf("unexpected --draft flag in gh command: %v", ghCall.Args)
+		}
 	}
 }
 
