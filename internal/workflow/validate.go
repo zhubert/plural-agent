@@ -138,6 +138,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 			errs = append(errs, validateResolveConflictsParams(prefix, state.Params)...)
 		}
 
+		// Validate params for workflow.retry action
+		if state.Action == "workflow.retry" {
+			errs = append(errs, validateRetryActionParams(prefix, state.Params)...)
+		}
+
 	case StateTypeWait:
 		// Wait states require event
 		if state.Event == "" {
@@ -732,6 +737,84 @@ func detectCycles(cfg *Config) []ValidationError {
 	for name := range cfg.States {
 		if color[name] == 0 {
 			dfs(name)
+		}
+	}
+
+	return errs
+}
+
+// validateRetryActionParams validates params for workflow.retry actions.
+func validateRetryActionParams(prefix string, params map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	if params == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.action",
+			Message: "action is required for workflow.retry",
+		})
+		return errs
+	}
+
+	actionVal, ok := params["action"]
+	if !ok || actionVal == nil {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.action",
+			Message: "action is required for workflow.retry",
+		})
+	} else if s, ok := actionVal.(string); !ok || s == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".params.action",
+			Message: "action must be a non-empty string",
+		})
+	} else {
+		if s == "workflow.retry" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".params.action",
+				Message: "workflow.retry cannot wrap itself",
+			})
+		} else if !ValidActions[s] {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".params.action",
+				Message: fmt.Sprintf("unknown action %q", s),
+			})
+		}
+	}
+
+	if v, ok := params["max_attempts"]; ok {
+		switch n := v.(type) {
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_attempts",
+					Message: "max_attempts must be greater than 0",
+				})
+			}
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.max_attempts",
+					Message: "max_attempts must be greater than 0",
+				})
+			}
+		}
+	}
+
+	if v, ok := params["backoff_rate"]; ok {
+		switch n := v.(type) {
+		case float64:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.backoff_rate",
+					Message: "backoff_rate must be greater than 0",
+				})
+			}
+		case int:
+			if n <= 0 {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".params.backoff_rate",
+					Message: "backoff_rate must be greater than 0",
+				})
+			}
 		}
 	}
 

@@ -145,6 +145,9 @@ var ValidActions = map[string]bool{
 	"git.rebase":            true,
 	"asana.comment":         true,
 	"linear.comment":        true,
+	"slack.notify":          true,
+	"webhook.post":          true,
+	"workflow.retry":        true,
 }
 
 // RetryableActions is the set of network-bound actions that should be retried
