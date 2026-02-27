@@ -3545,7 +3545,10 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	// Mock git fetch, rebase, push
+	// Mock rev-parse HEAD (for RebaseBranchWithStatus), git fetch, rebase, push
+	mockExec.AddExactMatch("git", []string{"rev-parse", "HEAD"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
 	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
 	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{})
 	mockExec.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-sess-1"}, exec.MockResponse{})
@@ -3587,12 +3590,27 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 	if rounds != 1 {
 		t.Errorf("expected rebase_rounds=1, got %d", rounds)
 	}
+
+	// Verify rebase status data returned
+	if result.Data == nil {
+		t.Fatal("expected Data in result")
+	}
+	if result.Data["last_rebase_clean"] != true {
+		t.Errorf("expected last_rebase_clean=true (no-op), got %v", result.Data["last_rebase_clean"])
+	}
+	if _, ok := result.Data["last_rebase_at"].(string); !ok {
+		t.Errorf("expected last_rebase_at to be a string timestamp, got %T", result.Data["last_rebase_at"])
+	}
 }
 
 func TestRebaseAction_Execute_RebaseFails(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// Mock rev-parse HEAD (for RebaseBranchWithStatus)
+	mockExec.AddExactMatch("git", []string{"rev-parse", "HEAD"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
 	// Mock git fetch succeeds, rebase fails
 	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
 	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{
