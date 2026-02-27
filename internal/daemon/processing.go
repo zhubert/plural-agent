@@ -165,7 +165,10 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 	// so the engine follows the error edge.
 	if exitErr == nil && state != nil && state.Action == "ai.review" && sess != nil {
 		// Re-fetch item to see StepData updated by the submit_review MCP tool handler.
-		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+		if fresh, ok := d.state.GetWorkItem(item.ID); !ok {
+			log.Warn("work item deleted during async completion", "itemID", item.ID)
+			return
+		} else {
 			item = fresh
 		}
 
@@ -183,14 +186,14 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 				it.StepData["review_passed"] = reviewPassed
 				it.StepData["ai_review_summary"] = reviewSummary
 			})
+			// Re-fetch item so workItemView sees the updated StepData.
+			if fresh, ok := d.state.GetWorkItem(item.ID); ok {
+				item = fresh
+			}
 		}
 
 		if !reviewPassed {
 			exitErr = fmt.Errorf("AI review blocked: %s", reviewSummary)
-		}
-		// Re-fetch item so workItemView sees the updated StepData.
-		if fresh, ok := d.state.GetWorkItem(item.ID); ok {
-			item = fresh
 		}
 	}
 

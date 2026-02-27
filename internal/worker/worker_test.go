@@ -113,7 +113,7 @@ func (h *mockHost) CommentOnIssue(ctx context.Context, sessionID, body string) e
 	return h.commentOnIssueErr
 }
 
-func (h *mockHost) SetWorkItemData(sessionID, key string, value any) {
+func (h *mockHost) SetWorkItemData(sessionID, key string, value any) error {
 	if h.workItemData == nil {
 		h.workItemData = make(map[string]map[string]any)
 	}
@@ -121,6 +121,7 @@ func (h *mockHost) SetWorkItemData(sessionID, key string, value any) {
 		h.workItemData[sessionID] = make(map[string]any)
 	}
 	h.workItemData[sessionID][key] = value
+	return nil
 }
 
 func TestNewSessionWorker(t *testing.T) {

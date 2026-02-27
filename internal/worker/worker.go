@@ -580,8 +580,14 @@ func (w *SessionWorker) handleSubmitReview(req mcp.SubmitReviewRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
 	log.Info("storing review result via MCP tool", "passed", req.Passed)
 
-	w.host.SetWorkItemData(w.sessionID, "review_passed", req.Passed)
-	w.host.SetWorkItemData(w.sessionID, "ai_review_summary", req.Summary)
+	if err := w.host.SetWorkItemData(w.sessionID, "review_passed", req.Passed); err != nil {
+		w.runner.SendSubmitReviewResponse(mcp.SubmitReviewResponse{
+			ID:    req.ID,
+			Error: fmt.Sprintf("Failed to store review result: %v", err),
+		})
+		return
+	}
+	_ = w.host.SetWorkItemData(w.sessionID, "ai_review_summary", req.Summary)
 
 	w.runner.SendSubmitReviewResponse(mcp.SubmitReviewResponse{
 		ID:      req.ID,

@@ -2854,8 +2854,12 @@ func TestSetWorkItemData(t *testing.T) {
 		it.State = daemonstate.WorkItemActive
 	})
 
-	d.SetWorkItemData("sess-data", "review_passed", true)
-	d.SetWorkItemData("sess-data", "ai_review_summary", "all good")
+	if err := d.SetWorkItemData("sess-data", "review_passed", true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := d.SetWorkItemData("sess-data", "ai_review_summary", "all good"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	item, _ := d.state.GetWorkItem("item-data")
 	if got, ok := item.StepData["review_passed"].(bool); !ok || !got {
@@ -2867,12 +2871,14 @@ func TestSetWorkItemData(t *testing.T) {
 }
 
 func TestSetWorkItemData_NoMatchingSession(t *testing.T) {
-	// Should not panic when no work item matches the session ID.
+	// Should return an error when no work item matches the session ID.
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
-	d.SetWorkItemData("nonexistent-session", "key", "value")
-	// No panic = success
+	err := d.SetWorkItemData("nonexistent-session", "key", "value")
+	if err == nil {
+		t.Error("expected error for missing work item")
+	}
 }
 
 func TestCommentOnIssue_GitHub_FallbackToGitService(t *testing.T) {

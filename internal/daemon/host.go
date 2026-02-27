@@ -65,7 +65,7 @@ func (d *Daemon) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
 
 // SetWorkItemData stores a key-value pair in the work item's StepData
 // for the work item associated with the given session ID.
-func (d *Daemon) SetWorkItemData(sessionID, key string, value any) {
+func (d *Daemon) SetWorkItemData(sessionID, key string, value any) error {
 	for _, item := range d.state.GetActiveWorkItems() {
 		if item.SessionID == sessionID {
 			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
@@ -74,10 +74,10 @@ func (d *Daemon) SetWorkItemData(sessionID, key string, value any) {
 				}
 				it.StepData[key] = value
 			})
-			return
+			return nil
 		}
 	}
-	d.logger.Warn("SetWorkItemData: no work item found for session", "sessionID", sessionID)
+	return fmt.Errorf("no work item found for session %s", sessionID)
 }
 
 // CommentOnIssue posts a comment on the issue/task associated with the given session.

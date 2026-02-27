@@ -46,7 +46,7 @@ type Host interface {
 
 	// SetWorkItemData stores a key-value pair in the work item's StepData
 	// for the session identified by sessionID.
-	SetWorkItemData(sessionID, key string, value any)
+	SetWorkItemData(sessionID, key string, value any) error
 
 	// CommentOnIssue posts a comment on the issue/task associated with the
 	// given session. Routes through the appropriate provider (GitHub, Asana,
