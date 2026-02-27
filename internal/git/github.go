@@ -688,6 +688,36 @@ func (s *GitService) CheckPRChecks(ctx context.Context, repoPath, branch string)
 	return CIStatusPassing, nil
 }
 
+// CheckRun represents a single check run result for a PR.
+type CheckRun struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Link  string `json:"link"`
+}
+
+// GetPRCheckDetails fetches the individual check run results for a PR branch.
+// It returns the full list of checks with their names and states so callers
+// can report which specific checks passed or failed.
+func (s *GitService) GetPRCheckDetails(ctx context.Context, repoPath, branch string) ([]CheckRun, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "checks", branch, "--json", "name,state,link")
+	if err != nil {
+		// gh pr checks returns non-zero when checks fail or are pending.
+		// Try to parse whatever output we got before returning an error.
+		if len(output) > 0 {
+			var checks []CheckRun
+			if jsonErr := json.Unmarshal(output, &checks); jsonErr == nil {
+				return checks, nil
+			}
+		}
+		return nil, fmt.Errorf("gh pr checks failed: %w", err)
+	}
+	var checks []CheckRun
+	if err := json.Unmarshal(output, &checks); err != nil {
+		return nil, fmt.Errorf("failed to parse check run details: %w", err)
+	}
+	return checks, nil
+}
+
 // CheckPRReviewDecision returns the review decision for a PR by inspecting
 // individual reviews. GitHub's reviewDecision field only works with branch
 // protection rules, so we derive the decision ourselves by looking at each
