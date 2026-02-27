@@ -403,12 +403,12 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			continue
 		}
 
-		sess := d.config.GetSession(item.SessionID)
-		if sess == nil {
-			continue
-		}
+		// Build the view first — it resolves repo path from the session,
+		// StepData["_repo_path"], or repoFilter, so it works even after
+		// the session has been cleaned up (e.g. post-planning states).
+		view := d.workItemView(item)
 
-		engine := d.getEngine(sess.RepoPath)
+		engine := d.getEngine(view.RepoPath)
 		if engine == nil {
 			continue
 		}
@@ -423,7 +423,6 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			continue
 		}
 
-		view := d.workItemView(item)
 		result, err := engine.ProcessStep(ctx, view)
 		if err != nil {
 			d.logger.Error("wait step error", "workItem", item.ID, "error", err)
@@ -437,7 +436,12 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 		// phase update.
 		if result.NewStep != view.CurrentStep || result.NewPhase != view.Phase {
 			if len(result.Hooks) > 0 {
-				d.runHooks(ctx, result.Hooks, item, sess)
+				if sess := d.config.GetSession(item.SessionID); sess != nil {
+					d.runHooks(ctx, result.Hooks, item, sess)
+				} else {
+					d.logger.Warn("skipping hooks: no session for work item",
+						"workItem", item.ID, "step", item.CurrentStep)
+				}
 			}
 			// Merge event data into step data so downstream choice states
 			// can evaluate it.
@@ -464,12 +468,9 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 			continue
 		}
 
-		sess := d.config.GetSession(item.SessionID)
-		if sess == nil {
-			continue
-		}
+		view := d.workItemView(item)
 
-		engine := d.getEngine(sess.RepoPath)
+		engine := d.getEngine(view.RepoPath)
 		if engine == nil {
 			continue
 		}
@@ -482,7 +483,6 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 			continue
 		}
 
-		view := d.workItemView(item)
 		result, err := engine.ProcessStep(ctx, view)
 		if err != nil {
 			d.logger.Error("ci step error", "workItem", item.ID, "error", err)
@@ -492,7 +492,12 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 		// Compare against the view snapshot, not the live item (see processWaitItems).
 		if result.NewStep != view.CurrentStep || result.NewPhase != view.Phase {
 			if len(result.Hooks) > 0 {
-				d.runHooks(ctx, result.Hooks, item, sess)
+				if sess := d.config.GetSession(item.SessionID); sess != nil {
+					d.runHooks(ctx, result.Hooks, item, sess)
+				} else {
+					d.logger.Warn("skipping hooks: no session for work item",
+						"workItem", item.ID, "step", item.CurrentStep)
+				}
 			}
 			// Merge event data (e.g. ci_passed) into step data so downstream
 			// choice states can evaluate it.

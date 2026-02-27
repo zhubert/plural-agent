@@ -2636,6 +2636,58 @@ func TestProcessWaitItems_GateApproved(t *testing.T) {
 	}
 }
 
+func TestProcessWaitItems_GateApproved_NoSession(t *testing.T) {
+	// Regression: after planning completes the session is cleaned up, but the
+	// work item remains in await_plan_approval. processWaitItems must still
+	// check the gate.approved event using the repo path from StepData.
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	// Deliberately do NOT add a session — simulates post-planning cleanup.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-gate-nosess",
+		IssueRef:    config.IssueRef{Source: "github", ID: "301"},
+		SessionID:   "sess-cleaned-up",
+		Branch:      "feature-plan",
+		CurrentStep: "await_plan_approval",
+		StepData:    map[string]any{"_repo_path": "/test/repo"},
+	})
+	d.state.UpdateWorkItem("item-gate-nosess", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+	})
+	d.state.AdvanceWorkItem("item-gate-nosess", "await_plan_approval", "idle")
+
+	customCfg := &workflow.Config{
+		Start: "await_plan_approval",
+		States: map[string]*workflow.State{
+			"await_plan_approval": {
+				Type:  workflow.StateTypeWait,
+				Event: "gate.approved",
+				Next:  "done",
+			},
+			"done": {Type: workflow.StateTypeSucceed},
+		},
+	}
+	alwaysFires := &alwaysFiresEventChecker{}
+	registry := d.buildActionRegistry()
+	engine := workflow.NewEngine(customCfg, registry, alwaysFires, d.logger)
+	d.engines = map[string]*workflow.Engine{"/test/repo": engine}
+
+	d.lastReviewPollAt = time.Time{}
+	d.processWaitItems(context.Background())
+
+	item, _ := d.state.GetWorkItem("item-gate-nosess")
+	if !item.IsTerminal() {
+		t.Errorf("expected gate.approved to advance item to terminal even without session, got State=%s Phase=%s Step=%s",
+			item.State, item.Phase, item.CurrentStep)
+	}
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed state, got %q", item.State)
+	}
+}
+
 // alwaysFiresEventChecker is an event checker that always reports the event as fired.
 type alwaysFiresEventChecker struct{}
 
