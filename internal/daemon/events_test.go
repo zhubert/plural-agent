@@ -1236,6 +1236,248 @@ func TestCheckCIComplete_MergeableUnknown_FallsThroughToCI(t *testing.T) {
 	}
 }
 
+// --- phantom conflict / clean rebase grace period tests ---
+
+func TestCheckCIComplete_Conflicting_RecentCleanRebase_SkipsConflict(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is CONFLICTING
+	mergeableJSON, _ := json.Marshal(struct {
+		Mergeable string `json:"mergeable"`
+	}{Mergeable: "CONFLICTING"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: mergeableJSON,
+	})
+
+	// CI is pending
+	checksJSON, _ := json.Marshal([]struct {
+		State string `json:"state"`
+	}{{State: "PENDING"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: checksJSON,
+		Err:    errGHFailed,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	// Work item has a recent clean rebase
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+		StepData: map[string]any{
+			"last_rebase_clean": true,
+			"last_rebase_at":    time.Now().Format(time.RFC3339),
+		},
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should NOT fire conflicting because recent clean rebase; falls through to CI pending
+	if fired {
+		t.Error("expected fired=false (conflict suppressed, CI pending)")
+	}
+	if data != nil && data["conflicting"] == true {
+		t.Error("expected conflicting signal to be suppressed")
+	}
+}
+
+func TestCheckCIComplete_Conflicting_ExpiredGracePeriod_FiresConflict(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is CONFLICTING
+	mergeableJSON, _ := json.Marshal(struct {
+		Mergeable string `json:"mergeable"`
+	}{Mergeable: "CONFLICTING"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: mergeableJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	// Work item has a clean rebase but from 10 minutes ago (expired)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+		StepData: map[string]any{
+			"last_rebase_clean": true,
+			"last_rebase_at":    time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+		},
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Grace period expired — should fire conflict normally
+	if !fired {
+		t.Error("expected fired=true for conflicting PR with expired grace")
+	}
+	if data == nil || data["conflicting"] != true {
+		t.Error("expected conflicting=true in data")
+	}
+}
+
+func TestCheckCIComplete_Conflicting_NotCleanRebase_FiresConflict(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// PR is CONFLICTING
+	mergeableJSON, _ := json.Marshal(struct {
+		Mergeable string `json:"mergeable"`
+	}{Mergeable: "CONFLICTING"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: mergeableJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	// Work item has a recent rebase but it wasn't clean
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-sess-1",
+		CurrentStep: "await_ci",
+		StepData: map[string]any{
+			"last_rebase_clean": false,
+			"last_rebase_at":    time.Now().Format(time.RFC3339),
+		},
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkCIComplete(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Rebase was not clean — should fire conflict normally
+	if !fired {
+		t.Error("expected fired=true for conflicting PR after non-clean rebase")
+	}
+	if data == nil || data["conflicting"] != true {
+		t.Error("expected conflicting=true in data")
+	}
+}
+
+func TestIsRecentCleanRebase(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepData map[string]any
+		grace    time.Duration
+		expected bool
+	}{
+		{
+			name:     "nil step data",
+			stepData: nil,
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name:     "empty step data",
+			stepData: map[string]any{},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name: "clean rebase within grace",
+			stepData: map[string]any{
+				"last_rebase_clean": true,
+				"last_rebase_at":    time.Now().Format(time.RFC3339),
+			},
+			grace:    5 * time.Minute,
+			expected: true,
+		},
+		{
+			name: "clean rebase outside grace",
+			stepData: map[string]any{
+				"last_rebase_clean": true,
+				"last_rebase_at":    time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+			},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name: "not clean rebase within grace",
+			stepData: map[string]any{
+				"last_rebase_clean": false,
+				"last_rebase_at":    time.Now().Format(time.RFC3339),
+			},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name: "missing timestamp",
+			stepData: map[string]any{
+				"last_rebase_clean": true,
+			},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name: "invalid timestamp",
+			stepData: map[string]any{
+				"last_rebase_clean": true,
+				"last_rebase_at":    "not-a-timestamp",
+			},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+		{
+			name: "non-bool clean value",
+			stepData: map[string]any{
+				"last_rebase_clean": "yes",
+				"last_rebase_at":    time.Now().Format(time.RFC3339),
+			},
+			grace:    5 * time.Minute,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRecentCleanRebase(tt.stepData, tt.grace)
+			if got != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, got)
+			}
+		})
+	}
+}
+
 // --- gate.approved event tests ---
 
 func TestCheckGateApproved_LabelAdded_Fires(t *testing.T) {

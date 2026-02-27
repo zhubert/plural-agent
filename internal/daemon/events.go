@@ -166,8 +166,15 @@ func (c *eventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 	if mergeErr != nil {
 		log.Debug("mergeable check failed, falling through to CI", "error", mergeErr)
 	} else if mergeStatus == git.MergeableConflicting {
-		log.Warn("PR has merge conflicts")
-		return true, map[string]any{"conflicting": true}, nil
+		// After a clean rebase + force-push, GitHub's mergeable status can remain
+		// CONFLICTING for a period while it recalculates. Skip the conflict signal
+		// during a grace period to avoid a phantom rebase loop.
+		if isRecentCleanRebase(item.StepData, 5*time.Minute) {
+			log.Info("PR reports conflicting but recent rebase was clean, skipping conflict signal")
+		} else {
+			log.Warn("PR has merge conflicts")
+			return true, map[string]any{"conflicting": true}, nil
+		}
 	}
 
 	ciStatus, err := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
@@ -445,4 +452,38 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 		log.Warn("unknown gate trigger", "trigger", trigger)
 		return false, nil, nil
 	}
+}
+
+// isRecentCleanRebase returns true if the step data indicates the most recent
+// rebase was a no-op (clean) and occurred within the given grace period.
+// This is used to suppress phantom conflict signals from GitHub's stale
+// mergeable status after a rebase + force-push.
+func isRecentCleanRebase(stepData map[string]any, grace time.Duration) bool {
+	clean, ok := stepData["last_rebase_clean"]
+	if !ok {
+		return false
+	}
+	// Handle both native bool and JSON-deserialized values
+	switch v := clean.(type) {
+	case bool:
+		if !v {
+			return false
+		}
+	default:
+		return false
+	}
+
+	rawTS, ok := stepData["last_rebase_at"]
+	if !ok {
+		return false
+	}
+	tsStr, ok := rawTS.(string)
+	if !ok {
+		return false
+	}
+	ts, err := time.Parse(time.RFC3339, tsStr)
+	if err != nil {
+		return false
+	}
+	return time.Since(ts) < grace
 }

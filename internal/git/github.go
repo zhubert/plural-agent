@@ -648,6 +648,38 @@ func (s *GitService) SquashBranch(ctx context.Context, worktreePath, branch, bas
 	return nil
 }
 
+// RebaseResult contains information about a completed rebase operation.
+type RebaseResult struct {
+	// Clean is true when the rebase was a no-op (HEAD unchanged), meaning
+	// the branch was already up-to-date with the base branch.
+	Clean bool
+}
+
+// RebaseBranchWithStatus rebases a branch onto the latest base branch, force-pushes,
+// and reports whether the rebase was a no-op (HEAD unchanged). This allows callers
+// to detect phantom conflicts where GitHub's mergeable status is stale after a
+// clean rebase.
+func (s *GitService) RebaseBranchWithStatus(ctx context.Context, worktreePath, branch, baseBranch string) (*RebaseResult, error) {
+	// Capture HEAD before rebase to detect no-ops
+	headBefore, err := s.executor.Output(ctx, worktreePath, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git rev-parse HEAD (before rebase) failed: %w", err)
+	}
+
+	if err := s.RebaseBranch(ctx, worktreePath, branch, baseBranch); err != nil {
+		return nil, err
+	}
+
+	// Capture HEAD after rebase
+	headAfter, err := s.executor.Output(ctx, worktreePath, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git rev-parse HEAD (after rebase) failed: %w", err)
+	}
+
+	clean := strings.TrimSpace(string(headBefore)) == strings.TrimSpace(string(headAfter))
+	return &RebaseResult{Clean: clean}, nil
+}
+
 // RebaseBranch rebases a branch onto the latest base branch and force-pushes.
 // This is a mechanical rebase (no Claude needed). If real file-level conflicts
 // exist, the rebase is aborted and an error is returned.
