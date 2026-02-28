@@ -71,14 +71,19 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Run `claude -v` on the host to force an OAuth token refresh (so the
-	// keychain token is fresh when we pass it into the container) and to
-	// show the user which Claude CLI version is installed.
-	if out, err := exec.Command("claude", "-v").Output(); err == nil {
-		fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
+	// When auth comes from the macOS keychain, the OAuth access token may be
+	// stale. Running `claude -v` on the host forces the CLI to refresh it
+	// before we read it. We also show the version as useful context.
+	authSource := claude.ContainerAuthSource()
+	if strings.Contains(authSource, "keychain") {
+		if out, err := exec.Command("claude", "-v").Output(); err == nil {
+			fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
+		}
+		// Re-read after refresh — the token in the keychain should now be fresh.
+		authSource = claude.ContainerAuthSource()
 	}
 
-	if authSource := claude.ContainerAuthSource(); authSource != "" {
+	if authSource != "" {
 		fmt.Printf("Auth: %s\n", authSource)
 	} else {
 		fmt.Println("Warning: no container auth credentials found")
@@ -265,14 +270,19 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Run `claude -v` on the host to force an OAuth token refresh (so the
-	// keychain token is fresh when we pass it into the container) and to
-	// show the user which Claude CLI version is installed.
-	if out, err := exec.Command("claude", "-v").Output(); err == nil {
-		fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
+	// When auth comes from the macOS keychain, the OAuth access token may be
+	// stale. Running `claude -v` on the host forces the CLI to refresh it
+	// before we read it. We also show the version as useful context.
+	authSource := claude.ContainerAuthSource()
+	if strings.Contains(authSource, "keychain") {
+		if out, err := exec.Command("claude", "-v").Output(); err == nil {
+			fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
+		}
+		// Re-read after refresh — the token in the keychain should now be fresh.
+		authSource = claude.ContainerAuthSource()
 	}
 
-	if authSource := claude.ContainerAuthSource(); authSource != "" {
+	if authSource != "" {
 		fmt.Printf("Auth: %s\n", authSource)
 	} else {
 		fmt.Println("Warning: no container auth credentials found")
