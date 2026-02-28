@@ -1,11 +1,13 @@
-# Plan-then-code workflow — Claude creates a plan for human approval before coding.
+# Plan-then-code workflow — Claude creates a plan for human review before coding.
 #
-# Label flow: plan → plan-review → plan-approved → in-progress
+# Label flow: plan → plan-review → in-progress
 #
 # 1. User adds "plan" label to an issue
 # 2. Claude analyzes the issue, explores the codebase, and posts a plan as a comment
-# 3. Label changes to "plan-review" — waiting for human approval
-# 4. User replaces "plan-review" with "plan-approved"
+# 3. Label changes to "plan-review" — waiting for human feedback
+# 4. User replies to the plan in the issue:
+#    - Approval ("LGTM", "looks good", "approved", "proceed", etc.) → coding begins
+#    - Any other comment → Claude revises the plan and posts an updated version
 # 5. Workflow resumes: label changes to "in-progress", Claude codes the solution
 # 6. PR opened, CI checked, reviewer assigned, merged on approval
 
@@ -43,37 +45,41 @@ states:
     action: github.add_label
     params:
       label: plan-review
-    next: await_plan_approval
-    error: await_plan_approval
+    next: await_plan_feedback
+    error: await_plan_feedback
 
-  # Wait for the human to add "plan-approved" label
-  await_plan_approval:
+  # Wait for the human to reply to the plan comment.
+  # Approval phrases advance to coding; any other reply triggers re-planning.
+  await_plan_feedback:
     type: wait
-    event: gate.approved
+    event: plan.user_replied
     params:
-      trigger: label_added
-      label: plan-approved
+      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
     timeout: 72h
     timeout_next: plan_expired
-    next: remove_plan_review_label
+    next: check_plan_feedback
     error: notify_failed
+
+  # Route based on whether the reply was an approval or feedback.
+  check_plan_feedback:
+    type: choice
+    choices:
+      - variable: plan_approved
+        equals: true
+        next: remove_plan_review_label
+      - variable: plan_approved
+        equals: false
+        next: planning
+    default: failed
 
   # ── Transition to coding ────────────────────────────────────────
 
-  # Clean up approval labels, add "in-progress"
+  # Clean up plan-review label, add "in-progress"
   remove_plan_review_label:
     type: task
     action: github.remove_label
     params:
       label: plan-review
-    next: remove_plan_approved_label
-    error: remove_plan_approved_label
-
-  remove_plan_approved_label:
-    type: task
-    action: github.remove_label
-    params:
-      label: plan-approved
     next: add_in_progress_label
     error: add_in_progress_label
 
@@ -85,7 +91,7 @@ states:
     next: coding
     error: coding
 
-  # ── Coding phase (same as before) ──────────────────────────────
+  # ── Coding phase ───────────────────────────────────────────────
 
   coding:
     type: task

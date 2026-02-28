@@ -169,6 +169,56 @@ func DefaultWorkflowConfig() *Config {
 	}
 }
 
+// DefaultPlanningWorkflowConfig returns a Config with a plan-then-code state graph:
+//
+//	planning → await_plan_feedback → check_plan_feedback
+//	  → plan_approved=true:  coding → open_pr → await_ci → ... (same as DefaultWorkflowConfig)
+//	  → plan_approved=false: planning (re-plan loop with user feedback injected)
+//
+// The planning phase asks Claude to analyze the issue and post a structured plan
+// as an issue comment. The workflow then waits for the user to reply. If the
+// reply matches the approval_pattern ("LGTM", "looks good", etc.) it proceeds to
+// coding. Any other reply is treated as feedback: Claude revises the plan and
+// posts an updated comment, then waits again. The loop continues until approval.
+func DefaultPlanningWorkflowConfig() *Config {
+	cfg := DefaultWorkflowConfig()
+	cfg.Workflow = "plan-then-code"
+	cfg.Start = "planning"
+
+	cfg.States["planning"] = &State{
+		Type:   StateTypeTask,
+		Action: "ai.plan",
+		Params: map[string]any{
+			"max_turns":     30,
+			"max_duration":  "15m",
+			"containerized": true,
+		},
+		Next:  "await_plan_feedback",
+		Error: "failed",
+	}
+	cfg.States["await_plan_feedback"] = &State{
+		Type:    StateTypeWait,
+		Event:   "plan.user_replied",
+		Timeout: &Duration{72 * time.Hour},
+		Params: map[string]any{
+			"approval_pattern": `(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)`,
+		},
+		Next:        "check_plan_feedback",
+		TimeoutNext: "failed",
+		Error:       "failed",
+	}
+	cfg.States["check_plan_feedback"] = &State{
+		Type: StateTypeChoice,
+		Choices: []ChoiceRule{
+			{Variable: "plan_approved", Equals: true, Next: "coding"},
+			{Variable: "plan_approved", Equals: false, Next: "planning"},
+		},
+		Default: "failed",
+	}
+
+	return cfg
+}
+
 // Merge overlays partial onto defaults. States present in partial replace the
 // corresponding default state entirely. States in defaults but not in partial
 // are preserved. Top-level fields (Workflow, Start) use partial if non-empty.
