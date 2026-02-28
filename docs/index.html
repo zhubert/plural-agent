@@ -1205,6 +1205,7 @@
             <a href="#events" class="sidebar-link">Wait events</a>
             <a href="#events-pr" class="sidebar-sublink">pr</a>
             <a href="#events-ci" class="sidebar-sublink">ci</a>
+            <a href="#events-plan" class="sidebar-sublink">plan</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
@@ -1311,7 +1312,7 @@
               <h4>Tag or label an issue</h4>
               <p>
                 Mark a task in GitHub, Asana, or Linear with the configured
-                trigger label (e.g. <code>queued</code>).
+                trigger label (e.g. <code>plan</code> or <code>queued</code>).
               </p>
             </div>
           </li>
@@ -1319,17 +1320,38 @@
             <div class="step-body">
               <h4>Daemon picks it up</h4>
               <p>
-                erg creates a branch and starts a containerized Claude Code
-                session with full tool access to the codebase.
+                erg starts a containerized Claude session. With planning
+                enabled, no branch is created yet — Claude reads the codebase
+                in read-only mode.
               </p>
             </div>
           </li>
           <li>
             <div class="step-body">
-              <h4>Claude writes code</h4>
+              <h4>Claude analyzes and posts a plan</h4>
               <p>
-                Claude reads the issue, implements the changes, runs tests,
-                and commits to the branch.
+                The <code>ai.plan</code> session explores the codebase and
+                posts a structured implementation plan as an issue comment —
+                no code written yet.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>You review and approve</h4>
+              <p>
+                Reply with approval (e.g. "LGTM") to proceed, or leave
+                feedback. Claude revises the plan and loops back until you
+                approve.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Claude writes the code</h4>
+              <p>
+                Once approved, <code>ai.code</code> creates a branch,
+                implements the changes, runs tests, and commits.
               </p>
             </div>
           </li>
@@ -1337,19 +1359,8 @@
             <div class="step-body">
               <h4>State machine advances</h4>
               <p>
-                The workflow engine moves the item through your configured
-                states: open a PR, wait for CI, request review, auto-fix
-                failures, merge.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Your rules, your automation</h4>
-              <p>
-                Every transition, timeout, retry, and notification is defined
-                in <code>.erg/workflow.yaml</code>. The built-in default
-                handles most projects out of the box.
+                The workflow engine opens a PR, waits for CI, handles review
+                feedback, and merges — automatically, according to your rules.
               </p>
             </div>
           </li>
@@ -1488,7 +1499,25 @@
         </p>
 
         <h3>Pipeline overview</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+          The recommended workflow begins with a planning step — Claude posts
+          an implementation plan for human approval before writing any code.
+        </p>
         <div class="state-flow">
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-task">planning</div>
+              <span class="sf-type">ai.plan</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
+          </div>
+          <div class="sf-step">
+            <div class="sf-node">
+              <div class="sf-box sf-wait">await_plan</div>
+              <span class="sf-type">plan.user_replied</span>
+            </div>
+            <span class="sf-arrow">&rarr;</span>
+          </div>
           <div class="sf-step">
             <div class="sf-node">
               <div class="sf-box sf-task">coding</div>
@@ -1505,22 +1534,8 @@
           </div>
           <div class="sf-step">
             <div class="sf-node">
-              <div class="sf-box sf-wait">await_review</div>
-              <span class="sf-type">pr.reviewed</span>
-            </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-wait">await_ci</div>
-              <span class="sf-type">ci.complete</span>
-            </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-task">merge</div>
-              <span class="sf-type">github.merge</span>
+              <div class="sf-box sf-wait">await_merge</div>
+              <span class="sf-type">pr.mergeable</span>
             </div>
             <span class="sf-arrow">&rarr;</span>
           </div>
@@ -1530,8 +1545,8 @@
           </div>
         </div>
         <p class="state-note">
+          <code>plan.user_replied</code> loops back for re-planning on feedback &middot;
           <code>retry</code> with exponential backoff &middot;
-          <code>catch</code> to recovery states &middot;
           <code>timeout</code> enforced on wait states
         </p>
 
@@ -3720,6 +3735,91 @@ https://github.com/your-org/your-repo/pull/99</pre>
           </div>
         </div>
 
+        <h3 id="events-plan">Plan events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">plan.user_replied</span>
+          </div>
+          <p class="action-desc">
+            Fires when a human comments on the issue after
+            <code>ai.plan</code> posts an implementation plan. The daemon
+            checks whether the comment matches an approval pattern. If it
+            does, <code>plan_approved</code> is <code>true</code> and the
+            workflow can proceed to <code>ai.code</code>. Non-matching
+            comments are treated as feedback — the text is automatically
+            injected into the next <code>ai.plan</code> session when looping
+            back, so Claude can revise the plan accordingly. Supported for
+            GitHub, Asana, and Linear providers.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>approval_pattern</td>
+                  <td>string</td>
+                  <td><em>LGTM|looks good|approved?|…</em></td>
+                  <td>
+                    Regular expression matched against the comment body to
+                    detect approval. Defaults to
+                    <code>(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)</code>.
+                    Override to match your team's preferred phrasing.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>plan_approved</td>
+                  <td>bool</td>
+                  <td>
+                    <code>true</code> if the comment matched the approval
+                    pattern, <code>false</code> if it did not. Inspect in a
+                    <code>choice</code> state to branch on approval vs.
+                    feedback.
+                  </td>
+                </tr>
+                <tr>
+                  <td>user_feedback</td>
+                  <td>string</td>
+                  <td>
+                    Full text of the comment. Automatically passed to the
+                    next <code>ai.plan</code> session when looping back for
+                    re-planning.
+                  </td>
+                </tr>
+                <tr>
+                  <td>user_feedback_author</td>
+                  <td>string</td>
+                  <td>
+                    Username or display name of the commenter.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Example workflows -->
         <h2 id="examples">Example workflows</h2>
         <p>
@@ -3849,11 +3949,14 @@ stateDiagram-v2
           </div>
         </div>
 
-        <h3 id="example-supervised">Advanced</h3>
+        <h3 id="example-supervised">Supervised</h3>
         <p>
-          For complex features spanning multiple files. Includes
-          hooks, retry with exponential backoff, <code>catch</code>-based error
-          routing, and a Slack notification after merge.
+          The recommended starting workflow for most teams. Claude analyzes
+          the issue and posts a structured implementation plan as an issue
+          comment — <em>before writing any code</em>. A human approves the
+          approach or leaves feedback; Claude revises and loops back until
+          approved. Once the plan is signed off, the full PR lifecycle runs
+          automatically.
         </p>
         <div class="example-tabs">
           <div class="tab-bar">
@@ -3867,118 +3970,164 @@ stateDiagram-v2
           <div data-panel="yaml">
             <div class="code-block">
               <div class="code-header">
-                <span class="code-filename">advanced.yaml</span>
+                <span class="code-filename">supervised.yaml</span>
               </div>
               <pre>
-# Advanced workflow — for complex features spanning multiple files.
+# Supervised workflow — plan first, get human approval, then code.
 #
-# A custom system prompt enforces architectural guidelines. Hooks install
-# dependencies before coding and run lint checks after. Failed sessions
-# are retried with exponential backoff before routing to a recovery state.
+# Claude analyzes the issue and codebase in read-only mode, then posts
+# a structured implementation plan as an issue comment. A human reviews
+# the plan and replies to approve or give feedback. Claude loops back to
+# revise the plan until approved, then proceeds to code and open a PR.
+#
+# Label an issue "plan" to trigger this workflow.
 #
 # Highlights:
-#   - system_prompt loaded from a file for per-repo AI guidelines
-#   - before hooks (block on failure) and after hooks (fire-and-forget)
-#   - retry with exponential backoff before catch-based error routing
-#   - Slack webhook notification after merge via after hook
+#   - ai.plan: read-only session, posts plan as issue comment (no branch created)
+#   - plan.user_replied: waits for human feedback on the plan
+#   - choice state routes on plan_approved: approved → coding, feedback → re-plan
+#   - label transitions for visibility: plan → plan-review → in-progress
+#   - pr.mergeable: combined review + CI wait before merge
 
-workflow: advanced-feature
-start: coding
+workflow: supervised
+start: planning
 
 source:
   provider: github
   filter:
-    label: feature-queued
+    label: plan              # Label an issue "plan" to trigger this workflow
 
 settings:
-  max_concurrent: 2
-  branch_prefix: feature/
+  max_concurrent: 3
+  branch_prefix: bot/
   cleanup_merged: true
 
 states:
+  # Claude explores the codebase and posts a plan as an issue comment.
+  # Read-only: no branch is created, no code is written.
+  planning:
+    type: task
+    action: ai.plan
+    params:
+      max_turns: 30
+      max_duration: 15m
+    next: remove_plan_label
+    error: notify_failed
+
+  # Swap labels so the issue shows it is ready for plan review.
+  remove_plan_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan
+    next: add_plan_review_label
+
+  add_plan_review_label:
+    type: task
+    action: github.add_label
+    params:
+      label: plan-review
+    next: await_plan_feedback
+
+  # Wait for a human to comment on the issue.
+  # Reply "LGTM", "approved", "proceed", etc. to approve.
+  # Any other reply is treated as feedback — Claude will revise the plan.
+  await_plan_feedback:
+    type: wait
+    event: plan.user_replied
+    params:
+      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
+    timeout: 72h
+    timeout_next: plan_expired
+    next: check_plan_feedback
+    error: notify_failed
+
+  # Route based on whether the human approved or gave feedback.
+  check_plan_feedback:
+    type: choice
+    choices:
+      - variable: plan_approved
+        equals: true
+        next: remove_plan_review_label   # Approved → proceed to coding
+      - variable: plan_approved
+        equals: false
+        next: planning                   # Feedback → revise and re-post the plan
+    default: notify_failed
+
+  remove_plan_review_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan-review
+    next: add_in_progress_label
+
+  add_in_progress_label:
+    type: task
+    action: github.add_label
+    params:
+      label: in-progress
+    next: coding
+
+  # Plan approved — Claude now creates a branch and writes the code.
   coding:
     type: task
     action: ai.code
     params:
-      max_turns: 100
-      max_duration: 60m
-      system_prompt: "file:.erg/prompts/feature.md"  # Architecture + style guidelines
-    before:
-      - run: "make deps"      # Install dependencies before Claude starts (blocks on failure)
-      - run: "make generate"  # Run code generation (blocks on failure)
-    after:
-      - run: "make lint"      # Run lint after coding (logged on failure, does not block)
-    retry:
-      - max_attempts: 2
-        interval: 60s
-        backoff_rate: 2.0     # Wait 60s, then 120s between retries
-        errors: ["*"]         # Retry on any failure
-    catch:
-      - errors: ["container_error"]
-        next: notify_container_failure  # Container issues get a human-readable comment
-      - errors: ["*"]
-        next: failed                    # All other failures → fail
+      max_turns: 50
+      max_duration: 30m
     next: open_pr
-    error: failed
+    error: notify_failed
 
   open_pr:
     type: task
     action: github.create_pr
     params:
       link_issue: true
-    next: await_ci
-    error: failed
+    next: await_merge
+    error: notify_failed
 
-  await_ci:
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  await_merge:
     type: wait
-    event: ci.complete
-    timeout: 3h
+    event: pr.mergeable
     params:
-      on_failure: retry       # Keep polling; CI may still pass on a subsequent run
-    next: await_review
-    error: failed
-
-  await_review:
-    type: wait
-    event: pr.reviewed
+      require_review: true
+      require_ci: true
     timeout: 72h
     timeout_next: review_overdue
-    params:
-      auto_address: true
-      max_feedback_rounds: 5  # Allow more review rounds for complex features
-      system_prompt: "file:.erg/prompts/review-feedback.md"
     next: merge
-    error: failed
-
-  # Comment on the PR and fail if review takes too long.
-  review_overdue:
-    type: task
-    action: github.comment_pr
-    params:
-      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
-    next: failed
-    error: failed
+    error: notify_failed
 
   merge:
     type: task
     action: github.merge
     params:
-      method: rebase
+      method: squash
       cleanup: true
-    after:
-      # Post to Slack after merge. SLACK_WEBHOOK_URL must be set in the environment.
-      - run: |
-          curl -s -X POST "$SLACK_WEBHOOK_URL" \
-            -H 'Content-type: application/json' \
-            --data "{\"text\": \"Feature merged: &lt;$ERG_PR_URL|$ERG_ISSUE_TITLE&gt;\"}"
     next: done
 
-  # Post a comment when a container error prevents coding, then fail.
-  notify_container_failure:
+  # Comment on the issue if the plan is not approved within 72h.
+  plan_expired:
     type: task
     action: github.comment_issue
     params:
-      body: "The coding session failed due to a container error. Please check the infrastructure and re-queue the issue."
+      body: "The implementation plan has been awaiting approval for 72h. Re-label the issue to restart."
+    next: failed
+    error: failed
+
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
     next: failed
     error: failed
 
@@ -3994,15 +4143,24 @@ states:
             <div class="diagram-panel">
               <pre class="mermaid">
 stateDiagram-v2
-    [*] --> coding
+    [*] --> planning
+    planning --> remove_plan_label : ai.plan
+    remove_plan_label --> add_plan_review_label : github.remove_label
+    add_plan_review_label --> await_plan_feedback : github.add_label
+    await_plan_feedback --> check_plan_feedback : plan.user_replied
+    await_plan_feedback --> plan_expired : timeout
+    check_plan_feedback --> remove_plan_review_label : plan_approved is true
+    check_plan_feedback --> planning : plan_approved is false
+    remove_plan_review_label --> add_in_progress_label : github.remove_label
+    add_in_progress_label --> coding : github.add_label
     coding --> open_pr : ai.code
-    open_pr --> await_ci : github.create_pr
-    await_ci --> await_review : ci.complete
-    await_review --> merge : pr.reviewed
-    await_review --> review_overdue : timeout
-    review_overdue --> failed : github.comment_pr
+    open_pr --> await_merge : github.create_pr
+    await_merge --> merge : pr.mergeable
+    await_merge --> review_overdue : timeout
+    review_overdue --> notify_failed : github.comment_pr
     merge --> done : github.merge
-    notify_container_failure --> failed : github.comment_issue
+    plan_expired --> failed : github.comment_issue
+    notify_failed --> failed : github.comment_issue
     done --> [*]
     failed --> [*]</pre
               >
