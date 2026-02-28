@@ -356,267 +356,54 @@ func validateCodingParams(prefix string, params map[string]any) []ValidationErro
 
 // validateMergeParams validates params for github.merge actions.
 func validateMergeParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-	if params == nil {
-		return errs
-	}
-
-	if method, ok := params["method"]; ok {
-		if s, ok := method.(string); ok {
-			switch s {
-			case "rebase", "squash", "merge":
-				// valid
-			default:
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.method",
-					Message: fmt.Sprintf("unknown merge method %q (must be rebase, squash, or merge)", s),
-				})
-			}
-		}
-	}
-
-	return errs
+	return optionalEnum(prefix, params, "method", []string{"rebase", "squash", "merge"})
 }
 
 // validateCommentIssueParams validates params for github.comment_issue actions.
 func validateCommentIssueParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-
-	if params == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.body",
-			Message: "body is required for github.comment_issue action",
-		})
+	errs := requireString(prefix, params, "body", "github.comment_issue action")
+	if len(errs) > 0 {
 		return errs
 	}
-
-	body, ok := params["body"]
-	if !ok || body == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.body",
-			Message: "body is required for github.comment_issue action",
-		})
-		return errs
+	if s, ok := params["body"].(string); ok {
+		errs = append(errs, validatePromptPath(prefix+".params.body", s)...)
 	}
-
-	if s, ok := body.(string); ok {
-		if s == "" {
-			errs = append(errs, ValidationError{
-				Field:   prefix + ".params.body",
-				Message: "body must not be empty",
-			})
-		} else {
-			errs = append(errs, validatePromptPath(prefix+".params.body", s)...)
-		}
-	}
-
 	return errs
 }
 
 // validateLabelParams validates params for github.add_label and github.remove_label actions.
 func validateLabelParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-
-	if params == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.label",
-			Message: "label is required for label actions",
-		})
-		return errs
-	}
-
-	label, ok := params["label"]
-	if !ok || label == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.label",
-			Message: "label is required for label actions",
-		})
-		return errs
-	}
-
-	if s, ok := label.(string); ok && s == "" {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.label",
-			Message: "label must not be empty",
-		})
-	}
-
-	return errs
+	return requireString(prefix, params, "label", "label actions")
 }
 
 // validateRequestReviewParams validates params for github.request_review actions.
 func validateRequestReviewParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-
-	if params == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.reviewer",
-			Message: "reviewer is required for github.request_review action",
-		})
-		return errs
-	}
-
-	reviewer, ok := params["reviewer"]
-	if !ok || reviewer == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.reviewer",
-			Message: "reviewer is required for github.request_review action",
-		})
-		return errs
-	}
-
-	if s, ok := reviewer.(string); ok && s == "" {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.reviewer",
-			Message: "reviewer must not be empty",
-		})
-	}
-
-	return errs
+	return requireString(prefix, params, "reviewer", "github.request_review action")
 }
 
 // validateAssignPRParams validates params for github.assign_pr actions.
 func validateAssignPRParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-
-	if params == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.assignee",
-			Message: "assignee is required for github.assign_pr action",
-		})
-		return errs
-	}
-
-	assignee, ok := params["assignee"]
-	if !ok || assignee == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.assignee",
-			Message: "assignee is required for github.assign_pr action",
-		})
-		return errs
-	}
-
-	if s, ok := assignee.(string); ok && s == "" {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.assignee",
-			Message: "assignee must not be empty",
-		})
-	}
-
-	return errs
+	return requireString(prefix, params, "assignee", "github.assign_pr action")
 }
 
 // validateFormatParams validates params for git.format actions.
 func validateFormatParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-
-	if params == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.command",
-			Message: "command is required for git.format action",
-		})
-		return errs
-	}
-
-	command, ok := params["command"]
-	if !ok || command == nil {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.command",
-			Message: "command is required for git.format action",
-		})
-		return errs
-	}
-
-	if s, ok := command.(string); ok && s == "" {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".params.command",
-			Message: "command must not be empty",
-		})
-	}
-
-	return errs
+	return requireString(prefix, params, "command", "git.format action")
 }
 
 // validateRebaseParams validates params for git.rebase actions.
 func validateRebaseParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-	if params == nil {
-		return errs
-	}
-
-	if v, ok := params["max_rebase_rounds"]; ok {
-		switch n := v.(type) {
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_rebase_rounds",
-					Message: "max_rebase_rounds must be greater than 0",
-				})
-			}
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_rebase_rounds",
-					Message: "max_rebase_rounds must be greater than 0",
-				})
-			}
-		}
-	}
-
-	return errs
+	return optionalPositiveNum(prefix, params, "max_rebase_rounds")
 }
 
 // validateResolveConflictsParams validates params for ai.resolve_conflicts actions.
 func validateResolveConflictsParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-	if params == nil {
-		return errs
-	}
-
-	if v, ok := params["max_conflict_rounds"]; ok {
-		switch n := v.(type) {
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_conflict_rounds",
-					Message: "max_conflict_rounds must be greater than 0",
-				})
-			}
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_conflict_rounds",
-					Message: "max_conflict_rounds must be greater than 0",
-				})
-			}
-		}
-	}
-
-	return errs
+	return optionalPositiveNum(prefix, params, "max_conflict_rounds")
 }
 
 // validateCIParams validates params for ci.complete events.
 func validateCIParams(prefix string, params map[string]any) []ValidationError {
-	var errs []ValidationError
-	if params == nil {
-		return errs
-	}
-
-	if onFailure, ok := params["on_failure"]; ok {
-		if s, ok := onFailure.(string); ok {
-			switch s {
-			case "abandon", "retry", "notify", "fix":
-				// valid
-			default:
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.on_failure",
-					Message: fmt.Sprintf("unknown on_failure policy %q (must be abandon, retry, notify, or fix)", s),
-				})
-			}
-		}
-	}
-
-	return errs
+	return optionalEnum(prefix, params, "on_failure", []string{"abandon", "retry", "notify", "fix"})
 }
 
 // validateSource validates the source configuration.
@@ -792,50 +579,8 @@ func detectCycles(cfg *Config) []ValidationError {
 // validateDiffParams validates params for git.validate_diff actions.
 func validateDiffParams(prefix string, params map[string]any) []ValidationError {
 	var errs []ValidationError
-	if params == nil {
-		return errs
-	}
-
-	// max_diff_lines must be a positive integer when present.
-	if v, ok := params["max_diff_lines"]; ok {
-		switch n := v.(type) {
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_diff_lines",
-					Message: "max_diff_lines must be greater than 0",
-				})
-			}
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_diff_lines",
-					Message: "max_diff_lines must be greater than 0",
-				})
-			}
-		}
-	}
-
-	// max_lock_file_lines must be a positive integer when present.
-	if v, ok := params["max_lock_file_lines"]; ok {
-		switch n := v.(type) {
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_lock_file_lines",
-					Message: "max_lock_file_lines must be greater than 0",
-				})
-			}
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_lock_file_lines",
-					Message: "max_lock_file_lines must be greater than 0",
-				})
-			}
-		}
-	}
-
+	errs = append(errs, optionalPositiveNum(prefix, params, "max_diff_lines")...)
+	errs = append(errs, optionalPositiveNum(prefix, params, "max_lock_file_lines")...)
 	return errs
 }
 
@@ -876,45 +621,79 @@ func validateRetryActionParams(prefix string, params map[string]any) []Validatio
 		}
 	}
 
-	if v, ok := params["max_attempts"]; ok {
-		switch n := v.(type) {
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_attempts",
-					Message: "max_attempts must be greater than 0",
-				})
-			}
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.max_attempts",
-					Message: "max_attempts must be greater than 0",
-				})
-			}
-		}
-	}
-
-	if v, ok := params["backoff_rate"]; ok {
-		switch n := v.(type) {
-		case float64:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.backoff_rate",
-					Message: "backoff_rate must be greater than 0",
-				})
-			}
-		case int:
-			if n <= 0 {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".params.backoff_rate",
-					Message: "backoff_rate must be greater than 0",
-				})
-			}
-		}
-	}
+	errs = append(errs, optionalPositiveNum(prefix, params, "max_attempts")...)
+	errs = append(errs, optionalPositiveNum(prefix, params, "backoff_rate")...)
 
 	return errs
+}
+
+// requireString validates that a required string param is present and non-empty.
+// context describes the action for error messages (e.g. "github.request_review action").
+func requireString(prefix string, params map[string]any, key, context string) []ValidationError {
+	field := prefix + ".params." + key
+	if params == nil {
+		return []ValidationError{{Field: field, Message: fmt.Sprintf("%s is required for %s", key, context)}}
+	}
+	v, ok := params[key]
+	if !ok || v == nil {
+		return []ValidationError{{Field: field, Message: fmt.Sprintf("%s is required for %s", key, context)}}
+	}
+	if s, ok := v.(string); ok && s == "" {
+		return []ValidationError{{Field: field, Message: key + " must not be empty"}}
+	}
+	return nil
+}
+
+// optionalEnum validates that an optional string param, if present, is one of the allowed values.
+func optionalEnum(prefix string, params map[string]any, key string, valid []string) []ValidationError {
+	if params == nil {
+		return nil
+	}
+	v, ok := params[key]
+	if !ok {
+		return nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return nil
+	}
+	for _, allowed := range valid {
+		if s == allowed {
+			return nil
+		}
+	}
+	return []ValidationError{{
+		Field:   prefix + ".params." + key,
+		Message: fmt.Sprintf("unknown %s %q (must be %s)", key, s, strings.Join(valid, ", ")),
+	}}
+}
+
+// optionalPositiveNum validates that an optional numeric param, if present, is greater than 0.
+// Handles both int and float64 (YAML may parse numbers as either type).
+func optionalPositiveNum(prefix string, params map[string]any, key string) []ValidationError {
+	if params == nil {
+		return nil
+	}
+	v, ok := params[key]
+	if !ok {
+		return nil
+	}
+	var nonPositive bool
+	switch n := v.(type) {
+	case int:
+		nonPositive = n <= 0
+	case float64:
+		nonPositive = n <= 0
+	default:
+		return nil
+	}
+	if nonPositive {
+		return []ValidationError{{
+			Field:   prefix + ".params." + key,
+			Message: key + " must be greater than 0",
+		}}
+	}
+	return nil
 }
 
 // validatePromptPath checks that a file: path doesn't escape the repo root.

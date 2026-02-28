@@ -1135,3 +1135,99 @@ func TestValidate_ValidateDiffAction(t *testing.T) {
 		t.Errorf("expected validation error for max_diff_lines=0, got errors: %v", errs)
 	}
 }
+
+func TestRequireString(t *testing.T) {
+	tests := []struct {
+		name      string
+		params    map[string]any
+		key       string
+		wantField string
+		wantError bool
+	}{
+		{"nil params", nil, "label", "p.params.label", true},
+		{"missing key", map[string]any{"other": "x"}, "label", "p.params.label", true},
+		{"nil value", map[string]any{"label": nil}, "label", "p.params.label", true},
+		{"empty string", map[string]any{"label": ""}, "label", "p.params.label", true},
+		{"valid string", map[string]any{"label": "queued"}, "label", "", false},
+		{"non-string value", map[string]any{"label": 42}, "label", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := requireString("p", tt.params, tt.key, "test action")
+			if tt.wantError {
+				if len(errs) == 0 {
+					t.Fatal("expected validation error")
+				}
+				if errs[0].Field != tt.wantField {
+					t.Errorf("got field %q, want %q", errs[0].Field, tt.wantField)
+				}
+			} else if len(errs) > 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+		})
+	}
+}
+
+func TestOptionalEnum(t *testing.T) {
+	valid := []string{"rebase", "squash", "merge"}
+	tests := []struct {
+		name      string
+		params    map[string]any
+		wantError bool
+	}{
+		{"nil params", nil, false},
+		{"key absent", map[string]any{}, false},
+		{"valid value", map[string]any{"method": "rebase"}, false},
+		{"invalid value", map[string]any{"method": "yolo"}, true},
+		{"non-string value", map[string]any{"method": 42}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := optionalEnum("p", tt.params, "method", valid)
+			if tt.wantError && len(errs) == 0 {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+			if tt.wantError && len(errs) > 0 && errs[0].Field != "p.params.method" {
+				t.Errorf("got field %q, want %q", errs[0].Field, "p.params.method")
+			}
+		})
+	}
+}
+
+func TestOptionalPositiveNum(t *testing.T) {
+	tests := []struct {
+		name      string
+		params    map[string]any
+		wantError bool
+	}{
+		{"nil params", nil, false},
+		{"key absent", map[string]any{}, false},
+		{"positive int", map[string]any{"max": 3}, false},
+		{"zero int", map[string]any{"max": 0}, true},
+		{"negative int", map[string]any{"max": -1}, true},
+		{"positive float64", map[string]any{"max": float64(2.5)}, false},
+		{"zero float64", map[string]any{"max": float64(0)}, true},
+		{"negative float64", map[string]any{"max": float64(-1)}, true},
+		{"non-numeric value", map[string]any{"max": "three"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := optionalPositiveNum("p", tt.params, "max")
+			if tt.wantError && len(errs) == 0 {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+			if tt.wantError && len(errs) > 0 && errs[0].Field != "p.params.max" {
+				t.Errorf("got field %q, want %q", errs[0].Field, "p.params.max")
+			}
+		})
+	}
+}
