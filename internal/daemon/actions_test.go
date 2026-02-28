@@ -6983,15 +6983,24 @@ func TestPlanningAction_Execute_NoRepo(t *testing.T) {
 	}
 }
 
-func TestStartPlanning_CreatesSessionOnDefaultBranch(t *testing.T) {
+func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
 	cfg := testConfig()
 	cfg.Repos = []string{"/test/repo"}
 
 	mockExec := exec.NewMockExecutor(nil)
-	// Mock GetDefaultBranch (git symbolic-ref)
+	// FetchOrigin: remote get-url + fetch
+	mockExec.AddPrefixMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo.git\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	// GetDefaultBranch (symbolic-ref)
 	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
 		Stdout: []byte("refs/remotes/origin/main\n"),
 	})
+	// Check if origin/main exists
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// worktree add
+	mockExec.AddPrefixMatch("git", []string{"worktree", "add"}, exec.MockResponse{})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
 	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
@@ -7033,14 +7042,13 @@ func TestStartPlanning_CreatesSessionOnDefaultBranch(t *testing.T) {
 	}
 	sess := sessions[0]
 
-	// Session should be on the default branch, not a new feature branch
-	if sess.Branch != "main" {
-		t.Errorf("session branch = %q, want %q", sess.Branch, "main")
+	// Planning now creates an isolated worktree on a temporary branch —
+	// WorkTree must NOT be the repo path itself.
+	if sess.WorkTree == "/test/repo" {
+		t.Error("planning session WorkTree must not be the host repo path")
 	}
-
-	// WorkTree should be the repo path itself (no separate worktree)
-	if sess.WorkTree != "/test/repo" {
-		t.Errorf("session WorkTree = %q, want %q", sess.WorkTree, "/test/repo")
+	if sess.WorkTree == "" {
+		t.Error("planning session WorkTree must not be empty")
 	}
 
 	// Session should be marked as daemon-managed and autonomous

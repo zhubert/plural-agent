@@ -33,28 +33,6 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 		return fmt.Errorf("no matching repo found")
 	}
 
-	baseBranch := d.gitService.GetDefaultBranch(ctx, repoPath)
-
-	// Create a lightweight session on the default branch.
-	// WorkTree is set to repoPath so Claude can read the codebase.
-	// No new branch or git worktree is created — this is read-only.
-	sessID := uuid.New().String()
-	sess := &config.Session{
-		ID:            sessID,
-		RepoPath:      repoPath,
-		WorkTree:      repoPath,
-		Branch:        baseBranch,
-		BaseBranch:    baseBranch,
-		DaemonManaged: true,
-		Autonomous:    true,
-		IssueRef: &config.IssueRef{
-			Source: item.IssueRef.Source,
-			ID:     item.IssueRef.ID,
-			Title:  item.IssueRef.Title,
-			URL:    item.IssueRef.URL,
-		},
-	}
-
 	// Configure from workflow params for the planning state
 	wfCfg := d.getWorkflowConfig(repoPath)
 	planningState := wfCfg.States["planning"]
@@ -63,7 +41,23 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 		params = workflow.NewParamHelper(planningState.Params)
 	}
 
+	// Create a worktree so the planning container has an isolated workspace
+	// instead of mounting the host repo directly. The worktree is on a
+	// temporary branch that is deleted when planning completes.
+	sess, err := d.sessionService.Create(ctx, repoPath, "", "", session.BasePointOrigin)
+	if err != nil {
+		return fmt.Errorf("failed to create planning worktree: %w", err)
+	}
+
+	sess.DaemonManaged = true
+	sess.Autonomous = true
 	sess.Containerized = params.Bool("containerized", true)
+	sess.IssueRef = &config.IssueRef{
+		Source: item.IssueRef.Source,
+		ID:     item.IssueRef.ID,
+		Title:  item.IssueRef.Title,
+		URL:    item.IssueRef.URL,
+	}
 	d.config.AddSession(*sess)
 
 	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
@@ -115,7 +109,7 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 	}
 	w.Start(ctx)
 
-	log.Info("started planning", "sessionID", sess.ID, "branch", baseBranch)
+	log.Info("started planning", "sessionID", sess.ID, "branch", sess.Branch)
 	return nil
 }
 
@@ -565,9 +559,8 @@ func (d *Daemon) cleanupSession(ctx context.Context, sessionID string) {
 	log.Info("cleaned up session")
 }
 
-// cleanupPlanningSession cleans up a planning session's runner/container and config
-// without deleting the git worktree or branch (planning sessions are read-only on
-// the default branch, so there's nothing to delete).
+// cleanupPlanningSession cleans up a planning session's worktree, branch, runner,
+// and config entries.
 func (d *Daemon) cleanupPlanningSession(ctx context.Context, sessionID string) {
 	sess := d.config.GetSession(sessionID)
 	if sess == nil {
@@ -577,6 +570,11 @@ func (d *Daemon) cleanupPlanningSession(ctx context.Context, sessionID string) {
 	log := d.logger.With("sessionID", sessionID, "branch", sess.Branch)
 
 	d.sessionMgr.DeleteSession(sessionID)
+
+	if err := d.sessionService.Delete(ctx, sess); err != nil {
+		log.Warn("failed to delete planning worktree", "error", err)
+	}
+
 	d.config.RemoveSession(sessionID)
 	config.DeleteSessionMessages(sessionID)
 
