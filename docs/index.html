@@ -1242,6 +1242,9 @@
             <a href="#example-label-tracking" class="sidebar-link"
               >Label tracking</a
             >
+            <a href="#example-asana-kanban" class="sidebar-link"
+              >Asana kanban</a
+            >
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -4827,6 +4830,237 @@ stateDiagram-v2
     check_close --> done : default
     close_issue --> done : github.close_issue
     label_failed --> failed : github.add_label
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <h3 id="example-asana-kanban">Asana kanban</h3>
+        <p>
+          A board-section-driven workflow for Asana. Tasks in the
+          <em>Todo</em> section are picked up automatically — no tag required.
+          Claude plans and posts a comment; the card moves to
+          <em>Planned</em>. Human feedback triggers re-planning; dragging the
+          card to <em>Doing</em> starts coding. After the PR opens the card
+          moves to <em>In Review</em>, then to <em>Done</em> on merge.
+        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">asana-kanban.yaml</span>
+              </div>
+              <pre>
+# Asana kanban workflow — board sections drive the lifecycle.
+#
+# Section flow: Todo → Planned → Doing → In Review → Done
+#
+# Tasks in the "Todo" section are picked up automatically.
+# No tag is required — section position is the only trigger.
+#
+# Highlights:
+#   - source.filter.section: poll a named board section, not a tag
+#   - asana.move_to_section: advance the card as work progresses
+#   - plan.user_replied: comment feedback triggers re-planning
+#   - asana.in_section: gate on a human dragging the card to "Doing"
+#   - pr.mergeable: combined review + CI wait before merge
+
+workflow: asana-kanban
+start: planning
+
+source:
+  provider: asana
+  filter:
+    project: YOUR_PROJECT_GID   # found in the project URL
+    section: Todo               # poll tasks in this board section
+
+settings:
+  max_concurrent: 3
+  branch_prefix: bot/
+  cleanup_merged: true
+
+states:
+  # Claude explores the codebase and posts a plan as an Asana comment.
+  planning:
+    type: task
+    action: ai.plan
+    params:
+      max_turns: 30
+      max_duration: 15m
+    next: move_to_planned
+    error: notify_failed
+
+  # Slide the card to "Planned" to signal the plan is ready for review.
+  move_to_planned:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: Planned
+    next: await_plan_feedback
+    error: await_plan_feedback
+
+  # Wait for a human to comment on the task.
+  # Approval phrases advance to the coding gate; any other comment
+  # is treated as feedback and loops back to re-plan.
+  # After 24h of silence, move on to wait for the card to reach "Doing".
+  await_plan_feedback:
+    type: wait
+    event: plan.user_replied
+    params:
+      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
+    timeout: 24h
+    timeout_next: await_doing
+    next: check_plan_feedback
+    error: notify_failed
+
+  check_plan_feedback:
+    type: choice
+    choices:
+      - variable: plan_approved
+        equals: true
+        next: await_doing
+      - variable: plan_approved
+        equals: false
+        next: planning          # Feedback → revise and re-post the plan
+    default: planning
+
+  # Gate on a human dragging the card to "Doing" on the board.
+  # This is the explicit signal that the plan is accepted and work should begin.
+  await_doing:
+    type: wait
+    event: asana.in_section
+    params:
+      section: Doing
+    timeout: 7d
+    timeout_next: plan_expired
+    next: coding
+    error: notify_failed
+
+  # Plan accepted — Claude creates a branch and writes the code.
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: notify_failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: move_to_in_review
+    error: notify_failed
+
+  # Advance the card to "In Review" while the PR is open.
+  move_to_in_review:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: In Review
+    next: await_merge
+    error: await_merge
+
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    timeout_next: review_overdue
+    next: merge
+    error: notify_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: move_to_done
+    error: notify_failed
+
+  # Move the card to "Done" — the task is complete.
+  move_to_done:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: Done
+    next: done
+    error: done
+
+  plan_expired:
+    type: task
+    action: asana.comment
+    params:
+      body: "Plan waiting 7 days for the card to move to 'Doing'. Move the card when ready, or remove it from Todo to cancel."
+    next: failed
+    error: failed
+
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  notify_failed:
+    type: task
+    action: asana.comment
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> planning
+    planning --> move_to_planned : ai.plan
+    planning --> notify_failed : error
+    move_to_planned --> await_plan_feedback : asana.move_to_section
+    await_plan_feedback --> check_plan_feedback : plan.user_replied
+    await_plan_feedback --> await_doing : timeout (24h)
+    check_plan_feedback --> await_doing : plan_approved is true
+    check_plan_feedback --> planning : plan_approved is false
+    await_doing --> coding : asana.in_section (Doing)
+    await_doing --> plan_expired : timeout (7d)
+    coding --> open_pr : ai.code
+    coding --> notify_failed : error
+    open_pr --> move_to_in_review : github.create_pr
+    open_pr --> notify_failed : error
+    move_to_in_review --> await_merge : asana.move_to_section
+    await_merge --> merge : pr.mergeable
+    await_merge --> review_overdue : timeout (72h)
+    merge --> move_to_done : github.merge
+    move_to_done --> done : asana.move_to_section
+    review_overdue --> notify_failed : github.comment_pr
+    plan_expired --> failed : asana.comment
+    notify_failed --> failed : asana.comment
     done --> [*]
     failed --> [*]</pre
               >
