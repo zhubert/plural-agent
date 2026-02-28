@@ -67,3 +67,12 @@ func (s *Session) GetIssueRef() *IssueRef {
 func (s *Session) HasIssue() bool {
 	return s.GetIssueRef() != nil
 }
+
+// GetWorkDir returns the effective working directory for this session.
+// It prefers the worktree path if set, falling back to the repo path.
+func (s *Session) GetWorkDir() string {
+	if s.WorkTree != "" {
+		return s.WorkTree
+	}
+	return s.RepoPath
+}

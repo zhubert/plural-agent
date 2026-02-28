@@ -125,7 +125,7 @@ func (d *Daemon) recoverWaitPhase(ctx context.Context, item *daemonstate.WorkIte
 		return
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	prState, err := d.gitService.GetPRState(pollCtx, sess.RepoPath, item.Branch)
@@ -221,7 +221,7 @@ func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.Work
 	}
 
 	// Check if PR was already created
-	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	prState, err := d.gitService.GetPRState(pollCtx, sess.RepoPath, item.Branch)

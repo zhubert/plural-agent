@@ -49,7 +49,7 @@ func (c *eventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 		return false, nil, nil
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	// Check if PR was closed
@@ -158,7 +158,7 @@ func (c *eventChecker) checkCIComplete(ctx context.Context, params *workflow.Par
 		return false, nil, nil
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	// Check mergeable status first — conflicts prevent CI from running
@@ -227,7 +227,7 @@ func (c *eventChecker) checkPRMergeable(ctx context.Context, params *workflow.Pa
 		return false, nil, nil
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	// Check PR state
@@ -305,7 +305,7 @@ func (c *eventChecker) checkCIWaitForChecks(ctx context.Context, params *workflo
 		return false, nil, nil
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	checks, err := d.gitService.GetPRCheckDetails(pollCtx, sess.RepoPath, item.Branch)
@@ -393,7 +393,7 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 		return false, nil, nil
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	trigger := params.String("trigger", "label_added")

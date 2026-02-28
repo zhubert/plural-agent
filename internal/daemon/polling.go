@@ -54,7 +54,7 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 		return
 	}
 
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	for _, repoPath := range pollingRepos {

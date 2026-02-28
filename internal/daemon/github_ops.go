@@ -7,7 +7,6 @@ import (
 	osexec "os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
@@ -20,9 +19,9 @@ import (
 // createPR creates a pull request for a work item's session.
 // When draft is true the PR is created in draft state.
 func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft bool) (string, error) {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return "", fmt.Errorf("session not found")
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return "", err
 	}
 
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
@@ -31,7 +30,7 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft 
 	// recovered via the existing-PR path in startCoding), return its URL
 	// instead of trying to create a duplicate.
 	if sess.PRCreated {
-		prCtx, prCancel := context.WithTimeout(ctx, 15*time.Second)
+		prCtx, prCancel := context.WithTimeout(ctx, timeoutQuickAPI)
 		prState, prErr := d.gitService.GetPRState(prCtx, sess.RepoPath, sess.Branch)
 		prCancel()
 		if prErr == nil && prState == git.PRStateOpen {
@@ -57,7 +56,7 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft 
 
 	log.Info("creating PR")
 
-	prCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	prCtx, cancel := context.WithTimeout(ctx, timeoutGitPush)
 	defer cancel()
 
 	resultCh := d.gitService.CreatePR(prCtx, sess.RepoPath, sess.WorkTree, sess.Branch, sess.BaseBranch, "", sess.GetIssueRef(), item.SessionID, draft)
@@ -91,12 +90,9 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft 
 // to the base branch OR has uncommitted changes in the worktree. Returns false
 // when the coding session made no changes at all.
 func (d *Daemon) branchHasChanges(ctx context.Context, sess *config.Session) (bool, error) {
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
-	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	// Check for uncommitted changes first (staged or unstaged).
@@ -127,12 +123,12 @@ func (d *Daemon) branchHasChanges(ctx context.Context, sess *config.Session) (bo
 
 // pushChanges pushes changes for a work item's session.
 func (d *Daemon) pushChanges(ctx context.Context, item daemonstate.WorkItem) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found")
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
-	pushCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	pushCtx, cancel := context.WithTimeout(ctx, timeoutGitPush)
 	defer cancel()
 
 	resultCh := d.gitService.PushUpdates(pushCtx, sess.RepoPath, sess.WorkTree, sess.Branch, "Address review feedback")
@@ -149,14 +145,14 @@ func (d *Daemon) pushChanges(ctx context.Context, item daemonstate.WorkItem) err
 
 // mergePR merges the PR for a work item.
 func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found")
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
 	method := d.getEffectiveMergeMethod(sess.RepoPath)
 
-	mergeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	mergeCtx, cancel := context.WithTimeout(ctx, timeoutGitHubMerge)
 	defer cancel()
 
 	mergeErr := d.gitService.MergePR(mergeCtx, sess.RepoPath, item.Branch, false, method)
@@ -188,13 +184,13 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 		}
 
 		// Rebase to linearize history and force-push
-		rebaseCtx, rebaseCancel := context.WithTimeout(ctx, 2*time.Minute)
+		rebaseCtx, rebaseCancel := context.WithTimeout(ctx, timeoutGitPush)
 		defer rebaseCancel()
 
 		if rebaseErr := d.gitService.RebaseBranch(rebaseCtx, worktree, sess.Branch, baseBranch); rebaseErr != nil {
 			log.Warn("linearization rebase failed, falling back to squash merge", "rebaseError", rebaseErr)
 
-			squashCtx, squashCancel := context.WithTimeout(ctx, 60*time.Second)
+			squashCtx, squashCancel := context.WithTimeout(ctx, timeoutGitHubMerge)
 			defer squashCancel()
 
 			if squashErr := d.gitService.MergePR(squashCtx, sess.RepoPath, item.Branch, false, "squash"); squashErr != nil {
@@ -208,7 +204,7 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 			log.Info("branch linearized successfully, retrying merge")
 
 			// Retry merge
-			retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(ctx, timeoutGitHubMerge)
 			defer retryCancel()
 
 			if retryErr := d.gitService.MergePR(retryCtx, sess.RepoPath, item.Branch, false, method); retryErr != nil {
@@ -271,7 +267,7 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, 
 		return fmt.Errorf("comment body is empty")
 	}
 
-	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	return d.gitService.CommentOnIssue(commentCtx, repoPath, issueNum, body)
@@ -279,9 +275,9 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, 
 
 // commentOnPR posts a comment on the PR for a work item.
 func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found for work item %s", item.ID)
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
 	bodyTemplate := params.String("body", "")
@@ -293,7 +289,7 @@ func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, par
 		return fmt.Errorf("comment body is empty")
 	}
 
-	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", body)
@@ -340,7 +336,7 @@ func (d *Daemon) commentViaProvider(ctx context.Context, item daemonstate.WorkIt
 		return fmt.Errorf("%s provider does not support commenting", expectedSource)
 	}
 
-	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	return pa.Comment(commentCtx, repoPath, item.IssueRef.ID, body)
@@ -369,7 +365,7 @@ func (d *Daemon) addLabel(ctx context.Context, item daemonstate.WorkItem, params
 		return fmt.Errorf("label parameter is required")
 	}
 
-	labelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	labelCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	return d.gitService.AddIssueLabel(labelCtx, repoPath, issueNum, label)
@@ -398,7 +394,7 @@ func (d *Daemon) removeLabel(ctx context.Context, item daemonstate.WorkItem, par
 		return fmt.Errorf("label parameter is required")
 	}
 
-	labelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	labelCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	return d.gitService.RemoveIssueLabel(labelCtx, repoPath, issueNum, label)
@@ -417,7 +413,7 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 		return fmt.Errorf("no repo path found for work item %s", item.ID)
 	}
 
-	closeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	closeCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID)
@@ -444,7 +440,7 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 
 	label := d.resolveQueueLabel(repoPath)
 
-	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	opCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	// Attempt to use the ProviderActions interface if the provider supports it.
@@ -484,7 +480,7 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 
 	label := d.resolveQueueLabel(repoPath)
 
-	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	opCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	// Remove queue label (best-effort)
@@ -506,7 +502,7 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 
 // getPRURL fetches the URL of an existing PR for the given branch using the gh CLI.
 func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
-	prCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	prCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	cmd := osexec.CommandContext(prCtx, "gh", "pr", "view", branch, "--json", "url")
@@ -528,9 +524,9 @@ func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
 
 // requestReview requests a review on the PR for a work item.
 func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found for work item %s", item.ID)
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
 	reviewer := params.String("reviewer", "")
@@ -538,7 +534,7 @@ func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, p
 		return fmt.Errorf("reviewer parameter is required")
 	}
 
-	reviewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	reviewCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer)
@@ -575,7 +571,7 @@ func (d *Daemon) createRelease(ctx context.Context, item daemonstate.WorkItem, p
 	prerelease := params.Bool("prerelease", false)
 	target := params.String("target", "")
 
-	releaseCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	releaseCtx, cancel := context.WithTimeout(ctx, timeoutGitHubMerge)
 	defer cancel()
 
 	return d.gitService.CreateRelease(releaseCtx, repoPath, tag, title, notes, draft, prerelease, target)
@@ -583,9 +579,9 @@ func (d *Daemon) createRelease(ctx context.Context, item daemonstate.WorkItem, p
 
 // assignPR assigns the PR to specific users for a work item.
 func (d *Daemon) assignPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found for work item %s", item.ID)
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
 	assignee := params.String("assignee", "")
@@ -593,7 +589,7 @@ func (d *Daemon) assignPR(ctx context.Context, item daemonstate.WorkItem, params
 		return fmt.Errorf("assignee parameter is required")
 	}
 
-	assignCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	assignCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	cmd := osexec.CommandContext(assignCtx, "gh", "pr", "edit", item.Branch, "--add-assignee", assignee)

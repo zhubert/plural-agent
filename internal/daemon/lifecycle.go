@@ -46,7 +46,7 @@ func (d *Daemon) shutdown() {
 	select {
 	case <-done:
 		d.logger.Info("all workers shut down")
-	case <-time.After(30 * time.Second):
+	case <-time.After(timeoutStandardOp):
 		d.logger.Warn("shutdown timed out")
 	}
 

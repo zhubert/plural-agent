@@ -6,7 +6,6 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/workflow"
@@ -56,22 +55,19 @@ var defaultTestPatterns = []string{
 // Returns a non-empty violations slice when checks fail, or an error if the
 // checks could not be executed at all (e.g. git command failure).
 func (d *Daemon) validateDiff(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) ([]string, error) {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return nil, fmt.Errorf("session not found for work item %s", item.ID)
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return nil, err
 	}
 
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
 	baseBranch := sess.BaseBranch
 	if baseBranch == "" {
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	diffCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	diffCtx, cancel := context.WithTimeout(ctx, timeoutGitPush)
 	defer cancel()
 
 	// Three-dot notation: diff from merge base of baseBranch and item.Branch

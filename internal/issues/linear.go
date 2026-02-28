@@ -156,41 +156,11 @@ func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filte
 }`
 	}
 
-	gqlReq := linearGraphQLRequest{
-		Query:     query,
-		Variables: variables,
-	}
-
-	body, err := json.Marshal(gqlReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal GraphQL request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/graphql", p.apiBase)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch issues: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("Linear API returned 403 Forbidden - check that your LINEAR_API_KEY has access to this team")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Linear API returned status %d", resp.StatusCode)
-	}
-
 	var gqlResp linearTeamIssuesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Linear response: %w", err)
+	if err := p.linearGraphQL(ctx, query, variables,
+		"Linear API returned 403 Forbidden - check that your LINEAR_API_KEY has access to this team",
+		&gqlResp); err != nil {
+		return nil, err
 	}
 
 	nodes := gqlResp.Data.Team.Issues.Nodes
@@ -271,8 +241,9 @@ const linearIssueUpdateMutation = `mutation($id: String!, $labelIds: [String!]!)
   }
 }`
 
-// linearGraphQL executes a GraphQL request and returns the response body.
-func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variables map[string]any, result any) error {
+// linearGraphQL executes a GraphQL request against the Linear API.
+// If forbiddenMsg is non-empty, a 403 response produces that specific error.
+func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variables map[string]any, forbiddenMsg string, result any) error {
 	apiKey := os.Getenv(linearAPIKeyEnvVar)
 	if apiKey == "" {
 		return fmt.Errorf("LINEAR_API_KEY environment variable not set")
@@ -288,28 +259,8 @@ func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variab
 	}
 
 	url := fmt.Sprintf("%s/graphql", p.apiBase)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to execute GraphQL request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Linear API returned status %d", resp.StatusCode)
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return fmt.Errorf("failed to parse Linear response: %w", err)
-	}
-
-	return nil
+	return apiRequest(ctx, p.httpClient, http.MethodPost, url, bytes.NewReader(body),
+		apiKey, http.StatusOK, forbiddenMsg, "Linear", result)
 }
 
 // RemoveLabel removes a label from a Linear issue by name.
@@ -319,7 +270,7 @@ func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variab
 func (p *LinearProvider) RemoveLabel(ctx context.Context, repoPath string, issueID string, label string) error {
 	// Fetch the issue UUID and current labels.
 	var labelsResp linearIssueLabelsResponse
-	if err := p.linearGraphQL(ctx, linearIssueLabelsQuery, map[string]any{"id": issueID}, &labelsResp); err != nil {
+	if err := p.linearGraphQL(ctx, linearIssueLabelsQuery, map[string]any{"id": issueID}, "", &labelsResp); err != nil {
 		return fmt.Errorf("failed to fetch issue labels: %w", err)
 	}
 
@@ -357,7 +308,7 @@ func (p *LinearProvider) RemoveLabel(ctx context.Context, repoPath string, issue
 	if err := p.linearGraphQL(ctx, linearIssueUpdateMutation, map[string]any{
 		"id":       issueUUID,
 		"labelIds": updatedLabelIDs,
-	}, &updateResp); err != nil {
+	}, "", &updateResp); err != nil {
 		return fmt.Errorf("failed to update issue labels: %w", err)
 	}
 
@@ -376,7 +327,7 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 		} `json:"data"`
 	}
 	lookupQuery := `query($id: String!) { issue(id: $id) { id } }`
-	if err := p.linearGraphQL(ctx, lookupQuery, map[string]any{"id": issueID}, &issueResp); err != nil {
+	if err := p.linearGraphQL(ctx, lookupQuery, map[string]any{"id": issueID}, "", &issueResp); err != nil {
 		return fmt.Errorf("failed to look up issue UUID: %w", err)
 	}
 
@@ -395,7 +346,7 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 	if err := p.linearGraphQL(ctx, linearCommentCreateMutation, map[string]any{
 		"issueId": issueUUID,
 		"body":    body,
-	}, &commentResp); err != nil {
+	}, "", &commentResp); err != nil {
 		return fmt.Errorf("failed to create comment: %w", err)
 	}
 
@@ -404,42 +355,9 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 
 // FetchTeams retrieves all teams accessible to the user.
 func (p *LinearProvider) FetchTeams(ctx context.Context) ([]LinearTeam, error) {
-	apiKey := os.Getenv(linearAPIKeyEnvVar)
-	if apiKey == "" {
-		return nil, fmt.Errorf("LINEAR_API_KEY environment variable not set")
-	}
-
-	gqlReq := linearGraphQLRequest{
-		Query: `{ teams { nodes { id name } } }`,
-	}
-
-	body, err := json.Marshal(gqlReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal GraphQL request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/graphql", p.apiBase)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch teams: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Linear API returned status %d", resp.StatusCode)
-	}
-
 	var gqlResp linearTeamsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Linear teams response: %w", err)
+	if err := p.linearGraphQL(ctx, `{ teams { nodes { id name } } }`, nil, "", &gqlResp); err != nil {
+		return nil, err
 	}
 
 	nodes := gqlResp.Data.Teams.Nodes

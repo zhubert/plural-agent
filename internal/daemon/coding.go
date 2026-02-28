@@ -135,7 +135,7 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 		// Before cleaning up, check if there's a live PR on this branch.
 		// If so, create a minimal tracking session so the workflow can advance
 		// to the PR monitoring states instead of failing and re-queuing.
-		prCtx, prCancel := context.WithTimeout(ctx, 15*time.Second)
+		prCtx, prCancel := context.WithTimeout(ctx, timeoutQuickAPI)
 		prState, prErr := d.gitService.GetPRState(prCtx, repoPath, fullBranchName)
 		prCancel()
 		if prErr == nil && (prState == git.PRStateOpen || prState == git.PRStateMerged) {
@@ -281,7 +281,7 @@ func (d *Daemon) addressFeedback(ctx context.Context, item daemonstate.WorkItem,
 	sess = d.refreshStaleSession(ctx, item, sess)
 
 	// Fetch review comments
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	comments, err := d.gitService.FetchPRReviewComments(pollCtx, sess.RepoPath, item.Branch)
@@ -441,7 +441,7 @@ func (d *Daemon) recreateWorktree(ctx context.Context, repoPath, branch, session
 
 	worktreePath := filepath.Join(worktreesDir, sessionID)
 
-	wtCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	wtCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	addOut, err := osexec.CommandContext(wtCtx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch).CombinedOutput()
@@ -624,9 +624,9 @@ func (d *Daemon) findRepoPath(ctx context.Context) string {
 // runFormatter runs the specified formatter command in the session's worktree
 // and commits any resulting changes.
 func (d *Daemon) runFormatter(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found for work item %s", item.ID)
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return err
 	}
 
 	command := params.String("command", "")
@@ -637,12 +637,9 @@ func (d *Daemon) runFormatter(ctx context.Context, item daemonstate.WorkItem, pa
 	message := params.String("message", "Apply auto-formatting")
 
 	// Use worktree if available, fall back to repo path
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
-	formatCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	formatCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
 	defer cancel()
 
 	// Run the formatter command via shell
@@ -752,7 +749,7 @@ CI FAILURE LOGS:
 
 // fetchCIFailureLogs fetches failure logs from the most recent failed CI run.
 func fetchCIFailureLogs(ctx context.Context, repoPath, branch string) (string, error) {
-	fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	fetchCtx, cancel := context.WithTimeout(ctx, timeoutGitHubMerge)
 	defer cancel()
 
 	// Find the most recent failed run
@@ -990,17 +987,14 @@ func (d *Daemon) writePRDescription(ctx context.Context, item daemonstate.WorkIt
 	// Refresh stale session so worktree path is valid.
 	sess = d.refreshStaleSession(ctx, item, sess)
 
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
 	baseBranch := sess.BaseBranch
 	if baseBranch == "" {
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	descCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	descCtx, cancel := context.WithTimeout(ctx, timeoutPRDescription)
 	defer cancel()
 
 	body, err := d.gitService.GenerateRichPRDescription(descCtx, workDir, item.Branch, baseBranch, sess.GetIssueRef())
@@ -1008,7 +1002,7 @@ func (d *Daemon) writePRDescription(ctx context.Context, item daemonstate.WorkIt
 		return fmt.Errorf("failed to generate PR description: %w", err)
 	}
 
-	updateCtx, updateCancel := context.WithTimeout(ctx, 30*time.Second)
+	updateCtx, updateCancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer updateCancel()
 
 	if err := d.gitService.UpdatePRBody(updateCtx, workDir, item.Branch, body); err != nil {
@@ -1166,10 +1160,7 @@ type aiReviewResult struct {
 // the session's worktree. Returns (passed=true, summary="") if the file is
 // absent or unparseable — absent means Claude found no blocking issues.
 func (d *Daemon) readAIReviewResult(sess *config.Session) (bool, string) {
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
 	resultPath := filepath.Join(workDir, ".erg", "ai_review.json")
 	data, err := os.ReadFile(resultPath)

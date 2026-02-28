@@ -41,6 +41,26 @@ func TestSession_GetIssueRef_ZeroIssueNumber(t *testing.T) {
 	}
 }
 
+func TestSession_GetWorkDir(t *testing.T) {
+	tests := []struct {
+		name string
+		sess Session
+		want string
+	}{
+		{"worktree set", Session{RepoPath: "/repo", WorkTree: "/worktree"}, "/worktree"},
+		{"worktree empty", Session{RepoPath: "/repo"}, "/repo"},
+		{"both empty", Session{}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.sess.GetWorkDir(); got != tt.want {
+				t.Errorf("GetWorkDir() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSession_HasIssue(t *testing.T) {
 	tests := []struct {
 		name string

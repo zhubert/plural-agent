@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/erg/internal/claude"
@@ -84,9 +83,9 @@ func (d *Daemon) SetWorkItemData(sessionID, key string, value any) error {
 // It routes through the appropriate provider (GitHub, Asana, Linear) based on the
 // issue source. For GitHub, falls back to GitService if no provider is registered.
 func (d *Daemon) CommentOnIssue(ctx context.Context, sessionID, body string) error {
-	sess := d.config.GetSession(sessionID)
-	if sess == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
+	sess, err := d.getSessionOrError(sessionID)
+	if err != nil {
+		return err
 	}
 
 	issueRef := sess.GetIssueRef()
@@ -94,7 +93,7 @@ func (d *Daemon) CommentOnIssue(ctx context.Context, sessionID, body string) err
 		return fmt.Errorf("no issue associated with session %s", sessionID)
 	}
 
-	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	source := issues.Source(issueRef.Source)

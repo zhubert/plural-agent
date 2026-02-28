@@ -98,30 +98,12 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 	// Fetch incomplete tasks from the project
 	url := fmt.Sprintf("%s/projects/%s/tasks?opt_fields=gid,name,notes,permalink_url,tags.name&completed_since=now", p.apiBase, projectID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+pat)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch tasks: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("Asana API returned 403 Forbidden - check that your ASANA_PAT has access to this project")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Asana API returned status %d", resp.StatusCode)
-	}
-
 	var tasksResp asanaTasksResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tasksResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Asana response: %w", err)
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK,
+		"Asana API returned 403 Forbidden - check that your ASANA_PAT has access to this project",
+		"Asana", &tasksResp); err != nil {
+		return nil, err
 	}
 
 	tasks := tasksResp.Data
@@ -267,27 +249,10 @@ func (p *AsanaProvider) FetchProjects(ctx context.Context) ([]AsanaProject, erro
 func (p *AsanaProvider) fetchWorkspaces(ctx context.Context, pat string) ([]asanaWorkspace, error) {
 	url := fmt.Sprintf("%s/workspaces", p.apiBase)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+pat)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch workspaces: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Asana API returned status %d for workspaces", resp.StatusCode)
-	}
-
 	var wsResp asanaWorkspacesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&wsResp); err != nil {
-		return nil, fmt.Errorf("failed to parse workspaces response: %w", err)
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &wsResp); err != nil {
+		return nil, err
 	}
 
 	return wsResp.Data, nil
@@ -319,27 +284,10 @@ func (p *AsanaProvider) fetchWorkspaceProjects(ctx context.Context, pat, workspa
 
 // fetchProjectsPage fetches a single page of projects and returns the projects and the next page offset.
 func (p *AsanaProvider) fetchProjectsPage(ctx context.Context, pat, requestURL string) ([]asanaProject, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+pat)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to fetch projects: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("Asana API returned status %d for projects", resp.StatusCode)
-	}
-
 	var projResp asanaProjectsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&projResp); err != nil {
-		return nil, "", fmt.Errorf("failed to parse projects response: %w", err)
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, requestURL, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &projResp); err != nil {
+		return nil, "", err
 	}
 
 	var nextOffset string
@@ -386,12 +334,6 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 
 	// Fetch current tags on the task to find the GID for the target label.
 	tagsURL := fmt.Sprintf("%s/tasks/%s?opt_fields=tags.gid,tags.name", p.apiBase, issueID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tagsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+pat)
-	req.Header.Set("Accept", "application/json")
 
 	type taskTagsResponse struct {
 		Data struct {
@@ -399,19 +341,10 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 		} `json:"data"`
 	}
 
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to fetch task tags: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Asana API returned status %d fetching task tags", resp.StatusCode)
-	}
-
 	var tagsResp taskTagsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err != nil {
-		return fmt.Errorf("failed to parse task tags response: %w", err)
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, tagsURL, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &tagsResp); err != nil {
+		return err
 	}
 
 	// Find the tag GID matching the label name.
@@ -431,25 +364,9 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 	removeURL := fmt.Sprintf("%s/tasks/%s/removeTag", p.apiBase, issueID)
 	tagJSON, _ := json.Marshal(tagGID)
 	removeBody := fmt.Sprintf(`{"data":{"tag":%s}}`, tagJSON)
-	removeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, removeURL, strings.NewReader(removeBody))
-	if err != nil {
-		return fmt.Errorf("failed to create remove tag request: %w", err)
-	}
-	removeReq.Header.Set("Authorization", "Bearer "+pat)
-	removeReq.Header.Set("Content-Type", "application/json")
-	removeReq.Header.Set("Accept", "application/json")
 
-	removeResp, err := p.httpClient.Do(removeReq)
-	if err != nil {
-		return fmt.Errorf("failed to remove tag: %w", err)
-	}
-	defer removeResp.Body.Close()
-
-	if removeResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Asana API returned status %d removing tag", removeResp.StatusCode)
-	}
-
-	return nil
+	return apiRequest(ctx, p.httpClient, http.MethodPost, removeURL, strings.NewReader(removeBody),
+		"Bearer "+pat, http.StatusOK, "", "Asana", nil)
 }
 
 // Comment adds a comment (story) to an Asana task.
@@ -463,23 +380,7 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
 	textJSON, _ := json.Marshal(body)
 	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, storiesURL, strings.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+pat)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
 
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to create story: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("Asana API returned status %d creating story", resp.StatusCode)
-	}
-
-	return nil
+	return apiRequest(ctx, p.httpClient, http.MethodPost, storiesURL, strings.NewReader(reqBody),
+		"Bearer "+pat, http.StatusCreated, "", "Asana", nil)
 }

@@ -656,7 +656,7 @@ func (d *Daemon) checkDockerHealth() bool {
 
 // defaultDockerHealthCheck runs "docker version" with a 5-second timeout.
 func defaultDockerHealthCheck() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutDockerHealth)
 	defer cancel()
 	return osexec.CommandContext(ctx, "docker", "version").Run()
 }

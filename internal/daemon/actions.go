@@ -456,9 +456,9 @@ func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) w
 	}
 
 	// Fetch CI failure logs
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	logs, err := fetchCIFailureLogs(ctx, sess.RepoPath, item.Branch)
@@ -494,9 +494,9 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	// Check max rounds
@@ -522,12 +522,9 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 	})
 
 	// Perform the rebase
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
-	rebaseCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	rebaseCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
 	defer cancel()
 
 	result, err := d.gitService.RebaseBranchWithStatus(rebaseCtx, workDir, item.Branch, baseBranch)
@@ -558,9 +555,9 @@ func (a *squashAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	// Refresh stale session to ensure worktree exists.
@@ -572,14 +569,11 @@ func (a *squashAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
 	message := ac.Params.String("message", "")
 
-	squashCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	squashCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
 	defer cancel()
 
 	if err := d.gitService.SquashBranch(squashCtx, workDir, item.Branch, baseBranch, message); err != nil {
@@ -605,9 +599,9 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	// Check max rounds
@@ -627,10 +621,7 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 	}
 
 	// Abort any stale merge that may be in progress from a previous attempt
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 
 	mergeInProgress, _ := d.gitService.IsMergeInProgress(ctx, workDir)
 	if mergeInProgress {
@@ -644,7 +635,7 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 	})
 
 	// Merge base branch into feature branch
-	mergeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	mergeCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
 	defer cancel()
 
 	conflictedFiles, err := d.gitService.MergeBaseIntoBranch(mergeCtx, workDir, baseBranch)
@@ -736,13 +727,13 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 		return workflow.ActionResult{Error: fmt.Errorf("max review rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	// Fetch review comments
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	comments, err := d.gitService.FetchPRReviewComments(pollCtx, sess.RepoPath, item.Branch)
@@ -792,23 +783,20 @@ func (a *aiReviewAction) Execute(ctx context.Context, ac *workflow.ActionContext
 		return workflow.ActionResult{Error: fmt.Errorf("max AI review rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	// Compute the work directory and base branch for the diff
-	workDir := sess.WorkTree
-	if workDir == "" {
-		workDir = sess.RepoPath
-	}
+	workDir := sess.GetWorkDir()
 	baseBranch := sess.BaseBranch
 	if baseBranch == "" {
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
 	// Get the branch diff
-	diffCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	diffCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
 	diff, err := getAIReviewDiff(diffCtx, workDir, baseBranch)
@@ -957,7 +945,7 @@ func (d *Daemon) sendSlackNotification(ctx context.Context, item daemonstate.Wor
 		return fmt.Errorf("failed to marshal Slack payload: %w", err)
 	}
 
-	notifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	notifyCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(notifyCtx, http.MethodPost, webhookURL, bytes.NewReader(body))
@@ -993,9 +981,9 @@ func (a *writePRDescriptionAction) Execute(ctx context.Context, ac *workflow.Act
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	if err := d.writePRDescription(ctx, item, sess); err != nil {
@@ -1021,9 +1009,9 @@ func (a *cherryPickAction) Execute(ctx context.Context, ac *workflow.ActionConte
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		return workflow.ActionResult{Error: fmt.Errorf("session not found")}
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
 	}
 
 	targetBranch := ac.Params.String("target_branch", "")
@@ -1036,7 +1024,7 @@ func (a *cherryPickAction) Execute(ctx context.Context, ac *workflow.ActionConte
 		return workflow.ActionResult{Error: err}
 	}
 
-	cherryCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	cherryCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
 	defer cancel()
 
 	if err := d.gitService.CherryPick(cherryCtx, sess.RepoPath, targetBranch, commits); err != nil {
