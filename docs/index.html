@@ -1231,6 +1231,7 @@
             <a href="#events-pr" class="sidebar-sublink">pr</a>
             <a href="#events-ci" class="sidebar-sublink">ci</a>
             <a href="#events-plan" class="sidebar-sublink">plan</a>
+            <a href="#events-asana" class="sidebar-sublink">asana</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
@@ -2859,6 +2860,48 @@
           </div>
         </div>
 
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.move_to_section</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Moves the Asana task to a named section within its configured
+            project board. Use this to reflect workflow progress on the board
+            (e.g., move a card to &ldquo;In Review&rdquo; after opening a PR).
+            Requires the <code>ASANA_PAT</code> environment variable to be set
+            and an Asana provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Name of the board section to move the task into. Matched
+                    case-insensitively against the project's sections.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
         <h3 id="actions-linear">Linear actions</h3>
 
         <div class="action-ref">
@@ -3907,6 +3950,66 @@ https://github.com/your-org/your-repo/pull/99</pre
                   <td>user_feedback_author</td>
                   <td>string</td>
                   <td>Username or display name of the commenter.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="events-asana">Asana events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.in_section</span>
+          </div>
+          <p class="action-desc">
+            Fires when the Asana task has been moved to a specific named section
+            within its configured project. Use this to gate on human board
+            movements — for example, waiting for a PM to drag a card into
+            &ldquo;Ready for Review&rdquo; before Claude opens a PR. Requires
+            the <code>ASANA_PAT</code> environment variable and an Asana
+            provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Section name to watch for. Matched case-insensitively
+                    against the task's current section within the configured
+                    project.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td>The section name as specified in the workflow params.</td>
                 </tr>
               </tbody>
             </table>
