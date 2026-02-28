@@ -1207,6 +1207,7 @@
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
             <a href="#workflow" class="sidebar-link">Configuration</a>
+            <a href="#source-filter" class="sidebar-sublink">source.filter</a>
             <a href="#states" class="sidebar-link">State types</a>
             <a href="#state-task" class="sidebar-sublink">task</a>
             <a href="#state-wait" class="sidebar-sublink">wait</a>
@@ -1512,7 +1513,8 @@
           <pre><span class="ck">source:</span>
   <span class="ck">provider:</span> <span class="cv">github</span>            <span class="cc"># github | asana | linear</span>
   <span class="ck">filter:</span>
-    <span class="ck">label:</span> <span class="cv">queued</span>              <span class="cc"># matches labels (GitHub), tags (Asana), or labels (Linear)</span>
+    <span class="ck">label:</span> <span class="cv">queued</span>              <span class="cc"># GitHub/Linear: issue label; Asana: tag name (optional when section is set)</span>
+    <span class="ck">section:</span> <span class="cv">Todo</span>             <span class="cc"># Asana only: poll tasks in this board section instead of by tag</span>
 
 <span class="ck">states:</span>
   <span class="ck">coding:</span>
@@ -1548,6 +1550,58 @@
     <span class="ck">params:</span>
       <span class="ck">method:</span> <span class="cv">squash</span>            <span class="cc"># rebase | squash | merge</span></pre>
         </div>
+
+        <h3 id="source-filter">source.filter keys</h3>
+        <p>
+          The <code>filter</code> block under <code>source</code> controls which
+          issues or tasks erg picks up. Available keys depend on the provider.
+        </p>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Provider</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>label</code></td>
+              <td>GitHub, Asana, Linear</td>
+              <td>
+                GitHub and Linear: issue label to poll. Asana: tag name to
+                filter by. Optional for Asana when <code>section</code> is set —
+                use it to narrow within a section if needed.
+              </td>
+            </tr>
+            <tr>
+              <td><code>project</code></td>
+              <td>Asana</td>
+              <td>
+                Asana project GID. Required for all Asana workflows. Found in
+                the project URL:
+                <code>app.asana.com/0/<strong>{gid}</strong>/list</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>section</code></td>
+              <td>Asana</td>
+              <td>
+                Board section name to poll. When set, erg fetches tasks from
+                that specific section rather than the whole project, enabling
+                kanban-style workflows where section position — not tags —
+                drives the lifecycle. Matched case-insensitively. If
+                <code>label</code> is also set, it is applied as an additional
+                tag filter on top of the section results.
+              </td>
+            </tr>
+            <tr>
+              <td><code>team</code></td>
+              <td>Linear</td>
+              <td>Linear team ID. Required for Linear workflows.</td>
+            </tr>
+          </tbody>
+        </table>
 
         <!-- State types -->
         <h3 id="states">State types</h3>
