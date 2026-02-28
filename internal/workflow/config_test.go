@@ -18,6 +18,8 @@ func TestDurationUnmarshalYAML(t *testing.T) {
 		{name: "2 hours", input: "2h", want: 2 * time.Hour},
 		{name: "1h30m", input: "1h30m", want: 90 * time.Minute},
 		{name: "45s", input: "45s", want: 45 * time.Second},
+		{name: "7d", input: "7d", want: 7 * 24 * time.Hour},
+		{name: "1d12h", input: "1d12h", want: 36 * time.Hour},
 		{name: "invalid", input: "bogus", wantErr: true},
 	}
 

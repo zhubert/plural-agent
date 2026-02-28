@@ -72,7 +72,7 @@ func (p *ParamHelper) Duration(key string, defaultVal time.Duration) time.Durati
 	if !ok {
 		return defaultVal
 	}
-	d, err := time.ParseDuration(s)
+	d, err := parseDuration(s)
 	if err != nil {
 		return defaultVal
 	}

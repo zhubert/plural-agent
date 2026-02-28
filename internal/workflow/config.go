@@ -108,13 +108,61 @@ type Duration struct {
 	time.Duration
 }
 
+// parseDuration parses a duration string, extending time.ParseDuration with
+// support for the "d" (days) unit, e.g. "7d" → 168h.
+func parseDuration(s string) (time.Duration, error) {
+	// Strip a leading "d"-suffixed segment and convert to hours.
+	// Supports simple forms like "7d" or compound "1d12h".
+	result := time.Duration(0)
+	rest := s
+	for len(rest) > 0 {
+		// Find the next numeric prefix.
+		i := 0
+		for i < len(rest) && (rest[i] >= '0' && rest[i] <= '9' || rest[i] == '.') {
+			i++
+		}
+		if i == 0 {
+			break
+		}
+		// Find the unit suffix.
+		j := i
+		for j < len(rest) && rest[j] >= 'a' && rest[j] <= 'z' {
+			j++
+		}
+		if j == i {
+			break
+		}
+		unit := rest[i:j]
+		if unit == "d" {
+			// Parse the numeric part manually.
+			var days float64
+			if _, err := fmt.Sscanf(rest[:i], "%f", &days); err != nil {
+				return 0, fmt.Errorf("invalid duration %q", s)
+			}
+			result += time.Duration(days * 24 * float64(time.Hour))
+			rest = rest[j:]
+		} else {
+			// Let time.ParseDuration handle the remainder (or full string).
+			d, err := time.ParseDuration(rest)
+			if err != nil {
+				return 0, err
+			}
+			return result + d, nil
+		}
+	}
+	if rest != "" {
+		return 0, fmt.Errorf("invalid duration %q", s)
+	}
+	return result, nil
+}
+
 // UnmarshalYAML implements yaml.Unmarshaler for Duration.
 func (d *Duration) UnmarshalYAML(unmarshal func(any) error) error {
 	var s string
 	if err := unmarshal(&s); err != nil {
 		return err
 	}
-	parsed, err := time.ParseDuration(s)
+	parsed, err := parseDuration(s)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q: %w", s, err)
 	}
