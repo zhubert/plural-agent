@@ -369,6 +369,86 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 		"Bearer "+pat, http.StatusOK, "", "Asana", nil)
 }
 
+// asanaTaskTagsResponse is the response when fetching a task's tags.
+type asanaTaskTagsResponse struct {
+	Data struct {
+		Tags []asanaTag `json:"tags"`
+	} `json:"data"`
+}
+
+// CheckIssueHasLabel returns true if the Asana task has a tag matching label.
+// Implements ProviderGateChecker.
+func (p *AsanaProvider) CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error) {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return false, fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	url := fmt.Sprintf("%s/tasks/%s?opt_fields=tags.name", p.apiBase, issueID)
+
+	var tagsResp asanaTaskTagsResponse
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &tagsResp); err != nil {
+		return false, err
+	}
+
+	for _, tag := range tagsResp.Data.Tags {
+		if strings.EqualFold(tag.Name, label) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// asanaStory represents a single story (comment) on an Asana task.
+type asanaStory struct {
+	Type      string `json:"type"`
+	Text      string `json:"text"`
+	CreatedAt string `json:"created_at"`
+	CreatedBy struct {
+		Name string `json:"name"`
+	} `json:"created_by"`
+}
+
+// asanaStoriesResponse is the response when fetching a task's stories.
+type asanaStoriesResponse struct {
+	Data []asanaStory `json:"data"`
+}
+
+// GetIssueComments returns all comments (stories of type "comment") on an Asana task.
+// Implements ProviderGateChecker.
+func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error) {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=type,text,created_at,created_by.name", p.apiBase, issueID)
+
+	var storiesResp asanaStoriesResponse
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &storiesResp); err != nil {
+		return nil, err
+	}
+
+	var comments []IssueComment
+	for _, story := range storiesResp.Data {
+		if story.Type != "comment" {
+			continue
+		}
+		if story.Text == "" {
+			continue
+		}
+		createdAt, _ := time.Parse(time.RFC3339, story.CreatedAt)
+		comments = append(comments, IssueComment{
+			Author:    story.CreatedBy.Name,
+			Body:      story.Text,
+			CreatedAt: createdAt,
+		})
+	}
+	return comments, nil
+}
+
 // Comment adds a comment (story) to an Asana task.
 // Implements ProviderActions.
 func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID string, body string) error {

@@ -2,11 +2,13 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/workflow"
 )
 
@@ -358,7 +360,7 @@ func (c *eventChecker) checkCIWaitForChecks(ctx context.Context, params *workflo
 
 // checkGateApproved implements the gate.approved event.
 // It pauses the workflow until a human provides an explicit approval signal
-// on the GitHub issue. Two trigger modes are supported:
+// on the issue. Supports GitHub, Asana, and Linear. Two trigger modes are supported:
 //
 //   - label_added (default): fires when the configured label is present on the issue.
 //   - comment_match: fires when a comment matching the configured regex pattern is
@@ -373,19 +375,9 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "event", "gate.approved")
 
-	// Resolve issue number from the work item's IssueRef.
 	workItem, ok := d.state.GetWorkItem(item.ID)
 	if !ok {
 		log.Warn("work item not found")
-		return false, nil, nil
-	}
-	if workItem.IssueRef.Source != "github" {
-		log.Debug("gate.approved only supports github issues", "source", workItem.IssueRef.Source)
-		return false, nil, nil
-	}
-	issueNumber, err := strconv.Atoi(workItem.IssueRef.ID)
-	if err != nil {
-		log.Warn("invalid issue number", "id", workItem.IssueRef.ID, "error", err)
 		return false, nil, nil
 	}
 
@@ -398,14 +390,16 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
+	source := workItem.IssueRef.Source
+	issueID := workItem.IssueRef.ID
 	trigger := params.String("trigger", "label_added")
 
 	switch trigger {
 	case "label_added":
 		label := params.String("label", "approved")
-		log.Debug("checking for label", "label", label, "issueNumber", issueNumber)
+		log.Debug("checking for label", "label", label, "issueID", issueID, "source", source)
 
-		hasLabel, err := d.gitService.CheckIssueHasLabel(pollCtx, repoPath, issueNumber, label)
+		hasLabel, err := c.issueHasLabel(pollCtx, repoPath, source, issueID, label)
 		if err != nil {
 			log.Debug("failed to check issue label", "error", err)
 			return false, nil, nil
@@ -429,9 +423,9 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 			return false, nil, nil
 		}
 
-		log.Debug("checking for matching comment", "pattern", pattern, "issueNumber", issueNumber, "since", item.StepEnteredAt)
+		log.Debug("checking for matching comment", "pattern", pattern, "issueID", issueID, "since", item.StepEnteredAt)
 
-		comments, err := d.gitService.GetIssueComments(pollCtx, repoPath, issueNumber)
+		comments, err := c.issueComments(pollCtx, repoPath, source, issueID)
 		if err != nil {
 			log.Debug("failed to fetch issue comments", "error", err)
 			return false, nil, nil
@@ -456,10 +450,69 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 	}
 }
 
+// issueHasLabel checks if an issue has the given label, supporting GitHub, Asana, and Linear.
+func (c *eventChecker) issueHasLabel(ctx context.Context, repoPath, source, issueID, label string) (bool, error) {
+	d := c.daemon
+	if source == "github" {
+		issueNumber, err := strconv.Atoi(issueID)
+		if err != nil {
+			return false, fmt.Errorf("invalid github issue number %q: %w", issueID, err)
+		}
+		return d.gitService.CheckIssueHasLabel(ctx, repoPath, issueNumber, label)
+	}
+
+	if d.issueRegistry == nil {
+		return false, fmt.Errorf("no issue registry configured for source %q", source)
+	}
+	p := d.issueRegistry.GetProvider(issues.Source(source))
+	if p == nil {
+		return false, fmt.Errorf("no provider found for source %q", source)
+	}
+	gc, ok := p.(issues.ProviderGateChecker)
+	if !ok {
+		return false, fmt.Errorf("provider for source %q does not support gate checking", source)
+	}
+	return gc.CheckIssueHasLabel(ctx, repoPath, issueID, label)
+}
+
+// issueComments returns all comments on an issue, supporting GitHub, Asana, and Linear.
+func (c *eventChecker) issueComments(ctx context.Context, repoPath, source, issueID string) ([]issues.IssueComment, error) {
+	d := c.daemon
+	if source == "github" {
+		issueNumber, err := strconv.Atoi(issueID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid github issue number %q: %w", issueID, err)
+		}
+		gitComments, err := d.gitService.GetIssueComments(ctx, repoPath, issueNumber)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]issues.IssueComment, len(gitComments))
+		for i, gc := range gitComments {
+			result[i] = issues.IssueComment{Author: gc.Author, Body: gc.Body, CreatedAt: gc.CreatedAt}
+		}
+		return result, nil
+	}
+
+	if d.issueRegistry == nil {
+		return nil, fmt.Errorf("no issue registry configured for source %q", source)
+	}
+	p := d.issueRegistry.GetProvider(issues.Source(source))
+	if p == nil {
+		return nil, fmt.Errorf("no provider found for source %q", source)
+	}
+	gc, ok := p.(issues.ProviderGateChecker)
+	if !ok {
+		return nil, fmt.Errorf("provider for source %q does not support gate checking", source)
+	}
+	return gc.GetIssueComments(ctx, repoPath, issueID)
+}
+
 // checkPlanUserReplied implements the plan.user_replied event.
-// It fires when a human posts a comment on the GitHub issue after the current
+// It fires when a human posts a comment on the issue after the current
 // plan_review step was entered, allowing the workflow to loop back for re-planning
 // or advance to coding based on the comment content.
+// Supports GitHub, Asana, and Linear.
 //
 // Params:
 //
@@ -471,7 +524,7 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 //
 //	plan_approved        - true if the comment matched approval_pattern, false otherwise
 //	user_feedback        - comment body (always set; useful for re-planning context)
-//	user_feedback_author - GitHub username of the commenter
+//	user_feedback_author - username or display name of the commenter
 func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
 	d := c.daemon
 	log := d.logger.With("workItem", item.ID, "event", "plan.user_replied")
@@ -479,15 +532,6 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 	workItem, ok := d.state.GetWorkItem(item.ID)
 	if !ok {
 		log.Warn("work item not found")
-		return false, nil, nil
-	}
-	if workItem.IssueRef.Source != "github" {
-		log.Debug("plan.user_replied only supports github issues", "source", workItem.IssueRef.Source)
-		return false, nil, nil
-	}
-	issueNumber, err := strconv.Atoi(workItem.IssueRef.ID)
-	if err != nil {
-		log.Warn("invalid issue number", "id", workItem.IssueRef.ID, "error", err)
 		return false, nil, nil
 	}
 
@@ -500,7 +544,7 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
 	defer cancel()
 
-	comments, err := d.gitService.GetIssueComments(pollCtx, repoPath, issueNumber)
+	comments, err := c.issueComments(pollCtx, repoPath, workItem.IssueRef.Source, workItem.IssueRef.ID)
 	if err != nil {
 		log.Debug("failed to fetch issue comments", "error", err)
 		return false, nil, nil

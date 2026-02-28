@@ -11,8 +11,46 @@ import (
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/workflow"
 )
+
+// mockGateProvider is a test double that implements Provider and ProviderGateChecker.
+type mockGateProvider struct {
+	src      issues.Source
+	hasLabel bool
+	labelErr error
+	comments []issues.IssueComment
+	commErr  error
+}
+
+func (m *mockGateProvider) Name() string                             { return string(m.src) }
+func (m *mockGateProvider) Source() issues.Source                    { return m.src }
+func (m *mockGateProvider) IsConfigured(_ string) bool               { return true }
+func (m *mockGateProvider) GenerateBranchName(_ issues.Issue) string { return "" }
+func (m *mockGateProvider) GetPRLinkText(_ issues.Issue) string      { return "" }
+func (m *mockGateProvider) FetchIssues(_ context.Context, _ string, _ issues.FilterConfig) ([]issues.Issue, error) {
+	return nil, nil
+}
+func (m *mockGateProvider) CheckIssueHasLabel(_ context.Context, _, _, _ string) (bool, error) {
+	return m.hasLabel, m.labelErr
+}
+func (m *mockGateProvider) GetIssueComments(_ context.Context, _, _ string) ([]issues.IssueComment, error) {
+	return m.comments, m.commErr
+}
+
+// testDaemonWithGateProvider creates a daemon with a mock gate provider registered.
+func testDaemonWithGateProvider(cfg *config.Config, provider *mockGateProvider) *Daemon {
+	mockExec := exec.NewMockExecutor(nil)
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	registry := issues.NewProviderRegistry(provider)
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	return d
+}
 
 func TestCheckPRReviewed_PRClosed(t *testing.T) {
 	cfg := testConfig()
@@ -2546,5 +2584,314 @@ func TestCheckEvent_PlanUserReplied_Routed(t *testing.T) {
 	}
 	if data["user_feedback_author"] != "frank" {
 		t.Errorf("expected user_feedback_author=frank, got %v", data["user_feedback_author"])
+	}
+}
+
+// --- gate.approved with Asana/Linear ---
+
+func TestCheckGateApproved_Asana_LabelAdded_Fires(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, hasLabel: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Asana task has label")
+	}
+	if data["gate_approved"] != true {
+		t.Error("expected gate_approved=true in data")
+	}
+	if data["gate_trigger"] != "label_added" {
+		t.Errorf("expected gate_trigger=label_added, got %v", data["gate_trigger"])
+	}
+}
+
+func TestCheckGateApproved_Asana_LabelAdded_LabelAbsent(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, hasLabel: false}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when Asana task does not have label")
+	}
+}
+
+func TestCheckGateApproved_Asana_CommentMatch_Fires(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{Author: "alice", Body: "/approve this", CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Asana comment matches pattern")
+	}
+	if data["gate_comment_author"] != "alice" {
+		t.Errorf("expected gate_comment_author=alice, got %v", data["gate_comment_author"])
+	}
+}
+
+func TestCheckGateApproved_Linear_LabelAdded_Fires(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, hasLabel: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Linear issue has label")
+	}
+	if data["gate_label"] != "approved" {
+		t.Errorf("expected gate_label=approved, got %v", data["gate_label"])
+	}
+}
+
+func TestCheckGateApproved_Linear_CommentMatch_Fires(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+	provider := &mockGateProvider{
+		src: issues.SourceLinear,
+		comments: []issues.IssueComment{
+			{Author: "bob", Body: "/approve LGTM", CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Linear comment matches pattern")
+	}
+	if data["gate_comment_author"] != "bob" {
+		t.Errorf("expected gate_comment_author=bob, got %v", data["gate_comment_author"])
+	}
+}
+
+func TestCheckGateApproved_NoProvider(t *testing.T) {
+	// Asana issue with no provider registered — should return fired=false (not an error).
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-abc"},
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "label_added", "label": "approved"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when no provider is registered for source")
+	}
+}
+
+// --- plan.user_replied with Asana/Linear ---
+
+func TestCheckPlanUserReplied_Asana_Fires(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{Author: "reviewer", Body: "Looks great, proceed!", CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-456"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Asana user posts a comment")
+	}
+	if data["user_feedback"] != "Looks great, proceed!" {
+		t.Errorf("expected user_feedback, got %v", data["user_feedback"])
+	}
+	if data["user_feedback_author"] != "reviewer" {
+		t.Errorf("expected user_feedback_author=reviewer, got %v", data["user_feedback_author"])
+	}
+}
+
+func TestCheckPlanUserReplied_Linear_Fires(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+	provider := &mockGateProvider{
+		src: issues.SourceLinear,
+		comments: []issues.IssueComment{
+			{Author: "lead", Body: "All good, go ahead", CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-789"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when Linear user posts a comment")
+	}
+	if data["user_feedback_author"] != "lead" {
+		t.Errorf("expected user_feedback_author=lead, got %v", data["user_feedback_author"])
+	}
+}
+
+func TestCheckPlanUserReplied_Asana_NoProvider(t *testing.T) {
+	// Asana issue with no provider registered — should return fired=false.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-abc"},
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when no provider is registered")
 	}
 }

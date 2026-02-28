@@ -263,6 +263,78 @@ func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variab
 		apiKey, http.StatusOK, forbiddenMsg, "Linear", result)
 }
 
+// CheckIssueHasLabel returns true if the Linear issue has a label matching the given name.
+// Implements ProviderGateChecker.
+func (p *LinearProvider) CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error) {
+	var labelsResp linearIssueLabelsResponse
+	if err := p.linearGraphQL(ctx, linearIssueLabelsQuery, map[string]any{"id": issueID}, "", &labelsResp); err != nil {
+		return false, fmt.Errorf("failed to fetch issue labels: %w", err)
+	}
+
+	for _, l := range labelsResp.Data.Issue.Labels.Nodes {
+		if strings.EqualFold(l.Name, label) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// linearIssueCommentsQuery fetches comments on a Linear issue by identifier.
+const linearIssueCommentsQuery = `query($id: String!) {
+  issue(id: $id) {
+    comments {
+      nodes {
+        body
+        createdAt
+        user {
+          name
+        }
+      }
+    }
+  }
+}`
+
+// linearIssueCommentsResponse is the GraphQL response for issue comments.
+type linearIssueCommentsResponse struct {
+	Data struct {
+		Issue struct {
+			Comments struct {
+				Nodes []struct {
+					Body      string `json:"body"`
+					CreatedAt string `json:"createdAt"`
+					User      struct {
+						Name string `json:"name"`
+					} `json:"user"`
+				} `json:"nodes"`
+			} `json:"comments"`
+		} `json:"issue"`
+	} `json:"data"`
+}
+
+// GetIssueComments returns all comments on a Linear issue, ordered oldest first.
+// Implements ProviderGateChecker.
+func (p *LinearProvider) GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error) {
+	var commentsResp linearIssueCommentsResponse
+	if err := p.linearGraphQL(ctx, linearIssueCommentsQuery, map[string]any{"id": issueID}, "", &commentsResp); err != nil {
+		return nil, fmt.Errorf("failed to fetch issue comments: %w", err)
+	}
+
+	nodes := commentsResp.Data.Issue.Comments.Nodes
+	comments := make([]IssueComment, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Body == "" {
+			continue
+		}
+		createdAt, _ := time.Parse(time.RFC3339, n.CreatedAt)
+		comments = append(comments, IssueComment{
+			Author:    n.User.Name,
+			Body:      n.Body,
+			CreatedAt: createdAt,
+		})
+	}
+	return comments, nil
+}
+
 // RemoveLabel removes a label from a Linear issue by name.
 // It fetches the current labels to find the label ID, then updates the issue
 // with the label removed.

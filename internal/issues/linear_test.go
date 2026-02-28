@@ -664,6 +664,216 @@ func TestLinearProvider_ImplementsProviderActions(t *testing.T) {
 	var _ ProviderActions = (*LinearProvider)(nil)
 }
 
+func TestLinearProvider_ImplementsProviderGateChecker(t *testing.T) {
+	var _ ProviderGateChecker = (*LinearProvider)(nil)
+}
+
+// --- CheckIssueHasLabel tests ---
+
+func TestLinearProvider_CheckIssueHasLabel_Found(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var gqlReq linearGraphQLRequest
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gqlReq)
+
+		w.Header().Set("Content-Type", "application/json")
+		resp := linearIssueLabelsResponse{}
+		resp.Data.Issue.ID = "uuid-eng-123"
+		resp.Data.Issue.Labels.Nodes = []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}{
+			{ID: "lbl-1", Name: "approved"},
+			{ID: "lbl-2", Name: "bug"},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	has, err := p.CheckIssueHasLabel(context.Background(), "/repo", "ENG-123", "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Error("expected has=true when label is present")
+	}
+}
+
+func TestLinearProvider_CheckIssueHasLabel_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := linearIssueLabelsResponse{}
+		resp.Data.Issue.ID = "uuid-eng-123"
+		resp.Data.Issue.Labels.Nodes = []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}{
+			{ID: "lbl-2", Name: "bug"},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	has, err := p.CheckIssueHasLabel(context.Background(), "/repo", "ENG-123", "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Error("expected has=false when label is absent")
+	}
+}
+
+func TestLinearProvider_CheckIssueHasLabel_CaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := linearIssueLabelsResponse{}
+		resp.Data.Issue.ID = "uuid-eng-123"
+		resp.Data.Issue.Labels.Nodes = []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}{
+			{ID: "lbl-1", Name: "Approved"},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	has, err := p.CheckIssueHasLabel(context.Background(), "/repo", "ENG-123", "approved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Error("expected has=true for case-insensitive label match")
+	}
+}
+
+func TestLinearProvider_CheckIssueHasLabel_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	p := NewLinearProvider(nil)
+
+	_, err := p.CheckIssueHasLabel(context.Background(), "/repo", "ENG-123", "approved")
+	if err == nil {
+		t.Error("expected error without API key")
+	}
+}
+
+// --- GetIssueComments tests ---
+
+func TestLinearProvider_GetIssueComments_ReturnsComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := linearIssueCommentsResponse{}
+		resp.Data.Issue.Comments.Nodes = []struct {
+			Body      string `json:"body"`
+			CreatedAt string `json:"createdAt"`
+			User      struct {
+				Name string `json:"name"`
+			} `json:"user"`
+		}{
+			{Body: "Looks good!", CreatedAt: "2024-01-15T10:00:00Z", User: struct{ Name string `json:"name"` }{Name: "alice"}},
+			{Body: "Please fix the tests", CreatedAt: "2024-01-14T09:00:00Z", User: struct{ Name string `json:"name"` }{Name: "bob"}},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "ENG-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].Author != "alice" {
+		t.Errorf("expected author 'alice', got %q", comments[0].Author)
+	}
+	if comments[0].Body != "Looks good!" {
+		t.Errorf("expected body 'Looks good!', got %q", comments[0].Body)
+	}
+	if comments[0].CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be non-zero")
+	}
+	if comments[1].Author != "bob" {
+		t.Errorf("expected author 'bob', got %q", comments[1].Author)
+	}
+}
+
+func TestLinearProvider_GetIssueComments_EmptyBodyExcluded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := linearIssueCommentsResponse{}
+		resp.Data.Issue.Comments.Nodes = []struct {
+			Body      string `json:"body"`
+			CreatedAt string `json:"createdAt"`
+			User      struct {
+				Name string `json:"name"`
+			} `json:"user"`
+		}{
+			{Body: "", CreatedAt: "2024-01-15T10:00:00Z", User: struct{ Name string `json:"name"` }{Name: "alice"}},
+			{Body: "real comment", CreatedAt: "2024-01-15T11:00:00Z", User: struct{ Name string `json:"name"` }{Name: "bob"}},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "ENG-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment (empty body excluded), got %d", len(comments))
+	}
+	if comments[0].Author != "bob" {
+		t.Errorf("expected author 'bob', got %q", comments[0].Author)
+	}
+}
+
+func TestLinearProvider_GetIssueComments_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	p := NewLinearProvider(nil)
+
+	_, err := p.GetIssueComments(context.Background(), "/repo", "ENG-123")
+	if err == nil {
+		t.Error("expected error without API key")
+	}
+}
+
 // contains checks if a string contains a substring.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)

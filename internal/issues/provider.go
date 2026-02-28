@@ -4,6 +4,7 @@ package issues
 
 import (
 	"context"
+	"time"
 )
 
 // Source identifies the origin of an issue (GitHub, Asana, Linear, etc.)
@@ -110,4 +111,22 @@ func (r *ProviderRegistry) GetProvider(source Source) Provider {
 // AllProviders returns all registered providers.
 func (r *ProviderRegistry) AllProviders() []Provider {
 	return r.providers
+}
+
+// IssueComment represents a comment on an issue from any supported source.
+type IssueComment struct {
+	Author    string    // Username or display name
+	Body      string    // Comment text
+	CreatedAt time.Time // When the comment was posted
+}
+
+// ProviderGateChecker extends Provider with operations needed for gate/approval events.
+// Providers that support label checking and comment fetching implement this interface,
+// enabling gate.approved and plan.user_replied events to work across all sources.
+type ProviderGateChecker interface {
+	// CheckIssueHasLabel returns true if the issue/task currently has the given label or tag.
+	CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error)
+
+	// GetIssueComments returns all comments on the issue/task, ordered oldest first.
+	GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error)
 }
