@@ -449,6 +449,115 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 	return comments, nil
 }
 
+// asanaMembership represents a task's membership in a project section.
+type asanaMembership struct {
+	Project struct {
+		GID string `json:"gid"`
+	} `json:"project"`
+	Section struct {
+		GID  string `json:"gid"`
+		Name string `json:"name"`
+	} `json:"section"`
+}
+
+// asanaMembershipsResponse is the API response when fetching task memberships.
+type asanaMembershipsResponse struct {
+	Data struct {
+		Memberships []asanaMembership `json:"memberships"`
+	} `json:"data"`
+}
+
+// IsInSection returns true if the Asana task is currently in the named section
+// within its configured project. The section is matched case-insensitively.
+// Implements ProviderSectionChecker.
+func (p *AsanaProvider) IsInSection(ctx context.Context, repoPath string, issueID string, section string) (bool, error) {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return false, fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	projectGID := p.config.GetAsanaProject(repoPath)
+	if projectGID == "" {
+		return false, fmt.Errorf("Asana project GID not configured for this repository")
+	}
+
+	url := fmt.Sprintf("%s/tasks/%s?opt_fields=memberships.project.gid,memberships.section.name", p.apiBase, issueID)
+
+	var resp asanaMembershipsResponse
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &resp); err != nil {
+		return false, err
+	}
+
+	for _, m := range resp.Data.Memberships {
+		if m.Project.GID == projectGID && strings.EqualFold(m.Section.Name, section) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// asanaSection represents a section within an Asana project.
+type asanaSection struct {
+	GID  string `json:"gid"`
+	Name string `json:"name"`
+}
+
+// asanaSectionsResponse is the API response for listing sections.
+type asanaSectionsResponse struct {
+	Data []asanaSection `json:"data"`
+}
+
+// fetchSections retrieves all sections in a project.
+func (p *AsanaProvider) fetchSections(ctx context.Context, pat, projectGID string) ([]asanaSection, error) {
+	url := fmt.Sprintf("%s/projects/%s/sections?opt_fields=gid,name", p.apiBase, projectGID)
+
+	var resp asanaSectionsResponse
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK, "", "Asana", &resp); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
+// MoveToSection moves an Asana task to a named section within its configured project.
+// The section name is matched case-insensitively.
+// Implements ProviderSectionMover.
+func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	projectGID := p.config.GetAsanaProject(repoPath)
+	if projectGID == "" {
+		return fmt.Errorf("Asana project GID not configured for this repository")
+	}
+
+	sections, err := p.fetchSections(ctx, pat, projectGID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch sections: %w", err)
+	}
+
+	var sectionGID string
+	for _, s := range sections {
+		if strings.EqualFold(s.Name, section) {
+			sectionGID = s.GID
+			break
+		}
+	}
+	if sectionGID == "" {
+		return fmt.Errorf("section %q not found in project", section)
+	}
+
+	addTaskURL := fmt.Sprintf("%s/sections/%s/addTask", p.apiBase, sectionGID)
+	taskJSON, _ := json.Marshal(issueID)
+	reqBody := fmt.Sprintf(`{"data":{"task":%s}}`, taskJSON)
+
+	return apiRequest(ctx, p.httpClient, http.MethodPost, addTaskURL, strings.NewReader(reqBody),
+		"Bearer "+pat, http.StatusOK, "", "Asana", nil)
+}
+
 // Comment adds a comment (story) to an Asana task.
 // Implements ProviderActions.
 func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID string, body string) error {

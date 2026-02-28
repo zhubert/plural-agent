@@ -120,6 +120,25 @@ type IssueComment struct {
 	CreatedAt time.Time // When the comment was posted
 }
 
+// ProviderSectionChecker extends Provider with the ability to check which section
+// an issue/task is currently in. This is optional; only providers that support
+// board sections (e.g., Asana) need to implement it.
+type ProviderSectionChecker interface {
+	// IsInSection returns true if the issue/task is currently in the named section
+	// within its configured project. The section is matched case-insensitively.
+	IsInSection(ctx context.Context, repoPath string, issueID string, section string) (bool, error)
+}
+
+// ProviderSectionMover extends Provider with the ability to move an issue/task to a
+// named section on its board. This is optional; only providers that support board
+// sections (e.g., Asana) need to implement it.
+type ProviderSectionMover interface {
+	// MoveToSection moves the issue/task to the named section within its project.
+	// The section is matched case-insensitively. Returns an error if the section
+	// is not found or the API call fails.
+	MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error
+}
+
 // ProviderGateChecker extends Provider with operations needed for gate/approval events.
 // Providers that support label checking and comment fetching implement this interface,
 // enabling gate.approved and plan.user_replied events to work across all sources.

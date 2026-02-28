@@ -18,11 +18,13 @@ import (
 
 // mockGateProvider is a test double that implements Provider and ProviderGateChecker.
 type mockGateProvider struct {
-	src      issues.Source
-	hasLabel bool
-	labelErr error
-	comments []issues.IssueComment
-	commErr  error
+	src         issues.Source
+	hasLabel    bool
+	labelErr    error
+	comments    []issues.IssueComment
+	commErr     error
+	inSection   bool
+	sectionErr  error
 }
 
 func (m *mockGateProvider) Name() string                             { return string(m.src) }
@@ -38,6 +40,9 @@ func (m *mockGateProvider) CheckIssueHasLabel(_ context.Context, _, _, _ string)
 }
 func (m *mockGateProvider) GetIssueComments(_ context.Context, _, _ string) ([]issues.IssueComment, error) {
 	return m.comments, m.commErr
+}
+func (m *mockGateProvider) IsInSection(_ context.Context, _, _, _ string) (bool, error) {
+	return m.inSection, m.sectionErr
 }
 
 // testDaemonWithGateProvider creates a daemon with a mock gate provider registered.
@@ -2893,5 +2898,226 @@ func TestCheckPlanUserReplied_Asana_NoProvider(t *testing.T) {
 	}
 	if fired {
 		t.Error("expected fired=false when no provider is registered")
+	}
+}
+
+// --- asana.in_section event tests ---
+
+func TestCheckAsanaInSection_Fires(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when task is in the target section")
+	}
+	if data["section"] != "In Progress" {
+		t.Errorf("expected section=In Progress in data, got %v", data["section"])
+	}
+}
+
+func TestCheckAsanaInSection_NotFired(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, inSection: false}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when task is not in the target section")
+	}
+}
+
+func TestCheckAsanaInSection_WrongSource(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for non-asana issue source")
+	}
+}
+
+func TestCheckAsanaInSection_MissingSection(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{}) // no section param
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when section param is missing")
+	}
+}
+
+func TestCheckAsanaInSection_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	view := &workflow.WorkItemView{ID: "nonexistent"}
+
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when work item not found")
+	}
+}
+
+func TestCheckAsanaInSection_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg) // no provider registered
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-abc"},
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "Done"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when no asana provider is registered")
+	}
+}
+
+func TestCheckAsanaInSection_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{
+		src:        issues.SourceAsana,
+		sectionErr: fmt.Errorf("asana API error"),
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	// Provider errors are swallowed — we stay in wait state (fired=false, err=nil).
+	fired, _, err := checker.checkAsanaInSection(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false on provider error")
+	}
+}
+
+func TestCheckEvent_AsanaInSection_Dispatches(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceAsana, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_section",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"section": "Done"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.CheckEvent(context.Background(), "asana.in_section", params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected CheckEvent to dispatch to asana.in_section and fire")
 	}
 }

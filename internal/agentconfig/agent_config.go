@@ -257,5 +257,8 @@ func (c *AgentConfig) Save() error { return nil }
 // HasAsanaProject returns false; Asana projects are not configured in agent mode.
 func (c *AgentConfig) HasAsanaProject(_ string) bool { return false }
 
+// GetAsanaProject returns empty string; Asana projects are not configured in agent mode.
+func (c *AgentConfig) GetAsanaProject(_ string) string { return "" }
+
 // HasLinearTeam returns false; Linear teams are not configured in agent mode.
 func (c *AgentConfig) HasLinearTeam(_ string) bool { return false }

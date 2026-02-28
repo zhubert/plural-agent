@@ -37,6 +37,8 @@ func (c *eventChecker) CheckEvent(ctx context.Context, event string, params *wor
 		return c.checkGateApproved(ctx, params, item)
 	case "plan.user_replied":
 		return c.checkPlanUserReplied(ctx, params, item)
+	case "asana.in_section":
+		return c.checkAsanaInSection(ctx, params, item)
 	default:
 		return false, nil, nil
 	}
@@ -613,4 +615,76 @@ func isRecentCleanRebase(stepData map[string]any, grace time.Duration) bool {
 		return false
 	}
 	return time.Since(ts) < grace
+}
+
+// checkAsanaInSection implements the asana.in_section event.
+// It fires when the Asana task has been moved to a specific named section
+// within its configured project. Useful for gating on human board movements
+// (e.g., waiting for a card to be dragged to "Ready for Review").
+//
+// Params:
+//
+//	section - section name to watch for (case-insensitive)
+//
+// Data returned on fire:
+//
+//	section - the section name as specified in the workflow params
+func (c *eventChecker) checkAsanaInSection(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+	d := c.daemon
+	log := d.logger.With("workItem", item.ID, "event", "asana.in_section")
+
+	workItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		log.Warn("work item not found")
+		return false, nil, nil
+	}
+
+	if issues.Source(workItem.IssueRef.Source) != issues.SourceAsana {
+		log.Warn("asana.in_section skipped: not an asana issue", "source", workItem.IssueRef.Source)
+		return false, nil, nil
+	}
+
+	section := params.String("section", "")
+	if section == "" {
+		log.Warn("asana.in_section requires section param")
+		return false, nil, nil
+	}
+
+	repoPath := item.RepoPath
+	if repoPath == "" {
+		log.Warn("no repo path for work item")
+		return false, nil, nil
+	}
+
+	if d.issueRegistry == nil {
+		log.Debug("no issue registry configured")
+		return false, nil, nil
+	}
+	p := d.issueRegistry.GetProvider(issues.SourceAsana)
+	if p == nil {
+		log.Debug("asana provider not registered")
+		return false, nil, nil
+	}
+	sc, ok := p.(issues.ProviderSectionChecker)
+	if !ok {
+		log.Warn("asana provider does not support section checking")
+		return false, nil, nil
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
+	defer cancel()
+
+	inSection, err := sc.IsInSection(pollCtx, repoPath, workItem.IssueRef.ID, section)
+	if err != nil {
+		log.Debug("failed to check section", "section", section, "error", err)
+		return false, nil, nil
+	}
+
+	if inSection {
+		log.Info("task is in target section", "section", section)
+		return true, map[string]any{"section": section}, nil
+	}
+
+	log.Debug("task not yet in target section", "section", section)
+	return false, nil, nil
 }

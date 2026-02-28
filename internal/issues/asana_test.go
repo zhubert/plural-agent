@@ -331,6 +331,319 @@ func TestAsanaProvider_ImplementsProviderGateChecker(t *testing.T) {
 	var _ ProviderGateChecker = (*AsanaProvider)(nil)
 }
 
+func TestAsanaProvider_ImplementsProviderSectionMover(t *testing.T) {
+	var _ ProviderSectionMover = (*AsanaProvider)(nil)
+}
+
+func TestAsanaProvider_ImplementsProviderSectionChecker(t *testing.T) {
+	var _ ProviderSectionChecker = (*AsanaProvider)(nil)
+}
+
+// --- IsInSection tests ---
+
+func TestAsanaProvider_IsInSection_InTargetSection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/tasks/task-gid-456") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"memberships": []map[string]any{
+					{
+						"project": map[string]any{"gid": "proj-123"},
+						"section": map[string]any{"gid": "sec-abc", "name": "In Progress"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	inSection, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !inSection {
+		t.Error("expected inSection=true when task is in the target section")
+	}
+}
+
+func TestAsanaProvider_IsInSection_CaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"memberships": []map[string]any{
+					{
+						"project": map[string]any{"gid": "proj-123"},
+						"section": map[string]any{"gid": "sec-abc", "name": "In Progress"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	inSection, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "IN PROGRESS")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !inSection {
+		t.Error("expected case-insensitive match")
+	}
+}
+
+func TestAsanaProvider_IsInSection_DifferentSection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"memberships": []map[string]any{
+					{
+						"project": map[string]any{"gid": "proj-123"},
+						"section": map[string]any{"gid": "sec-abc", "name": "Backlog"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	inSection, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inSection {
+		t.Error("expected inSection=false when task is in a different section")
+	}
+}
+
+func TestAsanaProvider_IsInSection_ProjectMismatch(t *testing.T) {
+	// Task is in the target section but for a different project — should return false.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"memberships": []map[string]any{
+					{
+						"project": map[string]any{"gid": "other-proj"},
+						"section": map[string]any{"gid": "sec-abc", "name": "In Progress"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123") // configured project differs
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	inSection, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inSection {
+		t.Error("expected inSection=false when membership project does not match configured project")
+	}
+}
+
+func TestAsanaProvider_IsInSection_NoPAT(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProvider(cfg)
+
+	_, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err == nil {
+		t.Error("expected error without PAT")
+	}
+}
+
+func TestAsanaProvider_IsInSection_NoProjectConfigured(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{} // no project configured
+	p := NewAsanaProvider(cfg)
+
+	_, err := p.IsInSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err == nil {
+		t.Error("expected error when project not configured")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("expected 'not configured' in error, got: %v", err)
+	}
+}
+
+// --- MoveToSection tests ---
+
+func TestAsanaProvider_MoveToSection_Success(t *testing.T) {
+	var addTaskReq []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/projects/proj-123/sections"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"gid": "sec-abc", "name": "In Progress"},
+					{"gid": "sec-xyz", "name": "Done"},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/sections/sec-abc/addTask"):
+			addTaskReq, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(addTaskReq), "task-gid-456") {
+		t.Errorf("expected task GID in addTask request body, got: %s", addTaskReq)
+	}
+}
+
+func TestAsanaProvider_MoveToSection_CaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/projects/proj-123/sections"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"gid": "sec-abc", "name": "In Progress"},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/sections/sec-abc/addTask"):
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	// Matching "IN PROGRESS" against section named "In Progress".
+	err := p.MoveToSection(context.Background(), "/test/repo", "task-gid-456", "IN PROGRESS")
+	if err != nil {
+		t.Fatalf("expected case-insensitive match, got error: %v", err)
+	}
+}
+
+func TestAsanaProvider_MoveToSection_SectionNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"gid": "sec-abc", "name": "In Progress"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/test/repo", "task-gid-456", "Nonexistent Section")
+	if err == nil {
+		t.Error("expected error for section not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestAsanaProvider_MoveToSection_NoPAT(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "")
+
+	cfg := &config.Config{}
+	cfg.SetAsanaProject("/test/repo", "proj-123")
+	p := NewAsanaProvider(cfg)
+
+	err := p.MoveToSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err == nil {
+		t.Error("expected error without PAT")
+	}
+}
+
+func TestAsanaProvider_MoveToSection_NoProjectConfigured(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	cfg := &config.Config{} // no project configured
+	p := NewAsanaProvider(cfg)
+
+	err := p.MoveToSection(context.Background(), "/test/repo", "task-gid-456", "In Progress")
+	if err == nil {
+		t.Error("expected error when project not configured")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("expected 'not configured' in error, got: %v", err)
+	}
+}
+
 // --- CheckIssueHasLabel tests ---
 
 func TestAsanaProvider_CheckIssueHasLabel_Found(t *testing.T) {

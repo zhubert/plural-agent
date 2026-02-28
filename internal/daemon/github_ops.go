@@ -400,6 +400,39 @@ func (d *Daemon) removeLabel(ctx context.Context, item daemonstate.WorkItem, par
 	return d.gitService.RemoveIssueLabel(labelCtx, repoPath, issueNum, label)
 }
 
+// moveToSection moves an Asana task to a named section within its project.
+func (d *Daemon) moveToSection(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	if issues.Source(item.IssueRef.Source) != issues.SourceAsana {
+		d.logger.Warn("asana.move_to_section skipped: not an asana issue",
+			"workItem", item.ID, "source", item.IssueRef.Source)
+		return nil
+	}
+
+	section := params.String("section", "")
+	if section == "" {
+		return fmt.Errorf("section parameter is required")
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	p := d.issueRegistry.GetProvider(issues.SourceAsana)
+	if p == nil {
+		return fmt.Errorf("asana provider not registered")
+	}
+	sm, ok := p.(issues.ProviderSectionMover)
+	if !ok {
+		return fmt.Errorf("asana provider does not support moving to sections")
+	}
+
+	moveCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer cancel()
+
+	return sm.MoveToSection(moveCtx, repoPath, item.IssueRef.ID, section)
+}
+
 // closeIssue closes the GitHub issue for a work item.
 func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) error {
 	if item.IssueRef.Source != "github" {

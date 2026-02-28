@@ -4219,6 +4219,206 @@ func TestAsanaCommentAction_NoProvider(t *testing.T) {
 	}
 }
 
+// --- asanaMoveToSectionAction tests ---
+
+// mockSectionMoverProvider is a test double for Provider + ProviderSectionMover.
+type mockSectionMoverProvider struct {
+	src          issues.Source
+	moveErr      error
+	moveCalls    []mockMoveSectionCall
+}
+
+type mockMoveSectionCall struct {
+	repoPath string
+	issueID  string
+	section  string
+}
+
+func (m *mockSectionMoverProvider) Name() string                             { return string(m.src) }
+func (m *mockSectionMoverProvider) Source() issues.Source                    { return m.src }
+func (m *mockSectionMoverProvider) IsConfigured(_ string) bool               { return true }
+func (m *mockSectionMoverProvider) GenerateBranchName(_ issues.Issue) string { return "" }
+func (m *mockSectionMoverProvider) GetPRLinkText(_ issues.Issue) string      { return "" }
+func (m *mockSectionMoverProvider) FetchIssues(_ context.Context, _ string, _ issues.FilterConfig) ([]issues.Issue, error) {
+	return nil, nil
+}
+func (m *mockSectionMoverProvider) MoveToSection(_ context.Context, repoPath, issueID, section string) error {
+	m.moveCalls = append(m.moveCalls, mockMoveSectionCall{repoPath: repoPath, issueID: issueID, section: section})
+	return m.moveErr
+}
+
+func TestAsanaMoveToSectionAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestAsanaMoveToSectionAction_SourceMismatch(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	// Work item has linear source, not asana — should be a no-op.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "linear", ID: "LIN-1"},
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected no-op success for source mismatch, got error: %v", result.Error)
+	}
+	if len(provider.moveCalls) != 0 {
+		t.Error("expected MoveToSection not to be called for source mismatch")
+	}
+}
+
+func TestAsanaMoveToSectionAction_MissingSection(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{}) // no section param
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for missing section parameter")
+	}
+}
+
+func TestAsanaMoveToSectionAction_Success(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if len(provider.moveCalls) != 1 {
+		t.Fatalf("expected 1 MoveToSection call, got %d", len(provider.moveCalls))
+	}
+	if provider.moveCalls[0].issueID != "task-abc" {
+		t.Errorf("expected issueID %q, got %q", "task-abc", provider.moveCalls[0].issueID)
+	}
+	if provider.moveCalls[0].section != "In Progress" {
+		t.Errorf("expected section %q, got %q", "In Progress", provider.moveCalls[0].section)
+	}
+}
+
+func TestAsanaMoveToSectionAction_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{
+		src:     issues.SourceAsana,
+		moveErr: fmt.Errorf("asana API error"),
+	}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "Done"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when provider returns error")
+	}
+}
+
+func TestAsanaMoveToSectionAction_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	registry := issues.NewProviderRegistry() // no Asana provider
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "Done"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error when asana provider is not registered")
+	}
+}
+
 // --- linearCommentAction tests ---
 
 func TestLinearCommentAction_WorkItemNotFound(t *testing.T) {

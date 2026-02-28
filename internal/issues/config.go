@@ -11,6 +11,7 @@ var (
 // AsanaConfigProvider defines the configuration interface required by AsanaProvider.
 type AsanaConfigProvider interface {
 	HasAsanaProject(repoPath string) bool
+	GetAsanaProject(repoPath string) string
 }
 
 // LinearConfigProvider defines the configuration interface required by LinearProvider.

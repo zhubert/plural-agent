@@ -302,6 +302,26 @@ func (a *asanaCommentAction) Execute(ctx context.Context, ac *workflow.ActionCon
 	return workflow.ActionResult{Success: true}
 }
 
+// asanaMoveToSectionAction implements the asana.move_to_section action.
+type asanaMoveToSectionAction struct {
+	daemon *Daemon
+}
+
+// Execute moves the Asana task to the configured section.
+func (a *asanaMoveToSectionAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.moveToSection(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("asana move_to_section failed: %w", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // linearCommentAction implements the linear.comment action.
 type linearCommentAction struct {
 	daemon *Daemon
