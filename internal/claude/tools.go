@@ -29,6 +29,13 @@ var ToolSetContainerShell = []string{
 	"Bash",
 }
 
+// ToolSetReadOnly contains read-only file tools for sessions that must not modify code.
+var ToolSetReadOnly = []string{
+	"Read",
+	"Glob",
+	"Grep",
+}
+
 // ToolSetWeb contains web access tools.
 var ToolSetWeb = []string{
 	"WebFetch",

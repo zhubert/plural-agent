@@ -96,3 +96,29 @@ func TestToolSets_SafeShell_NoUnrestrictedBash(t *testing.T) {
 		}
 	}
 }
+
+func TestToolSetReadOnly_NoMutationTools(t *testing.T) {
+	forbidden := []string{"Edit", "Write", "Bash", "NotebookEdit", "ExitPlanMode"}
+	for _, tool := range ToolSetReadOnly {
+		if slices.Contains(forbidden, tool) {
+			t.Errorf("ToolSetReadOnly should not contain mutation tool %q", tool)
+		}
+	}
+}
+
+func TestToolSetReadOnly_HasExpectedTools(t *testing.T) {
+	expected := []string{"Read", "Glob", "Grep"}
+	for _, tool := range expected {
+		if !slices.Contains(ToolSetReadOnly, tool) {
+			t.Errorf("ToolSetReadOnly should contain %q", tool)
+		}
+	}
+}
+
+func TestToolSetReadOnly_IsSubsetOfBase(t *testing.T) {
+	for _, tool := range ToolSetReadOnly {
+		if !slices.Contains(ToolSetBase, tool) {
+			t.Errorf("ToolSetReadOnly tool %q should also be in ToolSetBase", tool)
+		}
+	}
+}

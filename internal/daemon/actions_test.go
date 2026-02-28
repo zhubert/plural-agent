@@ -379,7 +379,7 @@ func TestConfigureRunner_ToolSelection(t *testing.T) {
 		Autonomous:    true,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	tools := runner.GetAllowedTools()
 	expected := claude.ComposeTools(
@@ -398,6 +398,41 @@ func TestConfigureRunner_ToolSelection(t *testing.T) {
 	}
 }
 
+func TestConfigureRunner_ToolOverride(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		Containerized: true,
+		Autonomous:    true,
+	}
+
+	// Pass a tool override — should use that instead of default tools
+	planningTools := claude.ComposeTools(
+		claude.ToolSetReadOnly,
+		claude.ToolSetWeb,
+	)
+	d.configureRunner(runner, sess, "", planningTools)
+
+	tools := runner.GetAllowedTools()
+	if len(tools) != len(planningTools) {
+		t.Errorf("expected %d tools, got %d", len(planningTools), len(tools))
+	}
+	for _, tool := range planningTools {
+		if !slices.Contains(tools, tool) {
+			t.Errorf("missing expected tool %q", tool)
+		}
+	}
+	// Verify mutation tools are NOT present
+	for _, forbidden := range []string{"Edit", "Write", "Bash", "NotebookEdit"} {
+		if slices.Contains(tools, forbidden) {
+			t.Errorf("planning tool override should not include %q", forbidden)
+		}
+	}
+}
+
 func TestConfigureRunner_ContainerMode(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
@@ -408,7 +443,7 @@ func TestConfigureRunner_ContainerMode(t *testing.T) {
 		Containerized: true,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if !runner.containerized {
 		t.Error("expected SetContainerized to be called")
@@ -425,7 +460,7 @@ func TestConfigureRunner_ContainerMode_Disabled(t *testing.T) {
 		Containerized: false,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if runner.containerized {
 		t.Error("expected SetContainerized NOT to be called when Containerized is false")
@@ -445,7 +480,7 @@ func TestConfigureRunner_HostToolsEnabled(t *testing.T) {
 		DaemonManaged: true,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if !runner.hostToolsEnabled {
 		t.Error("daemon configureRunner should enable host tools")
@@ -462,7 +497,7 @@ func TestConfigureRunner_StreamingDisabled(t *testing.T) {
 		Autonomous: true,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if !runner.streamingChunksOff {
 		t.Error("expected streaming chunks disabled for autonomous sessions")
@@ -479,7 +514,7 @@ func TestConfigureRunner_StreamingNotDisabled_NonAutonomous(t *testing.T) {
 		Autonomous: false,
 	}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if runner.streamingChunksOff {
 		t.Error("streaming chunks should not be disabled for non-autonomous sessions")
@@ -493,7 +528,7 @@ func TestConfigureRunner_SystemPrompt(t *testing.T) {
 	runner := newTrackingRunner("test-session")
 	sess := &config.Session{ID: "test-session"}
 
-	d.configureRunner(runner, sess, "custom prompt")
+	d.configureRunner(runner, sess, "custom prompt", nil)
 
 	if runner.systemPrompt != "custom prompt" {
 		t.Errorf("expected system prompt 'custom prompt', got %q", runner.systemPrompt)
@@ -507,7 +542,7 @@ func TestConfigureRunner_NoSystemPrompt(t *testing.T) {
 	runner := newTrackingRunner("test-session")
 	sess := &config.Session{ID: "test-session"}
 
-	d.configureRunner(runner, sess, "")
+	d.configureRunner(runner, sess, "", nil)
 
 	if runner.systemPrompt != "" {
 		t.Errorf("expected empty system prompt, got %q", runner.systemPrompt)

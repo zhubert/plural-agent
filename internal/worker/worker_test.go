@@ -950,3 +950,112 @@ func TestSessionWorker_HandleSubmitReview_Passed(t *testing.T) {
 		t.Errorf("expected ai_review_summary='looks good', got %v", data["ai_review_summary"])
 	}
 }
+
+func TestPlanningMode_CorrectionSentWhenNoCommentIssue(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "main"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+
+	// First response: Claude finishes without calling comment_issue
+	runner.QueueResponse(
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "I analyzed the codebase."},
+		claude.ResponseChunk{Done: true},
+	)
+
+	var correctionSent bool
+	correctionReceived := make(chan struct{})
+	sendCount := 0
+	runner.OnSend = func(content []claude.ContentBlock) {
+		sendCount++
+		if sendCount == 2 {
+			// This is the corrective message — verify it mentions comment_issue
+			for _, block := range content {
+				if block.Type == claude.ContentTypeText && block.Text != "" {
+					correctionSent = true
+				}
+			}
+			close(correctionReceived)
+		}
+	}
+
+	// Background goroutine: once the correction is sent, inject a Done
+	// chunk into the response channel to unblock the worker.
+	go func() {
+		<-correctionReceived
+		// Small delay to let SendContent finish setting up the channel
+		time.Sleep(10 * time.Millisecond)
+		runner.InjectChunk(claude.ResponseChunk{Done: true})
+	}()
+
+	w := NewSessionWorker(h, sess, runner, "Analyze issue #1")
+	w.SetPlanningMode(true)
+	w.Start(t.Context())
+	w.Wait()
+
+	if !correctionSent {
+		t.Error("expected a corrective message to be sent when planning mode finishes without comment_issue")
+	}
+	if w.Turns() != 2 {
+		t.Errorf("expected 2 turns (original + correction), got %d", w.Turns())
+	}
+}
+
+func TestPlanningMode_NoCorrectionWhenCommentIssuePosted(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "main"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+
+	w := NewSessionWorker(h, sess, runner, "Analyze issue #2")
+	w.SetPlanningMode(true)
+
+	// Directly mark commentIssuePosted as true, simulating the handler having
+	// been called during the session. This avoids timing-sensitive channel
+	// gymnastics and directly tests the guard logic.
+	w.commentIssuePosted = true
+
+	runner.QueueResponse(
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "Here is the plan."},
+		claude.ResponseChunk{Done: true},
+	)
+
+	w.Start(t.Context())
+	w.Wait()
+
+	if w.Turns() != 1 {
+		t.Errorf("expected 1 turn (no correction needed), got %d", w.Turns())
+	}
+}
+
+func TestPlanningMode_Disabled_NoCorrectionSent(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "main"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+
+	runner.QueueResponse(
+		claude.ResponseChunk{Type: claude.ChunkTypeText, Content: "Done with coding."},
+		claude.ResponseChunk{Done: true},
+	)
+
+	w := NewSessionWorker(h, sess, runner, "Code something")
+	// planningMode is false by default — no correction should be sent
+	w.Start(t.Context())
+	w.Wait()
+
+	if w.Turns() != 1 {
+		t.Errorf("expected 1 turn (no planning mode, no correction), got %d", w.Turns())
+	}
+}

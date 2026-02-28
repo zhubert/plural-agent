@@ -79,6 +79,17 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 	issueBody, _ := item.StepData["issue_body"].(string)
 	initialMsg := worker.FormatInitialMessage(item.IssueRef, issueBody)
 
+	// If this is a re-planning attempt triggered by user feedback, include the
+	// feedback so Claude can revise the plan accordingly.
+	if userFeedback, ok := item.StepData["user_feedback"].(string); ok && userFeedback != "" {
+		author, _ := item.StepData["user_feedback_author"].(string)
+		if author != "" {
+			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan (from @%s):\n%s", author, userFeedback)
+		} else {
+			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan:\n%s", userFeedback)
+		}
+	}
+
 	// Resolve planning system prompt from workflow config
 	systemPrompt := params.String("system_prompt", "")
 	planningPrompt, err := workflow.ResolveSystemPrompt(systemPrompt, repoPath)
@@ -90,8 +101,13 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 		planningPrompt = DefaultPlanningSystemPrompt
 	}
 
-	// Start worker, applying any per-session limits from workflow params
-	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, planningPrompt)
+	// Start worker with read-only tools — planning sessions must not modify code.
+	planningTools := claude.ComposeTools(
+		claude.ToolSetReadOnly,
+		claude.ToolSetWeb,
+	)
+	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, planningPrompt, planningTools)
+	w.SetPlanningMode(true)
 	maxTurns := params.Int("max_turns", 0)
 	maxDuration := params.Duration("max_duration", 0)
 	if maxTurns > 0 || maxDuration > 0 {
@@ -454,14 +470,19 @@ func (d *Daemon) recreateWorktree(ctx context.Context, repoPath, branch, session
 
 // configureRunner explicitly configures a runner for daemon use.
 // The daemon makes all policy decisions here rather than relying on SessionManager.
-func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Session, customPrompt string) {
-	// Tools: compose the container tool set for daemon sessions
-	runner.SetAllowedTools(claude.ComposeTools(
-		claude.ToolSetBase,
-		claude.ToolSetContainerShell,
-		claude.ToolSetWeb,
-		claude.ToolSetProductivity,
-	))
+// If toolOverride is non-nil, it replaces the default tool set.
+func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Session, customPrompt string, toolOverride []string) {
+	// Tools: use override if provided, otherwise compose the default container tool set
+	if toolOverride != nil {
+		runner.SetAllowedTools(toolOverride)
+	} else {
+		runner.SetAllowedTools(claude.ComposeTools(
+			claude.ToolSetBase,
+			claude.ToolSetContainerShell,
+			claude.ToolSetWeb,
+			claude.ToolSetProductivity,
+		))
+	}
 
 	// Container mode
 	if sess.Containerized {
@@ -486,9 +507,13 @@ func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Sessio
 // createWorkerWithPrompt creates a session worker with an optional custom system prompt
 // but does not start it. The caller is responsible for calling w.Start(ctx).
 // ctx is used to cancel the notification goroutine on shutdown.
-func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string) *worker.SessionWorker {
+func (d *Daemon) createWorkerWithPrompt(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, initialMsg, customPrompt string, toolOverride ...[]string) *worker.SessionWorker {
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
-	d.configureRunner(runner, sess, customPrompt)
+	var tools []string
+	if len(toolOverride) > 0 {
+		tools = toolOverride[0]
+	}
+	d.configureRunner(runner, sess, customPrompt, tools)
 	w := worker.NewSessionWorker(d, sess, runner, initialMsg)
 
 	d.mu.Lock()

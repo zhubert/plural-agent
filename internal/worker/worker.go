@@ -36,6 +36,11 @@ type SessionWorker struct {
 	// Per-session limit overrides (zero = use host defaults)
 	overrideMaxTurns    int
 	overrideMaxDuration time.Duration
+
+	// Planning mode: when true, the worker will send a corrective message
+	// if Claude tries to finish without calling comment_issue.
+	planningMode       bool
+	commentIssuePosted bool
 }
 
 // NewSessionWorker creates a new session worker.
@@ -95,6 +100,14 @@ func (w *SessionWorker) SetTurns(n int) {
 // SetStartTime sets the worker start time (for testing).
 func (w *SessionWorker) SetStartTime(t time.Time) {
 	w.startTime = t
+}
+
+// SetPlanningMode marks this worker as a planning session.
+// When enabled, the worker will send a corrective message if Claude
+// tries to finish without calling comment_issue.
+// Must be called before Start.
+func (w *SessionWorker) SetPlanningMode(enabled bool) {
+	w.planningMode = enabled
 }
 
 // SetLimits overrides the per-session turn and duration limits.
@@ -183,6 +196,21 @@ func (w *SessionWorker) run() {
 		if w.checkLimits() {
 			log.Warn("autonomous limit reached", "turns", w.turns.Load())
 			return
+		}
+
+		// Planning mode guard: if Claude is about to finish without posting
+		// a plan comment, send a corrective message instead of completing.
+		if w.planningMode && !w.commentIssuePosted {
+			log.Warn("planning session finishing without comment_issue, sending correction")
+			correction := "You have not yet posted your plan. " +
+				"You MUST call the comment_issue MCP tool to post your implementation plan before finishing. " +
+				"Do that now."
+			content := []claude.ContentBlock{{Type: claude.ContentTypeText, Text: correction}}
+			responseChan = w.runner.SendContent(w.ctx, content)
+			// Disable planning mode so we only nudge once — if Claude still
+			// ignores the correction, the daemon's fallback comment will fire.
+			w.planningMode = false
+			continue
 		}
 
 		// Check for pending messages (e.g., child completion notifications)
@@ -570,6 +598,7 @@ func (w *SessionWorker) handleCommentIssue(req mcp.CommentIssueRequest) {
 
 	// Record that a comment was posted so the daemon can detect if a planning
 	// session completes without ever calling comment_issue.
+	w.commentIssuePosted = true
 	_ = w.host.SetWorkItemData(w.sessionID, "plan_comment_posted", true)
 
 	w.runner.SendCommentIssueResponse(mcp.CommentIssueResponse{

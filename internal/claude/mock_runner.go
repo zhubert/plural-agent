@@ -83,6 +83,18 @@ func (m *MockRunner) QueueResponse(chunks ...ResponseChunk) {
 	m.responseQueue = append(m.responseQueue, chunks...)
 }
 
+// InjectChunk sends a chunk directly to the current response channel.
+// This is useful for tests that need to feed responses after SendContent
+// has been called with an empty queue (e.g., to unblock a waiting worker).
+func (m *MockRunner) InjectChunk(chunk ResponseChunk) {
+	m.mu.RLock()
+	ch := m.responseChan
+	m.mu.RUnlock()
+	if ch != nil {
+		ch <- chunk
+	}
+}
+
 // ClearResponseQueue clears any queued responses.
 func (m *MockRunner) ClearResponseQueue() {
 	m.mu.Lock()
