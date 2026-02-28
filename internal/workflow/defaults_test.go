@@ -198,6 +198,108 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultPlanningWorkflowConfig(t *testing.T) {
+	cfg := DefaultPlanningWorkflowConfig()
+
+	if cfg.Workflow != "plan-then-code" {
+		t.Errorf("workflow name: got %q, want plan-then-code", cfg.Workflow)
+	}
+	if cfg.Start != "planning" {
+		t.Errorf("start: got %q, want planning", cfg.Start)
+	}
+	if cfg.Source.Provider != "github" {
+		t.Errorf("source provider: got %q, want github", cfg.Source.Provider)
+	}
+
+	// Verify planning states exist
+	for _, name := range []string{"planning", "await_plan_feedback", "check_plan_feedback"} {
+		if _, ok := cfg.States[name]; !ok {
+			t.Errorf("expected planning state %q to exist", name)
+		}
+	}
+
+	// Verify coding states inherited from DefaultWorkflowConfig
+	for _, name := range []string{"coding", "open_pr", "await_ci", "check_ci_result", "merge", "done", "failed"} {
+		if _, ok := cfg.States[name]; !ok {
+			t.Errorf("expected coding state %q to exist", name)
+		}
+	}
+
+	// planning state
+	planning := cfg.States["planning"]
+	if planning.Type != StateTypeTask {
+		t.Errorf("planning type: got %s, want task", planning.Type)
+	}
+	if planning.Action != "ai.plan" {
+		t.Errorf("planning action: got %s, want ai.plan", planning.Action)
+	}
+	if planning.Next != "await_plan_feedback" {
+		t.Errorf("planning next: got %s, want await_plan_feedback", planning.Next)
+	}
+	pp := NewParamHelper(planning.Params)
+	if pp.Int("max_turns", 0) != 30 {
+		t.Error("planning max_turns: expected 30")
+	}
+	if pp.Duration("max_duration", 0) != 15*time.Minute {
+		t.Error("planning max_duration: expected 15m")
+	}
+
+	// await_plan_feedback state
+	awaitFeedback := cfg.States["await_plan_feedback"]
+	if awaitFeedback.Type != StateTypeWait {
+		t.Errorf("await_plan_feedback type: got %s, want wait", awaitFeedback.Type)
+	}
+	if awaitFeedback.Event != "plan.user_replied" {
+		t.Errorf("await_plan_feedback event: got %s, want plan.user_replied", awaitFeedback.Event)
+	}
+	if awaitFeedback.Next != "check_plan_feedback" {
+		t.Errorf("await_plan_feedback next: got %s, want check_plan_feedback", awaitFeedback.Next)
+	}
+	if awaitFeedback.TimeoutNext != "failed" {
+		t.Errorf("await_plan_feedback timeout_next: got %s, want failed", awaitFeedback.TimeoutNext)
+	}
+	if awaitFeedback.Timeout == nil || awaitFeedback.Timeout.Duration != 72*time.Hour {
+		t.Error("await_plan_feedback timeout: expected 72h")
+	}
+	afp := NewParamHelper(awaitFeedback.Params)
+	if afp.String("approval_pattern", "") == "" {
+		t.Error("await_plan_feedback approval_pattern: expected non-empty pattern")
+	}
+
+	// check_plan_feedback routes plan_approved=true → coding, plan_approved=false → planning
+	checkFeedback := cfg.States["check_plan_feedback"]
+	if checkFeedback.Type != StateTypeChoice {
+		t.Errorf("check_plan_feedback type: got %s, want choice", checkFeedback.Type)
+	}
+	if len(checkFeedback.Choices) != 2 {
+		t.Fatalf("check_plan_feedback choices: got %d, want 2", len(checkFeedback.Choices))
+	}
+	approved := checkFeedback.Choices[0]
+	if approved.Variable != "plan_approved" || approved.Equals != true || approved.Next != "coding" {
+		t.Errorf("check_plan_feedback approved choice: got variable=%s equals=%v next=%s", approved.Variable, approved.Equals, approved.Next)
+	}
+	feedback := checkFeedback.Choices[1]
+	if feedback.Variable != "plan_approved" || feedback.Equals != false || feedback.Next != "planning" {
+		t.Errorf("check_plan_feedback feedback choice: got variable=%s equals=%v next=%s", feedback.Variable, feedback.Equals, feedback.Next)
+	}
+
+	// Config should pass validation (planning loop is choice-gated, like the CI/review loops)
+	errs := Validate(cfg)
+	if len(errs) > 0 {
+		t.Errorf("planning config should be valid, got errors: %v", errs)
+	}
+}
+
+func TestDefaultPlanningWorkflowConfig_DoesNotModifyDefaultWorkflowConfig(t *testing.T) {
+	_ = DefaultPlanningWorkflowConfig()
+	// Calling DefaultPlanningWorkflowConfig should not contaminate subsequent calls
+	// to DefaultWorkflowConfig (states are added to a fresh copy, not the global default).
+	base := DefaultWorkflowConfig()
+	if _, hasPlanningState := base.States["planning"]; hasPlanningState {
+		t.Error("DefaultPlanningWorkflowConfig should not mutate DefaultWorkflowConfig result")
+	}
+}
+
 func TestDefaultWorkflowConfig_RetryOnNetworkStates(t *testing.T) {
 	cfg := DefaultWorkflowConfig()
 
