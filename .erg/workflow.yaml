@@ -18,7 +18,7 @@ source:
   provider: asana
   filter:
     project: "1213476871486785"
-    section: Todo
+    section: To do
 
 states:
   # ── Planning phase (card in Todo) ───────────────────────────────

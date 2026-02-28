@@ -243,7 +243,7 @@ func Merge(partial, defaults *Config) *Config {
 	if result.Source.Provider == "" {
 		result.Source.Provider = defaults.Source.Provider
 	}
-	if result.Source.Filter.Label == "" {
+	if result.Source.Filter.Label == "" && result.Source.Provider == defaults.Source.Provider {
 		result.Source.Filter.Label = defaults.Source.Filter.Label
 	}
 	if result.Source.Filter.Project == "" {

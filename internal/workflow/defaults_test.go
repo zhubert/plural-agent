@@ -370,6 +370,27 @@ func TestMerge(t *testing.T) {
 		}
 	})
 
+	t.Run("asana config without label does not inherit github queued label", func(t *testing.T) {
+		// Regression: Merge used to blindly copy the default label ("queued") into
+		// non-GitHub configs that had no label set. This caused the Asana provider
+		// to filter by the tag "queued", silently dropping tasks without that tag.
+		partial := &Config{
+			Source: SourceConfig{
+				Provider: "asana",
+				Filter: FilterConfig{
+					Project: "1213476871486785",
+					Section: "To do",
+				},
+			},
+		}
+		defaults := DefaultWorkflowConfig() // provider=github, label=queued
+		result := Merge(partial, defaults)
+
+		if result.Source.Filter.Label != "" {
+			t.Errorf("label should be empty for asana config without explicit label, got %q", result.Source.Filter.Label)
+		}
+	})
+
 	t.Run("partial state replaces default entirely", func(t *testing.T) {
 		partial := &Config{
 			States: map[string]*State{
