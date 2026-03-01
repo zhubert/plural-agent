@@ -226,6 +226,13 @@ func TestRunAgentClean_RemovesAuthFilesAndLogs(t *testing.T) {
 		}
 	}
 
+	// Create MCP config files in config dir
+	for _, name := range []string{"erg-mcp-sess1.json", "erg-mcp-sess2.json"} {
+		if err := os.WriteFile(filepath.Join(configDir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatalf("failed to create MCP config file: %v", err)
+		}
+	}
+
 	// Create log files in state dir (logs subdir)
 	logsDir := filepath.Join(stateDir, "logs")
 	os.MkdirAll(logsDir, 0o755)
@@ -247,6 +254,12 @@ func TestRunAgentClean_RemovesAuthFilesAndLogs(t *testing.T) {
 	authFiles, _ := filepath.Glob(filepath.Join(configDir, "erg-auth-*"))
 	if len(authFiles) != 0 {
 		t.Errorf("expected 0 auth files, got %d", len(authFiles))
+	}
+
+	// Verify MCP config files removed
+	mcpFiles, _ := filepath.Glob(filepath.Join(configDir, "erg-mcp-*.json"))
+	if len(mcpFiles) != 0 {
+		t.Errorf("expected 0 MCP config files, got %d", len(mcpFiles))
 	}
 
 	// Verify log files removed

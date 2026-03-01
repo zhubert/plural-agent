@@ -16,13 +16,14 @@ var agentCleanSkipConfirm bool
 
 var agentCleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Remove agent daemon state, lock files, worktrees, auth files, and logs",
+	Short: "Remove agent daemon state, lock files, worktrees, auth files, MCP configs, and logs",
 	Long: `Clears daemon state (work item tracking), removes lock files, worktrees,
-container auth files (erg-auth-*), and log files (erg.log, mcp-*.log, stream-*.log).
+container auth files (erg-auth-*), MCP config files (erg-mcp-*.json),
+and log files (erg.log, mcp-*.log, stream-*.log).
 
 This is useful when the daemon state becomes stale or corrupted,
 when a lock file is left behind after an unclean shutdown,
-or when orphaned auth/log files accumulate over time.
+or when orphaned auth/log/config files accumulate over time.
 
 It will prompt for confirmation before proceeding unless the --yes flag is used.`,
 	RunE: runAgentClean,
@@ -67,12 +68,16 @@ func runAgentCleanWithReader(input io.Reader) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: error finding auth files: %v\n", err)
 	}
+	mcpConfigFiles, err := claude.FindMCPConfigFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: error finding MCP config files: %v\n", err)
+	}
 	logFileCount, err := logger.FindLogFiles()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: error finding log files: %v\n", err)
 	}
 
-	if !stateExists && len(lockFiles) == 0 && len(wtEntries) == 0 && len(authFiles) == 0 && logFileCount == 0 {
+	if !stateExists && len(lockFiles) == 0 && len(wtEntries) == 0 && len(authFiles) == 0 && len(mcpConfigFiles) == 0 && logFileCount == 0 {
 		fmt.Println("Nothing to clean.")
 		return nil
 	}
@@ -96,6 +101,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	}
 	if len(authFiles) > 0 {
 		fmt.Printf("  - %d container auth file(s)\n", len(authFiles))
+	}
+	if len(mcpConfigFiles) > 0 {
+		fmt.Printf("  - %d MCP config file(s)\n", len(mcpConfigFiles))
 	}
 	if logFileCount > 0 {
 		fmt.Printf("  - %d log file(s)\n", logFileCount)
@@ -142,6 +150,12 @@ func runAgentCleanWithReader(input io.Reader) error {
 		fmt.Fprintf(os.Stderr, "Warning: error removing auth files: %v\n", err)
 	}
 
+	// Clean MCP config files
+	mcpRemoved, err := claude.ClearMCPConfigFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: error removing MCP config files: %v\n", err)
+	}
+
 	// Clean log files
 	logsRemoved, err := logger.ClearLogs()
 	if err != nil {
@@ -162,6 +176,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	}
 	if authRemoved > 0 {
 		fmt.Printf("  - %d auth file(s) removed\n", authRemoved)
+	}
+	if mcpRemoved > 0 {
+		fmt.Printf("  - %d MCP config file(s) removed\n", mcpRemoved)
 	}
 	if logsRemoved > 0 {
 		fmt.Printf("  - %d log file(s) removed\n", logsRemoved)

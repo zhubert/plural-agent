@@ -160,11 +160,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.releaseLock()
 
-	// Clean up stale auth files from previous runs that were killed ungracefully
+	// Clean up stale files from previous runs that were killed ungracefully
 	if n, err := claude.ClearAuthFiles(); err != nil {
 		d.logger.Warn("failed to clean stale auth files", "error", err)
 	} else if n > 0 {
 		d.logger.Info("cleaned stale auth files from previous run", "count", n)
+	}
+	if n, err := claude.ClearMCPConfigFiles(); err != nil {
+		d.logger.Warn("failed to clean stale MCP config files", "error", err)
+	} else if n > 0 {
+		d.logger.Info("cleaned stale MCP config files from previous run", "count", n)
 	}
 
 	// Load or create state

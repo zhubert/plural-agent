@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -175,5 +176,67 @@ func TestCreateContainerMCPConfig_NoExternalServers(t *testing.T) {
 	mcpServers := config["mcpServers"].(map[string]any)
 	if _, exists := mcpServers["external"]; exists {
 		t.Error("container MCP config should not include external MCP servers")
+	}
+}
+
+func TestFindMCPConfigFiles_Empty(t *testing.T) {
+	setupAuthTest(t) // reuse XDG isolation from container_auth_test.go
+
+	files, err := FindMCPConfigFiles()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 MCP config files, got %d", len(files))
+	}
+}
+
+func TestFindMCPConfigFiles_ReturnsMatches(t *testing.T) {
+	configDir := setupAuthTest(t)
+
+	for _, name := range []string{"erg-mcp-aaa.json", "erg-mcp-bbb.json"} {
+		if err := os.WriteFile(filepath.Join(configDir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatalf("failed to create MCP config file: %v", err)
+		}
+	}
+	// Non-matching file
+	os.WriteFile(filepath.Join(configDir, "config.json"), []byte("{}"), 0o644)
+
+	files, err := FindMCPConfigFiles()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 MCP config files, got %d", len(files))
+	}
+}
+
+func TestClearMCPConfigFiles_RemovesAll(t *testing.T) {
+	configDir := setupAuthTest(t)
+
+	for _, name := range []string{"erg-mcp-aaa.json", "erg-mcp-bbb.json", "erg-mcp-ccc.json"} {
+		if err := os.WriteFile(filepath.Join(configDir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatalf("failed to create MCP config file: %v", err)
+		}
+	}
+	// Non-matching file that should survive
+	otherFile := filepath.Join(configDir, "config.json")
+	os.WriteFile(otherFile, []byte("{}"), 0o644)
+
+	count, err := ClearMCPConfigFiles()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 files removed, got %d", count)
+	}
+
+	remaining, _ := FindMCPConfigFiles()
+	if len(remaining) != 0 {
+		t.Errorf("expected 0 remaining MCP config files, got %d", len(remaining))
+	}
+
+	if _, err := os.Stat(otherFile); err != nil {
+		t.Error("expected config.json to still exist")
 	}
 }

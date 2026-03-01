@@ -203,6 +203,33 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 	return configPath, nil
 }
 
+// FindMCPConfigFiles returns the paths of all erg-mcp-*.json files in the config directory.
+func FindMCPConfigFiles() ([]string, error) {
+	dir, err := paths.ConfigDir()
+	if err != nil {
+		return nil, nil
+	}
+	return filepath.Glob(filepath.Join(dir, "erg-mcp-*.json"))
+}
+
+// ClearMCPConfigFiles removes all erg-mcp-*.json files from the config directory.
+// Returns the number of files removed.
+func ClearMCPConfigFiles() (int, error) {
+	files, err := FindMCPConfigFiles()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, f := range files {
+		if err := os.Remove(f); err == nil {
+			count++
+		} else if !os.IsNotExist(err) {
+			return count, err
+		}
+	}
+	return count, nil
+}
+
 // SetMCPServers sets the external MCP servers to include in the config
 func (r *Runner) SetMCPServers(servers []MCPServer) {
 	r.mu.Lock()
