@@ -89,6 +89,83 @@ func TestCreateContainerMCPConfigLocked(t *testing.T) {
 	}
 }
 
+func TestCreateContainerMCPConfig_WithAllowedTools(t *testing.T) {
+	r := &Runner{
+		sessionID:    "test-planning-mcp",
+		allowedTools: []string{"Read", "Glob", "Grep", "WebFetch", "WebSearch"},
+		log:          testLogger(),
+	}
+
+	configPath, err := r.createContainerMCPConfigLocked(21120)
+	if err != nil {
+		t.Fatalf("createContainerMCPConfigLocked() error = %v", err)
+	}
+	defer os.Remove(configPath)
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse config JSON: %v", err)
+	}
+
+	mcpServers := config["mcpServers"].(map[string]any)
+	ergServer := mcpServers["erg"].(map[string]any)
+	argsRaw := ergServer["args"].([]any)
+	args := make([]string, len(argsRaw))
+	for i, a := range argsRaw {
+		args[i], _ = a.(string)
+	}
+
+	if !containsArg(args, "--allowed-tools") {
+		t.Fatal("expected --allowed-tools flag in container MCP config")
+	}
+
+	got := getArgValue(args, "--allowed-tools")
+	want := "Read,Glob,Grep,WebFetch,WebSearch"
+	if got != want {
+		t.Errorf("--allowed-tools = %q, want %q", got, want)
+	}
+}
+
+func TestCreateContainerMCPConfig_NoAllowedToolsOmitsFlag(t *testing.T) {
+	r := &Runner{
+		sessionID: "test-coding-mcp",
+		log:       testLogger(),
+	}
+
+	configPath, err := r.createContainerMCPConfigLocked(21120)
+	if err != nil {
+		t.Fatalf("createContainerMCPConfigLocked() error = %v", err)
+	}
+	defer os.Remove(configPath)
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse config JSON: %v", err)
+	}
+
+	mcpServers := config["mcpServers"].(map[string]any)
+	ergServer := mcpServers["erg"].(map[string]any)
+	argsRaw := ergServer["args"].([]any)
+	args := make([]string, len(argsRaw))
+	for i, a := range argsRaw {
+		args[i], _ = a.(string)
+	}
+
+	if containsArg(args, "--allowed-tools") {
+		t.Error("coding sessions should NOT include --allowed-tools (uses wildcard auto-approve)")
+	}
+}
+
 func TestCreateMCPConfigLocked_HostSession(t *testing.T) {
 	r := &Runner{
 		sessionID: "test-host-mcp",

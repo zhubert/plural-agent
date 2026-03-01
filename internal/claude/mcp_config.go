@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/zhubert/erg/internal/mcp"
@@ -156,8 +157,9 @@ func (r *Runner) createMCPConfigLocked(socketPath string) (string, error) {
 
 // createContainerMCPConfigLocked creates the MCP config for containerized sessions.
 // The config points to the erg binary inside the container at /usr/local/bin/erg
-// with --auto-approve and --listen, which auto-approves all regular permissions while
-// routing AskUserQuestion and ExitPlanMode through the TUI via reverse TCP.
+// with --auto-approve and --listen. When allowedTools is set, the MCP subprocess
+// only auto-approves those tools and denies everything else; otherwise it approves
+// all tools (the container is the sandbox).
 // The MCP subprocess listens on containerPort and the host dials in.
 // Must be called with mu held.
 func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, error) {
@@ -165,6 +167,9 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 	args := []string{"mcp-server", "--listen", listenAddr, "--auto-approve", "--session-id", r.sessionID}
 	if r.hostTools {
 		args = append(args, "--host-tools")
+	}
+	if len(r.allowedTools) > 0 {
+		args = append(args, "--allowed-tools", strings.Join(r.allowedTools, ","))
 	}
 	mcpServers := map[string]any{
 		"erg": map[string]any{

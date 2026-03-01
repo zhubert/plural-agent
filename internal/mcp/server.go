@@ -50,6 +50,7 @@ type Server struct {
 	planApprovalChan      chan<- PlanApprovalRequest       // Send plan approval requests to TUI
 	planResponseChan      <-chan PlanApprovalResponse      // Receive plan approval responses from TUI
 	allowedTools          []string                         // Pre-allowed tools for this session
+	denyUnlisted          bool                             // When true, deny unlisted tools immediately instead of forwarding to TUI
 	hasHostTools          bool                             // Whether to expose host operation tools
 	createPRChan          chan<- CreatePRRequest           // Send create PR requests to TUI
 	createPRResp          <-chan CreatePRResponse          // Receive create PR responses from TUI
@@ -67,6 +68,16 @@ type Server struct {
 
 // ServerOption is a functional option for configuring Server
 type ServerOption func(*Server)
+
+// WithDenyUnlisted configures the server to immediately deny tools not in the
+// allowed list instead of forwarding to the TUI. Used in container mode where
+// there may be no TUI to respond, and we want to restrict tool usage (e.g.,
+// planning sessions should only have read-only tools).
+func WithDenyUnlisted() ServerOption {
+	return func(s *Server) {
+		s.denyUnlisted = true
+	}
+}
 
 // WithHostTools enables host operation tools (create_pr, push_branch, get_review_comments, comment_issue, submit_review)
 func WithHostTools(
@@ -364,6 +375,14 @@ func (s *Server) handlePermissionToolCall(req *JSONRPCRequest, params ToolCallPa
 	if s.isToolAllowed(tool) {
 		s.log.Debug("tool is pre-allowed", "tool", tool)
 		s.sendPermissionResult(req.ID, true, arguments, "")
+		return
+	}
+
+	// In deny-unlisted mode (container sessions with restricted tools), deny
+	// immediately instead of forwarding to the TUI which may not exist.
+	if s.denyUnlisted {
+		s.log.Info("denied unlisted tool", "tool", tool)
+		s.sendPermissionResult(req.ID, false, arguments, fmt.Sprintf("tool %q is not permitted in this session", tool))
 		return
 	}
 

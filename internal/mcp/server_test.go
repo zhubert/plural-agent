@@ -1227,6 +1227,155 @@ func TestServer_handlePushBranch(t *testing.T) {
 }
 
 // TestServer_sendToolResult verifies that sendToolResult returns regular tool results.
+func TestServer_DenyUnlisted(t *testing.T) {
+	logger.Init(os.DevNull)
+	defer logger.Reset()
+
+	t.Run("denies unlisted tool immediately", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil,
+			[]string{"Read", "Glob", "Grep"}, "test", WithDenyUnlisted())
+
+		req := &JSONRPCRequest{JSONRPC: "2.0", ID: "1"}
+		params := ToolCallParams{
+			Name: ToolName,
+			Arguments: map[string]any{
+				"tool_name": "Edit",
+				"input": map[string]any{
+					"file_path": "/tmp/test.go",
+				},
+			},
+		}
+		s.handlePermissionToolCall(req, params)
+
+		output := buf.String()
+		if !strings.Contains(output, "deny") {
+			t.Errorf("expected deny in output, got: %s", output)
+		}
+		if !strings.Contains(output, "not permitted") {
+			t.Errorf("expected 'not permitted' message, got: %s", output)
+		}
+	})
+
+	t.Run("allows listed tool", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil,
+			[]string{"Read", "Glob", "Grep"}, "test", WithDenyUnlisted())
+
+		req := &JSONRPCRequest{JSONRPC: "2.0", ID: "1"}
+		params := ToolCallParams{
+			Name: ToolName,
+			Arguments: map[string]any{
+				"tool_name": "Read",
+				"input": map[string]any{
+					"file_path": "/tmp/test.go",
+				},
+			},
+		}
+		s.handlePermissionToolCall(req, params)
+
+		output := buf.String()
+		if !strings.Contains(output, "allow") {
+			t.Errorf("expected allow in output, got: %s", output)
+		}
+		if strings.Contains(output, "deny") {
+			t.Errorf("expected no deny in output, got: %s", output)
+		}
+	})
+
+	t.Run("denies Bash in read-only session", func(t *testing.T) {
+		var buf strings.Builder
+		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil,
+			[]string{"Read", "Glob", "Grep", "WebFetch", "WebSearch"}, "test", WithDenyUnlisted())
+
+		req := &JSONRPCRequest{JSONRPC: "2.0", ID: "1"}
+		params := ToolCallParams{
+			Name: ToolName,
+			Arguments: map[string]any{
+				"tool_name": "Bash",
+				"input": map[string]any{
+					"command": "go build ./...",
+				},
+			},
+		}
+		s.handlePermissionToolCall(req, params)
+
+		output := buf.String()
+		if !strings.Contains(output, "deny") {
+			t.Errorf("expected deny for Bash, got: %s", output)
+		}
+	})
+
+	t.Run("allows host MCP tools even when denyUnlisted", func(t *testing.T) {
+		var buf strings.Builder
+		createPRChan := make(chan CreatePRRequest, 1)
+		createPRResp := make(chan CreatePRResponse, 1)
+		pushBranchChan := make(chan PushBranchRequest, 1)
+		pushBranchResp := make(chan PushBranchResponse, 1)
+		getReviewCommentsChan := make(chan GetReviewCommentsRequest, 1)
+		getReviewCommentsResp := make(chan GetReviewCommentsResponse, 1)
+		commentIssueChan := make(chan CommentIssueRequest, 1)
+		commentIssueResp := make(chan CommentIssueResponse, 1)
+		submitReviewChan := make(chan SubmitReviewRequest, 1)
+		submitReviewResp := make(chan SubmitReviewResponse, 1)
+
+		s := NewServer(strings.NewReader(""), &buf, nil, nil, nil, nil, nil, nil,
+			[]string{"Read", "Glob", "Grep"}, "test",
+			WithDenyUnlisted(),
+			WithHostTools(createPRChan, createPRResp, pushBranchChan, pushBranchResp,
+				getReviewCommentsChan, getReviewCommentsResp,
+				commentIssueChan, commentIssueResp,
+				submitReviewChan, submitReviewResp))
+
+		req := &JSONRPCRequest{JSONRPC: "2.0", ID: "1"}
+		params := ToolCallParams{
+			Name: ToolName,
+			Arguments: map[string]any{
+				"tool_name": "mcp__erg__comment_issue",
+				"input":     map[string]any{},
+			},
+		}
+		s.handlePermissionToolCall(req, params)
+
+		output := buf.String()
+		if !strings.Contains(output, "allow") {
+			t.Errorf("expected allow for host MCP tool, got: %s", output)
+		}
+		if strings.Contains(output, "deny") {
+			t.Errorf("expected no deny for host MCP tool, got: %s", output)
+		}
+	})
+
+	t.Run("without denyUnlisted forwards to TUI", func(t *testing.T) {
+		reqChan := make(chan PermissionRequest, 1)
+		respChan := make(chan PermissionResponse, 1)
+		var buf strings.Builder
+		s := NewServer(strings.NewReader(""), &buf, reqChan, respChan, nil, nil, nil, nil,
+			[]string{"Read"}, "test") // no WithDenyUnlisted
+
+		// Pre-fill a response so the TUI send doesn't block
+		go func() {
+			<-reqChan
+			respChan <- PermissionResponse{Allowed: true}
+		}()
+
+		req := &JSONRPCRequest{JSONRPC: "2.0", ID: "1"}
+		params := ToolCallParams{
+			Name: ToolName,
+			Arguments: map[string]any{
+				"tool_name": "Edit",
+				"input":     map[string]any{"file_path": "/tmp/x"},
+			},
+		}
+		s.handlePermissionToolCall(req, params)
+
+		output := buf.String()
+		if !strings.Contains(output, "allow") {
+			t.Errorf("expected TUI to approve, got: %s", output)
+		}
+	})
+}
+
 func TestServer_sendToolResult(t *testing.T) {
 	t.Run("sends success result with isError false", func(t *testing.T) {
 		var buf strings.Builder

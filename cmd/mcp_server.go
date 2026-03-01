@@ -17,6 +17,7 @@ var socketPath string
 var tcpAddr string
 var listenAddr string
 var autoApprove bool
+var mcpAllowedTools string
 var mcpSessionID string
 var mcpHostTools bool
 
@@ -31,7 +32,8 @@ func init() {
 	mcpServerCmd.Flags().StringVar(&socketPath, "socket", "", "Unix socket path for TUI communication")
 	mcpServerCmd.Flags().StringVar(&tcpAddr, "tcp", "", "TCP address for TUI communication (host:port)")
 	mcpServerCmd.Flags().StringVar(&listenAddr, "listen", "", "Listen on TCP address and wait for host to connect (host:port)")
-	mcpServerCmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Auto-approve all tool permissions (used in container mode)")
+	mcpServerCmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Auto-approve tool permissions (used in container mode)")
+	mcpServerCmd.Flags().StringVar(&mcpAllowedTools, "allowed-tools", "", "Comma-separated list of allowed tools (with --auto-approve, unlisted tools are denied)")
 	mcpServerCmd.Flags().StringVar(&mcpSessionID, "session-id", "", "Session ID for logging")
 	mcpServerCmd.Flags().BoolVar(&mcpHostTools, "host-tools", false, "Enable host operation tools (create_pr, push_branch)")
 	rootCmd.AddCommand(mcpServerCmd)
@@ -213,7 +215,14 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "[mcp] connected to TUI, starting JSONRPC server\n")
 	var allowedTools []string
 	if autoApprove {
-		allowedTools = []string{"*"}
+		if mcpAllowedTools != "" {
+			// Explicit tool list: auto-approve only these tools, deny everything else
+			allowedTools = strings.Split(mcpAllowedTools, ",")
+			serverOpts = append(serverOpts, mcp.WithDenyUnlisted())
+		} else {
+			// No explicit list: approve everything (backward compat for coding sessions)
+			allowedTools = []string{"*"}
+		}
 	}
 	server := mcp.NewServer(os.Stdin, os.Stdout, reqChan, respChan, questionChan, answerChan, planApprovalChan, planResponseChan, allowedTools, sessionID, serverOpts...)
 	err = server.Run()
