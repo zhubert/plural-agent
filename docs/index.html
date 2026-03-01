@@ -3002,6 +3002,48 @@
           </div>
         </div>
 
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.move_to_state</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Moves the Linear issue to a named workflow state (e.g.,
+            &ldquo;In Progress&rdquo;, &ldquo;Done&rdquo;). Use this to reflect
+            workflow progress in Linear as work advances through the pipeline.
+            Requires the <code>LINEAR_API_KEY</code> environment variable to be
+            set and a Linear provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Name of the workflow state to move the issue into. Matched
+                    case-insensitively against the team's configured states.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
         <h3 id="actions-git">Git actions</h3>
 
         <div class="action-ref">
@@ -4067,6 +4109,65 @@ https://github.com/your-org/your-repo/pull/99</pre
                   <td>section</td>
                   <td>string</td>
                   <td>The section name as specified in the workflow params.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="events-linear">Linear events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.in_state</span>
+          </div>
+          <p class="action-desc">
+            Fires when the Linear issue has been moved to a specific named
+            workflow state. Use this to gate on human state transitions in
+            Linear — for example, waiting for a team lead to move an issue to
+            &ldquo;In Progress&rdquo; before Claude begins coding. Requires
+            the <code>LINEAR_API_KEY</code> environment variable and a Linear
+            provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Workflow state name to watch for. Matched case-insensitively
+                    against the issue's current state.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td>The state name as specified in the workflow params.</td>
                 </tr>
               </tbody>
             </table>
