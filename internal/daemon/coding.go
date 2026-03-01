@@ -902,21 +902,6 @@ INSTRUCTIONS:
 DO NOT push — the system handles pushing after you commit.`, round, fileList)
 }
 
-// getConflictRounds extracts the conflict resolution round counter from step data.
-func getConflictRounds(stepData map[string]any) int {
-	v, ok := stepData["conflict_rounds"]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	default:
-		return 0
-	}
-}
 
 // getRebaseRounds extracts the rebase round counter from step data.
 func getRebaseRounds(stepData map[string]any) int {

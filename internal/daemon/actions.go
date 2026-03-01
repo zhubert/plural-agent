@@ -652,12 +652,7 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 		return workflow.ActionResult{Error: err}
 	}
 
-	// Check max rounds
 	maxRounds := ac.Params.Int("max_conflict_rounds", 3)
-	rounds := getConflictRounds(item.StepData)
-	if rounds >= maxRounds {
-		return workflow.ActionResult{Error: fmt.Errorf("max conflict resolution rounds exceeded (%d/%d)", rounds, maxRounds)}
-	}
 
 	// Refresh stale session to ensure worktree exists
 	sess = d.refreshStaleSession(ctx, item, sess)
@@ -668,19 +663,24 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	// Abort any stale merge that may be in progress from a previous attempt
 	workDir := sess.GetWorkDir()
 
+	// Derive round count from git state: each completed conflict-resolution
+	// round leaves exactly one merge commit on the branch.
+	rounds, err := d.gitService.CountMergeCommits(ctx, workDir, baseBranch)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("failed to count conflict rounds: %w", err)}
+	}
+
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max conflict resolution rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	// Abort any stale merge that may be in progress from a previous attempt
 	mergeInProgress, _ := d.gitService.IsMergeInProgress(ctx, workDir)
 	if mergeInProgress {
 		d.gitService.AbortMerge(ctx, workDir)
 	}
-
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["conflict_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
 
 	// Merge base branch into feature branch
 	mergeCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)

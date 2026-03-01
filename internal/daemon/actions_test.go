@@ -4419,9 +4419,19 @@ func TestResolveConflictsAction_NoSession(t *testing.T) {
 
 func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 	cfg := testConfig()
-	d := testDaemon(cfg)
+	mockExec := exec.NewMockExecutor(nil)
+
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: git rev-list returns 3 (max already reached)
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("3\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
 
 	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
 	cfg.AddSession(*sess)
 
 	d.state.AddWorkItem(&daemonstate.WorkItem{
@@ -4429,7 +4439,7 @@ func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
 		SessionID: "sess-1",
 		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"conflict_rounds": 3},
+		StepData:  map[string]any{},
 	})
 
 	action := &resolveConflictsAction{daemon: d}
@@ -4452,42 +4462,16 @@ func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 	}
 }
 
-func TestResolveConflictsAction_MaxRoundsFloat64(t *testing.T) {
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	sess := testSession("sess-1")
-	cfg.AddSession(*sess)
-
-	d.state.AddWorkItem(&daemonstate.WorkItem{
-		ID:        "item-1",
-		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
-		SessionID: "sess-1",
-		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"conflict_rounds": float64(3)},
-	})
-
-	action := &resolveConflictsAction{daemon: d}
-	params := workflow.NewParamHelper(map[string]any{"max_conflict_rounds": 3})
-	ac := &workflow.ActionContext{
-		WorkItemID: "item-1",
-		Params:     params,
-	}
-
-	result := action.Execute(context.Background(), ac)
-
-	if result.Success {
-		t.Error("expected failure when max rounds exceeded (float64)")
-	}
-	if result.Error == nil {
-		t.Error("expected error when max rounds exceeded (float64)")
-	}
-}
-
 func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: 0 completed rounds so far
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
 	// Mock IsMergeInProgress (git rev-parse --verify MERGE_HEAD fails = no merge)
 	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "MERGE_HEAD"}, exec.MockResponse{
 		Err: fmt.Errorf("not found"),
@@ -4496,10 +4480,6 @@ func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
 	// Mock git merge (clean)
 	mockExec.AddExactMatch("git", []string{"merge", "origin/main", "--no-edit"}, exec.MockResponse{})
-	// Mock GetDefaultBranch
-	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
-		Stdout: []byte("refs/remotes/origin/main"),
-	})
 
 	d := testDaemonWithExec(cfg, mockExec)
 
@@ -4530,19 +4510,18 @@ func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	if result.Async {
 		t.Error("expected sync result for clean merge (no Claude needed)")
 	}
-
-	// Verify rounds incremented
-	item, _ := d.state.GetWorkItem("item-1")
-	rounds := getConflictRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected conflict_rounds=1, got %d", rounds)
-	}
 }
 
 func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: 0 completed rounds so far
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
 	// Mock IsMergeInProgress (no stale merge)
 	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "MERGE_HEAD"}, exec.MockResponse{
 		Err: fmt.Errorf("not found"),
@@ -4556,10 +4535,6 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	// Mock GetConflictedFiles
 	mockExec.AddExactMatch("git", []string{"diff", "--name-only", "--diff-filter=U"}, exec.MockResponse{
 		Stdout: []byte("file1.go\nfile2.go\n"),
-	})
-	// Mock GetDefaultBranch
-	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
-		Stdout: []byte("refs/remotes/origin/main"),
 	})
 
 	d := testDaemonWithExec(cfg, mockExec)
@@ -4591,38 +4566,8 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	if !result.Async {
 		t.Error("expected async result when conflicts need Claude resolution")
 	}
-
-	// Verify rounds incremented
-	item, _ := d.state.GetWorkItem("item-1")
-	rounds := getConflictRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected conflict_rounds=1, got %d", rounds)
-	}
 }
 
-func TestGetConflictRounds(t *testing.T) {
-	tests := []struct {
-		name     string
-		stepData map[string]any
-		expected int
-	}{
-		{"nil step data", nil, 0},
-		{"empty step data", map[string]any{}, 0},
-		{"int value", map[string]any{"conflict_rounds": 2}, 2},
-		{"float64 value (JSON)", map[string]any{"conflict_rounds": float64(3)}, 3},
-		{"string value (invalid)", map[string]any{"conflict_rounds": "2"}, 0},
-		{"zero value", map[string]any{"conflict_rounds": 0}, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getConflictRounds(tt.stepData)
-			if got != tt.expected {
-				t.Errorf("expected %d, got %d", tt.expected, got)
-			}
-		})
-	}
-}
 
 func TestFormatConflictResolutionPrompt(t *testing.T) {
 	prompt := formatConflictResolutionPrompt(2, []string{"file1.go", "file2.go"})
