@@ -106,6 +106,92 @@ func TestGetPRState_DraftTreatedAsOpen(t *testing.T) {
 	}
 }
 
+func TestGetPRForBranch_Open(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "list", "--head", "feature-branch", "--json", "url,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"url":"https://github.com/owner/repo/pull/1","state":"OPEN"}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	state, url, err := svc.GetPRForBranch(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != PRStateOpen {
+		t.Errorf("expected OPEN, got %s", state)
+	}
+	if url != "https://github.com/owner/repo/pull/1" {
+		t.Errorf("expected PR URL, got %q", url)
+	}
+}
+
+func TestGetPRForBranch_NoPR(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "list", "--head", "feature-branch", "--json", "url,state"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	state, url, err := svc.GetPRForBranch(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error for empty list: %v", err)
+	}
+	if state != PRStateUnknown {
+		t.Errorf("expected PRStateUnknown for no PR, got %s", state)
+	}
+	if url != "" {
+		t.Errorf("expected empty URL, got %q", url)
+	}
+}
+
+func TestGetPRForBranch_Merged(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "list", "--head", "feature-branch", "--json", "url,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"url":"https://github.com/owner/repo/pull/2","state":"MERGED"}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	state, _, err := svc.GetPRForBranch(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != PRStateMerged {
+		t.Errorf("expected MERGED, got %s", state)
+	}
+}
+
+func TestGetPRForBranch_DraftTreatedAsOpen(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "list", "--head", "feature-branch", "--json", "url,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"url":"https://github.com/owner/repo/pull/3","state":"DRAFT"}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	state, _, err := svc.GetPRForBranch(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != PRStateOpen {
+		t.Errorf("expected DRAFT to be treated as OPEN, got %s", state)
+	}
+}
+
+func TestGetPRForBranch_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "list", "--head", "feature-branch", "--json", "url,state"}, pexec.MockResponse{
+		Err: fmt.Errorf("gh: command failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	state, _, err := svc.GetPRForBranch(context.Background(), "/repo", "feature-branch")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if state != PRStateUnknown {
+		t.Errorf("expected unknown state on error, got %s", state)
+	}
+}
+
 func TestGetBatchPRStates_MultipleStates(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddExactMatch("gh", []string{"pr", "list", "--state", "all", "--json", "state,headRefName", "--head", "branch-a"}, pexec.MockResponse{

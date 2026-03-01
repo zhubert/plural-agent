@@ -54,6 +54,37 @@ func (s *GitService) GetPRState(ctx context.Context, repoPath, branch string) (P
 	}
 }
 
+// GetPRForBranch returns the state and URL of an existing PR for the given branch.
+// Uses "gh pr list --head <branch>" which returns an empty list (not an error)
+// when no PR exists. Returns PRStateUnknown and empty URL when no PR is found.
+func (s *GitService) GetPRForBranch(ctx context.Context, repoPath, branch string) (PRState, string, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "list", "--head", branch, "--json", "url,state")
+	if err != nil {
+		return PRStateUnknown, "", fmt.Errorf("gh pr list failed: %w", err)
+	}
+
+	var prs []struct {
+		URL   string `json:"url"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(output, &prs); err != nil {
+		return PRStateUnknown, "", fmt.Errorf("failed to parse PR list: %w", err)
+	}
+
+	if len(prs) == 0 {
+		return PRStateUnknown, "", nil
+	}
+
+	pr := prs[0]
+	switch PRState(pr.State) {
+	case PRStateOpen, PRStateMerged, PRStateClosed:
+		return PRState(pr.State), pr.URL, nil
+	default:
+		// Treat unrecognized states (e.g., DRAFT) as OPEN
+		return PRStateOpen, pr.URL, nil
+	}
+}
+
 // GetBatchPRStates returns the PR states for multiple branches.
 // It uses `gh pr list --head <branch>` to filter by each branch individually,
 // which correctly handles repos with any number of total PRs.

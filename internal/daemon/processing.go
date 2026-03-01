@@ -10,6 +10,7 @@ import (
 
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/workflow"
 )
 
@@ -125,17 +126,22 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 		return
 	}
 
-	if sess != nil && sess.PRCreated && item.CurrentStep == "coding" {
-		log.Warn("PR already created outside workflow, skipping open_pr step")
-		if state != nil {
-			d.runHooks(ctx, state.After, item, sess)
+	if sess != nil && item.CurrentStep == "coding" && sess.Branch != "" {
+		prCheckCtx, prCheckCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+		existingState, _, prCheckErr := d.gitService.GetPRForBranch(prCheckCtx, sess.RepoPath, sess.Branch)
+		prCheckCancel()
+		if prCheckErr == nil && existingState == git.PRStateOpen {
+			log.Warn("PR already created outside workflow, skipping open_pr step")
+			if state != nil {
+				d.runHooks(ctx, state.After, item, sess)
+			}
+			prState := engine.GetState("open_pr")
+			if prState != nil {
+				d.runHooks(ctx, prState.After, item, sess)
+			}
+			d.state.AdvanceWorkItem(item.ID, "await_review", "idle")
+			return
 		}
-		prState := engine.GetState("open_pr")
-		if prState != nil {
-			d.runHooks(ctx, prState.After, item, sess)
-		}
-		d.state.AdvanceWorkItem(item.ID, "await_review", "idle")
-		return
 	}
 
 	// If a format_command was configured on the coding action, run the formatter

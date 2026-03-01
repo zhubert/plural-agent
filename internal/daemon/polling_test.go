@@ -405,9 +405,6 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 	if sess.Branch != "issue-42" {
 		t.Errorf("expected session branch 'issue-42', got %q", sess.Branch)
 	}
-	if !sess.PRCreated {
-		t.Error("expected session to have PRCreated=true")
-	}
 
 	// Verify no label removal calls were made (only graphql + git remote calls expected).
 	for _, call := range mockExec.GetCalls() {

@@ -26,7 +26,6 @@ type Session struct {
 	Started    bool      `json:"started,omitempty"` // Whether session has been started with Claude CLI
 
 	Merged                   bool      `json:"merged,omitempty"`                      // Whether session has been merged to main
-	PRCreated                bool      `json:"pr_created,omitempty"`                  // Whether a PR has been created for this session
 	PRMerged                 bool      `json:"pr_merged,omitempty"`                   // Whether the PR was merged on GitHub
 	PRClosed                 bool      `json:"pr_closed,omitempty"`                   // Whether the PR was closed without merging on GitHub
 	ParentID                 string    `json:"parent_id,omitempty"`                   // ID of parent session if this is a fork

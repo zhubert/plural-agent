@@ -1097,11 +1097,22 @@ func TestDaemon_StartQueuedItems(t *testing.T) {
 
 func TestDaemon_HandleAsyncComplete_PRAlreadyCreated(t *testing.T) {
 	cfg := testConfig()
-	d := testDaemon(cfg)
+	mockExec := exec.NewMockExecutor(nil)
 
-	// Create a session where the worker already created a PR via MCP tools
+	// Mock gh pr list to return an open PR for this branch (simulating Claude
+	// creating a PR inside the container via gh pr create).
+	prListJSON, _ := json.Marshal([]struct {
+		URL   string `json:"url"`
+		State string `json:"state"`
+	}{{URL: "https://github.com/owner/repo/pull/99", State: "OPEN"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list", "--head", "feature-sess-pr-created"}, exec.MockResponse{
+		Stdout: prListJSON,
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	// Create a session — no PRCreated flag needed; GitHub state is the source of truth
 	sess := testSession("sess-pr-created")
-	sess.PRCreated = true
 	cfg.AddSession(*sess)
 
 	// Add a work item in coding step with async_pending phase and a done worker
@@ -1137,9 +1148,8 @@ func TestDaemon_HandleAsyncComplete_PRAlreadyMerged(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
-	// Create a session where the worker already created and merged a PR
+	// Create a session where the PR was already merged
 	sess := testSession("sess-pr-merged")
-	sess.PRCreated = true
 	sess.PRMerged = true
 	cfg.AddSession(*sess)
 

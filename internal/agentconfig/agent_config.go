@@ -164,18 +164,6 @@ func (c *AgentConfig) MarkSessionStarted(sessionID string) bool {
 	return false
 }
 
-func (c *AgentConfig) MarkSessionPRCreated(sessionID string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := range c.sessions {
-		if c.sessions[i].ID == sessionID {
-			c.sessions[i].PRCreated = true
-			return true
-		}
-	}
-	return false
-}
-
 func (c *AgentConfig) MarkSessionPRMerged(sessionID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

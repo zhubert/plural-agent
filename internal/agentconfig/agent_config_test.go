@@ -167,7 +167,6 @@ func TestAgentConfig_MarkSessionMethods(t *testing.T) {
 		checkFn func(*model.Session) bool
 	}{
 		{"Started", c.MarkSessionStarted, func(s *model.Session) bool { return s.Started }},
-		{"PRCreated", c.MarkSessionPRCreated, func(s *model.Session) bool { return s.PRCreated }},
 		{"PRMerged", c.MarkSessionPRMerged, func(s *model.Session) bool { return s.PRMerged }},
 		{"MergedToParent", c.MarkSessionMergedToParent, func(s *model.Session) bool { return s.MergedToParent }},
 	}

@@ -316,7 +316,6 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 		Autonomous:    true,
 		Containerized: true,
 		Started:       true,
-		PRCreated:     true,
 		IssueRef: &config.IssueRef{
 			Source: string(issues.SourceGitHub),
 			ID:     issue.ID,

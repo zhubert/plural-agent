@@ -15,7 +15,6 @@ type Config interface {
 	RemoveSession(id string) bool
 	ClearOrphanedParentIDs(deletedIDs []string)
 	MarkSessionStarted(sessionID string) bool
-	MarkSessionPRCreated(sessionID string) bool
 	MarkSessionPRMerged(sessionID string) bool
 	MarkSessionMergedToParent(sessionID string) bool
 	UpdateSessionPRCommentsAddressedCount(sessionID string, count int) bool

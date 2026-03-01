@@ -69,9 +69,6 @@ func TestDaemon_ReconstructSessions_RecoveredItemsGetSessions(t *testing.T) {
 	if !sess1.Containerized {
 		t.Error("expected Containerized=true")
 	}
-	if !sess1.PRCreated {
-		t.Error("expected PRCreated=true for post-coding item")
-	}
 
 	sess2 := cfg.GetSession("sess-2")
 	if sess2 == nil {
@@ -79,31 +76,6 @@ func TestDaemon_ReconstructSessions_RecoveredItemsGetSessions(t *testing.T) {
 	}
 	if sess2.Branch != "feature-2" {
 		t.Errorf("expected Branch feature-2, got %s", sess2.Branch)
-	}
-}
-
-func TestDaemon_ReconstructSessions_CodingItemNotMarkedPRCreated(t *testing.T) {
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	// Item still in coding step — PR hasn't been created yet
-	d.state.AddWorkItem(&daemonstate.WorkItem{
-		ID:          "item-coding",
-		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
-		SessionID:   "sess-coding",
-		Branch:      "feature-coding",
-		CurrentStep: "coding",
-	})
-	d.state.AdvanceWorkItem("item-coding", "coding", "async_pending")
-
-	d.reconstructSessions()
-
-	sess := cfg.GetSession("sess-coding")
-	if sess == nil {
-		t.Fatal("expected session to be reconstructed")
-	}
-	if sess.PRCreated {
-		t.Error("expected PRCreated=false for item still in coding step")
 	}
 }
 

@@ -30,9 +30,6 @@ func (d *Daemon) reconstructSessions() {
 			continue
 		}
 
-		// Only mark PRCreated if the item is past the coding step.
-		prCreated := item.CurrentStep != "" && item.CurrentStep != "coding"
-
 		// Reconstruct the worktree path from the session ID. Worktrees follow
 		// a deterministic layout: <worktreesDir>/<sessionID>. Without this,
 		// cleanup operations fail because they try to run `git worktree remove ""`.
@@ -50,7 +47,6 @@ func (d *Daemon) reconstructSessions() {
 			Autonomous:    true,
 			Containerized: true,
 			Started:       true,
-			PRCreated:     prCreated,
 		}
 		d.config.AddSession(sess)
 
