@@ -3,7 +3,9 @@ package git
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -1151,6 +1153,16 @@ Diff:
 	return title, body, nil
 }
 
+// isGHNotFoundErr reports whether a gh CLI error indicates a resource was not found.
+// It checks both real exec.ExitError.Stderr and plain error messages (used by mocks).
+func isGHNotFoundErr(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return strings.Contains(strings.ToLower(string(exitErr.Stderr)), "not found")
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
 // CreateRelease creates a GitHub release using the gh CLI and returns the release URL.
 //
 // Parameters:
@@ -1166,13 +1178,19 @@ func (s *GitService) CreateRelease(ctx context.Context, repoPath, tag, title, no
 	}
 
 	// Check if the release already exists to make this idempotent.
-	if viewOutput, viewErr := s.executor.Output(ctx, repoPath, "gh", "release", "view", tag, "--json", "url"); viewErr == nil {
+	viewOutput, viewErr := s.executor.Output(ctx, repoPath, "gh", "release", "view", tag, "--json", "url")
+	if viewErr == nil {
 		var viewResp struct {
 			URL string `json:"url"`
 		}
-		if jsonErr := json.Unmarshal(viewOutput, &viewResp); jsonErr == nil && viewResp.URL != "" {
+		if jsonErr := json.Unmarshal(viewOutput, &viewResp); jsonErr != nil {
+			return "", fmt.Errorf("unexpected response from gh release view: %w", jsonErr)
+		}
+		if viewResp.URL != "" {
 			return viewResp.URL, nil
 		}
+	} else if !isGHNotFoundErr(viewErr) {
+		return "", fmt.Errorf("gh release view failed: %w", viewErr)
 	}
 
 	args := []string{"release", "create", tag}

@@ -6667,6 +6667,11 @@ func TestCreateReleaseAction_Execute_Success(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// Mock `gh release view` to return not-found (enabling idempotency check to proceed).
+	mockExec.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, exec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
+
 	// Mock `gh release create` to succeed
 	mockExec.AddPrefixMatch("gh", []string{"release", "create", "v1.0.0"}, exec.MockResponse{
 		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.0.0\n"),
@@ -6717,6 +6722,11 @@ func TestCreateReleaseAction_Execute_Success(t *testing.T) {
 func TestCreateReleaseAction_Execute_GhError(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock `gh release view` to return not-found (enabling idempotency check to proceed).
+	mockExec.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, exec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
 
 	// Mock `gh release create` to fail
 	mockExec.AddPrefixMatch("gh", []string{"release", "create"}, exec.MockResponse{
