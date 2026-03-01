@@ -1165,6 +1165,16 @@ func (s *GitService) CreateRelease(ctx context.Context, repoPath, tag, title, no
 		return "", fmt.Errorf("tag is required")
 	}
 
+	// Check if the release already exists to make this idempotent.
+	if viewOutput, viewErr := s.executor.Output(ctx, repoPath, "gh", "release", "view", tag, "--json", "url"); viewErr == nil {
+		var viewResp struct {
+			URL string `json:"url"`
+		}
+		if jsonErr := json.Unmarshal(viewOutput, &viewResp); jsonErr == nil && viewResp.URL != "" {
+			return viewResp.URL, nil
+		}
+	}
+
 	args := []string{"release", "create", tag}
 	if title != "" {
 		args = append(args, "--title", title)

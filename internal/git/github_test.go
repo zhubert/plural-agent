@@ -2335,6 +2335,49 @@ func TestCreateRelease_CLIError(t *testing.T) {
 	}
 }
 
+func TestCreateRelease_AlreadyExists_ReturnsExistingURL(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.2.3", "--json", "url"}, pexec.MockResponse{
+		Stdout: []byte(`{"url":"https://github.com/owner/repo/releases/tag/v1.2.3"}`),
+	})
+	// gh release create should NOT be called when release already exists.
+
+	svc := NewGitServiceWithExecutor(mock)
+	url, err := svc.CreateRelease(context.Background(), "/repo", "v1.2.3", "", "", false, false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/owner/repo/releases/tag/v1.2.3" {
+		t.Errorf("unexpected release URL: %s", url)
+	}
+
+	// Verify gh release create was never called.
+	for _, call := range mock.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "release" && call.Args[1] == "create" {
+			t.Error("gh release create should not be called when release already exists")
+		}
+	}
+}
+
+func TestCreateRelease_ViewFails_ProceedsToCreate(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
+	mock.AddExactMatch("gh", []string{"release", "create", "v1.0.0", "--generate-notes"}, pexec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.0.0\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	url, err := svc.CreateRelease(context.Background(), "/repo", "v1.0.0", "", "", false, false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/owner/repo/releases/tag/v1.0.0" {
+		t.Errorf("unexpected release URL: %s", url)
+	}
+}
+
 func TestUpdatePRBody_Success(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddPrefixMatch("gh", []string{"pr", "edit", "feature-branch", "--body"}, pexec.MockResponse{})
