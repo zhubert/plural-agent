@@ -353,6 +353,59 @@ func (s *SessionService) CreateFromBranch(ctx context.Context, repoPath string, 
 	return session, nil
 }
 
+// CreateOnExistingBranch creates a new session using an already-existing branch.
+// Unlike Create or CreateFromBranch, this does NOT create a new branch — it attaches
+// a new worktree to the existing branch so work can resume from where it left off.
+func (s *SessionService) CreateOnExistingBranch(ctx context.Context, repoPath, branch, baseBranch string) (*config.Session, error) {
+	log := logger.WithComponent("session")
+	startTime := time.Now()
+	log.Info("creating session on existing branch",
+		"repoPath", repoPath,
+		"branch", branch,
+		"baseBranch", baseBranch)
+
+	id := uuid.New().String()
+
+	repoName := filepath.Base(repoPath)
+
+	worktreesDir, err := paths.WorktreesDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worktrees directory: %w", err)
+	}
+	worktreePath := filepath.Join(worktreesDir, id)
+
+	log.Info("creating git worktree for existing branch",
+		"branch", branch,
+		"worktreePath", worktreePath)
+	worktreeStart := time.Now()
+	output, err := s.executor.CombinedOutput(ctx, repoPath, "git", "worktree", "add", worktreePath, branch)
+	if err != nil {
+		log.Error("failed to create worktree for existing branch",
+			"duration", time.Since(worktreeStart),
+			"output", string(output),
+			"error", err)
+		return nil, fmt.Errorf("failed to create worktree: %s: %w", string(output), err)
+	}
+	log.Debug("git worktree created", "duration", time.Since(worktreeStart))
+
+	sess := &config.Session{
+		ID:         id,
+		RepoPath:   repoPath,
+		WorkTree:   worktreePath,
+		Branch:     branch,
+		BaseBranch: baseBranch,
+		Name:       fmt.Sprintf("%s/%s", repoName, branch),
+		CreatedAt:  time.Now(),
+	}
+
+	log.Info("session on existing branch created successfully",
+		"sessionID", id,
+		"name", sess.Name,
+		"baseBranch", baseBranch,
+		"duration", time.Since(startTime))
+	return sess, nil
+}
+
 // ValidateRepo checks if a path is a valid git repository
 func (s *SessionService) ValidateRepo(ctx context.Context, path string) error {
 	log := logger.WithComponent("session")

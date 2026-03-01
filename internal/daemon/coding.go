@@ -141,6 +141,7 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 	fullBranchName := branchPrefix + branchName
 
 	// Check if branch already exists (stale from a previous crashed session)
+	var sess *config.Session
 	if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
 		// Before cleaning up, check if there's a live PR on this branch.
 		// If so, create a minimal tracking session so the workflow can advance
@@ -180,17 +181,36 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 			return fmt.Errorf("branch %s has an existing %s PR: %w", fullBranchName, prState, errExistingPR)
 		}
 
-		log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
-		d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
-		if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
-			return fmt.Errorf("branch %s exists and could not be cleaned up", fullBranchName)
+		// Check if the branch has commits ahead of the base branch.
+		// If it does, the branch IS the state — resume work on it instead of throwing it away.
+		baseBranch := d.sessionService.GetDefaultBranch(ctx, repoPath)
+		divCtx, divCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+		divergence, divErr := d.gitService.GetBranchDivergence(divCtx, repoPath, baseBranch, fullBranchName)
+		divCancel()
+		if divErr == nil && divergence.Ahead > 0 {
+			log.Info("branch has commits ahead of base, resuming instead of cleaning up",
+				"branch", fullBranchName, "commitsAhead", divergence.Ahead)
+			resumeSess, resumeErr := d.sessionService.CreateOnExistingBranch(ctx, repoPath, fullBranchName, baseBranch)
+			if resumeErr != nil {
+				return fmt.Errorf("failed to resume existing branch %s: %w", fullBranchName, resumeErr)
+			}
+			sess = resumeSess
+		} else {
+			log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
+			d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
+			if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
+				return fmt.Errorf("branch %s exists and could not be cleaned up", fullBranchName)
+			}
 		}
 	}
 
-	// Create new session
-	sess, err := d.sessionService.Create(ctx, repoPath, branchName, branchPrefix, session.BasePointOrigin)
-	if err != nil {
-		return fmt.Errorf("session creation failed: %w", err)
+	if sess == nil {
+		// Create new session on a fresh branch
+		newSess, err := d.sessionService.Create(ctx, repoPath, branchName, branchPrefix, session.BasePointOrigin)
+		if err != nil {
+			return fmt.Errorf("session creation failed: %w", err)
+		}
+		sess = newSess
 	}
 
 	// Configure session from workflow config params
