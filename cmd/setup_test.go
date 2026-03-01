@@ -149,8 +149,8 @@ func TestRunSetup_GitHub(t *testing.T) {
 
 func TestRunSetup_GitHub_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// Input: tracker=1, label=myqueue, plan=y, fixci=n, autoreview=n, reviewer=alice, method=squash, containers=y
-	input := "1\nmyqueue\ny\nn\nn\nalice\nsquash\ny\n"
+	// Input: tracker=1, label=myqueue, plan=y, fixci=n, autoreview=n, reviewer=alice, method=squash, containers=y, slack=n
+	input := "1\nmyqueue\ny\nn\nn\nalice\nsquash\ny\nn\n"
 	var out bytes.Buffer
 	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
 	if err != nil {
@@ -235,8 +235,9 @@ func TestRunSetup_Asana(t *testing.T) {
 
 func TestRunSetup_Asana_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// Input: tracker=2, project=1234, tag=ready, completion=Done, plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n
-	input := "2\n1234\nready\nDone\nn\ny\ny\n\n\nn\n"
+	// Input: tracker=2, project=1234, org=1(tags), tag=ready, section=(skip), completion=Done,
+	// plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n, slack=n
+	input := "2\n1234\n1\nready\n\nDone\nn\ny\ny\n\n\nn\nn\n"
 	var out bytes.Buffer
 	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
 	if err != nil {
@@ -254,6 +255,9 @@ func TestRunSetup_Asana_WizardCaptures(t *testing.T) {
 	}
 	if captured.CompletionSection != "Done" {
 		t.Errorf("expected CompletionSection=Done, got %q", captured.CompletionSection)
+	}
+	if captured.Kanban {
+		t.Errorf("expected Kanban=false for tags mode")
 	}
 }
 
@@ -280,8 +284,8 @@ func TestRunSetup_Linear(t *testing.T) {
 
 func TestRunSetup_Linear_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// Input: tracker=3, team=team-xyz, label=queued, completionState=Merged, then defaults
-	input := "3\nteam-xyz\n\nMerged\n"
+	// Input: tracker=3, team=team-xyz, org=1(labels), label=queued, completionState=Merged, then defaults
+	input := "3\nteam-xyz\n1\n\nMerged\n"
 	var out bytes.Buffer
 	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
 	if err != nil {
@@ -299,6 +303,9 @@ func TestRunSetup_Linear_WizardCaptures(t *testing.T) {
 	}
 	if captured.CompletionState != "Merged" {
 		t.Errorf("expected CompletionState=Merged, got %q", captured.CompletionState)
+	}
+	if captured.Kanban {
+		t.Errorf("expected Kanban=false for labels mode")
 	}
 }
 
@@ -397,6 +404,78 @@ func TestRunSetup_ShowsErgStart(t *testing.T) {
 	}
 	if !strings.Contains(output, "Setup complete") {
 		t.Errorf("expected 'Setup complete' in output, got:\n%s", output)
+	}
+}
+
+func TestRunSetup_Asana_Kanban_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=2, project=1234, org=2(kanban), section="To do"(default), completion="Done"(default),
+	// plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n, slack=n
+	input := "2\n1234\n2\n\n\nn\ny\ny\n\n\nn\nn\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "asana" {
+		t.Errorf("expected provider asana, got %q", captured.Provider)
+	}
+	if !captured.Kanban {
+		t.Errorf("expected Kanban=true")
+	}
+	if captured.Section != "To do" {
+		t.Errorf("expected Section='To do', got %q", captured.Section)
+	}
+	if captured.Label != "" {
+		t.Errorf("expected Label empty for kanban, got %q", captured.Label)
+	}
+	if captured.CompletionSection != "Done" {
+		t.Errorf("expected CompletionSection=Done, got %q", captured.CompletionSection)
+	}
+}
+
+func TestRunSetup_Linear_Kanban_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=3, team=team-xyz, org=2(kanban), label=queued(default), completion="Done"(default),
+	// plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n, slack=n
+	input := "3\nteam-xyz\n2\n\n\nn\ny\ny\n\n\nn\nn\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "linear" {
+		t.Errorf("expected provider linear, got %q", captured.Provider)
+	}
+	if !captured.Kanban {
+		t.Errorf("expected Kanban=true")
+	}
+	if captured.Label != "queued" {
+		t.Errorf("expected Label=queued for Linear kanban, got %q", captured.Label)
+	}
+	if captured.CompletionState != "Done" {
+		t.Errorf("expected CompletionState=Done, got %q", captured.CompletionState)
+	}
+}
+
+func TestRunSetup_GitHub_Slack_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=1, label=queued(default), plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n,
+	// slack=y, webhook=$SLACK_WEBHOOK_URL
+	input := "1\n\nn\ny\ny\n\n\nn\ny\n$SLACK_WEBHOOK_URL\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !captured.NotifySlack {
+		t.Errorf("expected NotifySlack=true")
+	}
+	if captured.SlackWebhook != "$SLACK_WEBHOOK_URL" {
+		t.Errorf("expected SlackWebhook=$SLACK_WEBHOOK_URL, got %q", captured.SlackWebhook)
 	}
 }
 
