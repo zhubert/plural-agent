@@ -3,6 +3,7 @@ package workflow
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -657,10 +658,8 @@ func optionalEnum(prefix string, params map[string]any, key string, valid []stri
 	if !ok {
 		return nil
 	}
-	for _, allowed := range valid {
-		if s == allowed {
-			return nil
-		}
+	if slices.Contains(valid, s) {
+		return nil
 	}
 	return []ValidationError{{
 		Field:   prefix + ".params." + key,

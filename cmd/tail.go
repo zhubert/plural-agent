@@ -261,7 +261,7 @@ func renderTailView(w io.Writer, items []*daemonstate.WorkItem, termRows, termCo
 	fmt.Fprintln(w)
 
 	// Print content rows — row-by-row across all columns
-	for row := 0; row < contentRows; row++ {
+	for row := range contentRows {
 		for i, col := range cols {
 			if i > 0 {
 				fmt.Fprint(w, "│")
