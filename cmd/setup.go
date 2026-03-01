@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/cli"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 var setupCmd = &cobra.Command{
@@ -18,7 +19,7 @@ var setupCmd = &cobra.Command{
 
   - Checks required tools (git, claude, gh) and shows install instructions
   - Guides you through setting up your issue tracker (GitHub, Asana, or Linear)
-  - Shows how to configure environment variables and workflow settings`,
+  - Asks workflow questions and generates .erg/workflow.yaml for your repo`,
 	RunE: runSetup,
 }
 
@@ -27,13 +28,20 @@ func init() {
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
-	return runSetupWithIO(os.Stdin, os.Stdout, cli.CheckAll)
+	repoPath, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	return runSetupWithIO(os.Stdin, os.Stdout, cli.CheckAll, repoPath, workflow.WriteFromWizard)
 }
 
 // prereqCheckerFn is the type for the prerequisite check function.
 type prereqCheckerFn func([]cli.Prerequisite) []cli.CheckResult
 
-func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn) error {
+// workflowWriterFn is a function that writes a workflow config based on wizard answers.
+type workflowWriterFn func(repoPath string, cfg workflow.WizardConfig) (string, error)
+
+func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn) error {
 	fmt.Fprintln(output, "=== erg setup ===")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Checking prerequisites...")
@@ -99,18 +107,150 @@ func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn) 
 
 	fmt.Fprintln(output)
 
+	var provider string
 	switch choice {
 	case "1":
 		printGitHubSetup(output)
+		provider = "github"
 	case "2":
 		printAsanaSetup(output)
+		provider = "asana"
 	case "3":
 		printLinearSetup(output)
+		provider = "linear"
 	default:
 		fmt.Fprintf(output, "Invalid choice %q. Please run `erg setup` again and enter 1, 2, or 3.\n", choice)
+		return nil
 	}
 
+	// Run the workflow wizard to generate .erg/workflow.yaml
+	wizardCfg := runWorkflowWizard(scanner, output, provider)
+
+	fmt.Fprintln(output)
+	fp, err := writer(repoPath, wizardCfg)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			fmt.Fprintf(output, "Note: %s already exists, skipping workflow generation.\n", fp)
+			fmt.Fprintln(output, "      Delete it and run `erg setup` again to reconfigure.")
+		} else {
+			fmt.Fprintf(output, "Failed to write workflow config: %v\n", err)
+			return nil
+		}
+	} else {
+		fmt.Fprintf(output, "Created %s\n", fp)
+	}
+
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Setup complete! Start the daemon:")
+	fmt.Fprintln(output, "  erg start")
+
 	return nil
+}
+
+// runWorkflowWizard prompts the user for workflow configuration choices and
+// returns a WizardConfig populated from their answers. Pressing Enter accepts
+// the default for each question. EOF (e.g. piped input exhausted) also accepts
+// the default, so existing tests that only provide tracker-selection input
+// still work by getting sensible defaults for all wizard questions.
+func runWorkflowWizard(scanner *bufio.Scanner, output io.Writer, provider string) workflow.WizardConfig {
+	cfg := workflow.WizardConfig{
+		Provider:    provider,
+		Label:       "queued",
+		FixCI:       true,
+		AutoReview:  true,
+		MergeMethod: "rebase",
+	}
+
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "=== Workflow Configuration ===")
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Let's configure your workflow. Press Enter to accept defaults.")
+	fmt.Fprintln(output)
+
+	switch provider {
+	case "asana":
+		fmt.Fprint(output, "Asana project GID (from URL: https://app.asana.com/0/GID/list): ")
+		cfg.Project = readLine(scanner)
+
+		fmt.Fprint(output, "Asana tag to watch for new tasks? [queued]: ")
+		cfg.Label = readWithDefault(scanner, "queued")
+
+		fmt.Fprint(output, "Move completed tasks to which section? (press Enter to skip): ")
+		cfg.CompletionSection = readLine(scanner)
+
+	case "linear":
+		fmt.Fprint(output, "Linear team ID (from Settings → API): ")
+		cfg.Team = readLine(scanner)
+
+		fmt.Fprint(output, "Linear label to watch for new issues? [queued]: ")
+		cfg.Label = readWithDefault(scanner, "queued")
+
+		fmt.Fprint(output, "Move completed issues to which state? (press Enter to skip): ")
+		cfg.CompletionState = readLine(scanner)
+
+	default: // github
+		fmt.Fprint(output, "Label to watch for new issues? [queued]: ")
+		cfg.Label = readWithDefault(scanner, "queued")
+	}
+
+	fmt.Fprint(output, "Should Claude plan the approach before coding? [y/N]: ")
+	cfg.PlanFirst = readYesNo(scanner, false)
+
+	fmt.Fprint(output, "Should Claude try to fix failing CI? [Y/n]: ")
+	cfg.FixCI = readYesNo(scanner, true)
+
+	fmt.Fprint(output, "Should Claude auto-address PR review comments? [Y/n]: ")
+	cfg.AutoReview = readYesNo(scanner, true)
+
+	fmt.Fprint(output, "GitHub username to request as reviewer (press Enter to skip): ")
+	cfg.Reviewer = readLine(scanner)
+
+	fmt.Fprint(output, "Merge method (rebase/squash/merge) [rebase]: ")
+	method := readWithDefault(scanner, "rebase")
+	if method == "squash" || method == "merge" {
+		cfg.MergeMethod = method
+	} else {
+		cfg.MergeMethod = "rebase"
+	}
+
+	fmt.Fprint(output, "Run sessions in Docker containers? [y/N]: ")
+	cfg.Containerized = readYesNo(scanner, false)
+
+	return cfg
+}
+
+// readLine reads one line from the scanner and returns the trimmed text,
+// or "" if the scanner is exhausted (EOF).
+func readLine(scanner *bufio.Scanner) string {
+	if !scanner.Scan() {
+		return ""
+	}
+	return strings.TrimSpace(scanner.Text())
+}
+
+// readWithDefault reads one line and returns def if the input is empty or EOF.
+func readWithDefault(scanner *bufio.Scanner, def string) string {
+	if !scanner.Scan() {
+		return def
+	}
+	text := strings.TrimSpace(scanner.Text())
+	if text == "" {
+		return def
+	}
+	return text
+}
+
+// readYesNo reads one line and interprets "y"/"yes" as true, "n"/"no" as false.
+// Empty input or EOF returns defaultYes.
+func readYesNo(scanner *bufio.Scanner, defaultYes bool) bool {
+	if !scanner.Scan() {
+		return defaultYes
+	}
+	text := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	if text == "" {
+		return defaultYes
+	}
+	return text == "y" || text == "yes"
 }
 
 func printGitHubSetup(w io.Writer) {
@@ -119,20 +259,13 @@ func printGitHubSetup(w io.Writer) {
 	fmt.Fprintln(w, "GitHub Issues is the default issue tracker for erg.")
 	fmt.Fprintln(w, "It uses the gh CLI (which you already have installed).")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Steps to get started:")
+	fmt.Fprintln(w, "Before we configure your workflow:")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Authenticate with GitHub:")
+	fmt.Fprintln(w, "  1. Authenticate with GitHub (if you haven't already):")
 	fmt.Fprintln(w, "       gh auth login")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  2. Label issues with \"queued\" for erg to pick them up.")
+	fmt.Fprintln(w, "  2. Label issues with your chosen label for erg to pick them up.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  3. Initialize your workflow config (from within your repo):")
-	fmt.Fprintln(w, "       erg workflow init")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  4. Start the daemon:")
-	fmt.Fprintln(w, "       erg start")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Your erg setup is complete!")
 }
 
 func printAsanaSetup(w io.Writer) {
@@ -154,23 +287,9 @@ func printAsanaSetup(w io.Writer) {
 	fmt.Fprintln(w, "  # Reload your shell:")
 	fmt.Fprintln(w, "  source ~/.zshrc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Configure your workflow (.erg/workflow.yaml):")
+	fmt.Fprintln(w, "Find your project GID in the Asana project URL:")
+	fmt.Fprintln(w, "  https://app.asana.com/0/PROJECT_GID/list")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  source:")
-	fmt.Fprintln(w, "    provider: asana")
-	fmt.Fprintln(w, "    filter:")
-	fmt.Fprintln(w, "      project: \"YOUR_PROJECT_GID\"  # from the project URL")
-	fmt.Fprintln(w, "      label: queued              # Asana tag to filter on")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  # Find your project GID in the Asana project URL:")
-	fmt.Fprintln(w, "  # https://app.asana.com/0/PROJECT_GID/list")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Next steps:")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Set ASANA_PAT in your environment")
-	fmt.Fprintln(w, "  2. Run: erg workflow init  (from within your repo)")
-	fmt.Fprintln(w, "  3. Set your Asana project GID in .erg/workflow.yaml")
-	fmt.Fprintln(w, "  4. Start the daemon: erg start")
 }
 
 func printLinearSetup(w io.Writer) {
@@ -191,20 +310,6 @@ func printLinearSetup(w io.Writer) {
 	fmt.Fprintln(w, "  # Reload your shell:")
 	fmt.Fprintln(w, "  source ~/.zshrc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Configure your workflow (.erg/workflow.yaml):")
+	fmt.Fprintln(w, "Find your team ID in Linear: Settings → API → or in the team URL.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  source:")
-	fmt.Fprintln(w, "    provider: linear")
-	fmt.Fprintln(w, "    filter:")
-	fmt.Fprintln(w, "      team: \"YOUR_TEAM_ID\"  # Linear team ID")
-	fmt.Fprintln(w, "      label: queued        # Linear label to filter on")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  # Find your team ID in Linear: Settings → API → or in the team URL.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Next steps:")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Set LINEAR_API_KEY in your environment")
-	fmt.Fprintln(w, "  2. Run: erg workflow init  (from within your repo)")
-	fmt.Fprintln(w, "  3. Set your Linear team ID in .erg/workflow.yaml")
-	fmt.Fprintln(w, "  4. Start the daemon: erg start")
 }

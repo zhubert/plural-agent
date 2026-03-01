@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zhubert/erg/internal/cli"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 // allFoundChecker returns a checker where every prerequisite is found.
@@ -50,9 +52,22 @@ func partialChecker(found map[string]bool) prereqCheckerFn {
 	}
 }
 
+// noopWriter is a workflowWriterFn that succeeds without writing any files.
+func noopWriter(repoPath string, cfg workflow.WizardConfig) (string, error) {
+	return filepath.Join(repoPath, ".erg", "workflow.yaml"), nil
+}
+
+// captureWriter returns a workflowWriterFn that stores the last WizardConfig passed to it.
+func captureWriter(captured *workflow.WizardConfig) workflowWriterFn {
+	return func(repoPath string, cfg workflow.WizardConfig) (string, error) {
+		*captured = cfg
+		return filepath.Join(repoPath, ".erg", "workflow.yaml"), nil
+	}
+}
+
 func TestRunSetup_AllPrereqsMissing(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader(""), &out, noneFoundChecker)
+	err := runSetupWithIO(strings.NewReader(""), &out, noneFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +87,7 @@ func TestRunSetup_AllPrereqsMissing(t *testing.T) {
 func TestRunSetup_RequiredMissing_ShowsInstallURLs(t *testing.T) {
 	checker := partialChecker(map[string]bool{"git": false, "claude": false, "gh": true})
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader(""), &out, checker)
+	err := runSetupWithIO(strings.NewReader(""), &out, checker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +103,7 @@ func TestRunSetup_RequiredMissing_ShowsInstallURLs(t *testing.T) {
 func TestRunSetup_AllPresent_ShowsTrackerMenu(t *testing.T) {
 	var out bytes.Buffer
 	// Provide no input — will get invalid choice, but we just want to see the menu
-	err := runSetupWithIO(strings.NewReader("\n"), &out, allFoundChecker)
+	err := runSetupWithIO(strings.NewReader("\n"), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +124,8 @@ func TestRunSetup_AllPresent_ShowsTrackerMenu(t *testing.T) {
 
 func TestRunSetup_GitHub(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader("1\n"), &out, allFoundChecker)
+	// Input: tracker choice "1", then wizard defaults (all empty → use defaults)
+	err := runSetupWithIO(strings.NewReader("1\n"), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,17 +136,85 @@ func TestRunSetup_GitHub(t *testing.T) {
 	if !strings.Contains(output, "gh auth login") {
 		t.Errorf("expected gh auth login instruction, got:\n%s", output)
 	}
-	if !strings.Contains(output, "queued") {
-		t.Errorf("expected queued label mention, got:\n%s", output)
+	if !strings.Contains(output, "Workflow Configuration") {
+		t.Errorf("expected workflow wizard section, got:\n%s", output)
 	}
-	if !strings.Contains(output, "erg workflow init") {
-		t.Errorf("expected workflow init instruction, got:\n%s", output)
+	if !strings.Contains(output, "workflow.yaml") {
+		t.Errorf("expected workflow.yaml mention, got:\n%s", output)
+	}
+	if !strings.Contains(output, "erg start") {
+		t.Errorf("expected erg start instruction, got:\n%s", output)
+	}
+}
+
+func TestRunSetup_GitHub_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=1, label=myqueue, plan=y, fixci=n, autoreview=n, reviewer=alice, method=squash, containers=y
+	input := "1\nmyqueue\ny\nn\nn\nalice\nsquash\ny\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "github" {
+		t.Errorf("expected provider github, got %q", captured.Provider)
+	}
+	if captured.Label != "myqueue" {
+		t.Errorf("expected label myqueue, got %q", captured.Label)
+	}
+	if !captured.PlanFirst {
+		t.Errorf("expected PlanFirst=true")
+	}
+	if captured.FixCI {
+		t.Errorf("expected FixCI=false")
+	}
+	if captured.AutoReview {
+		t.Errorf("expected AutoReview=false")
+	}
+	if captured.Reviewer != "alice" {
+		t.Errorf("expected Reviewer=alice, got %q", captured.Reviewer)
+	}
+	if captured.MergeMethod != "squash" {
+		t.Errorf("expected MergeMethod=squash, got %q", captured.MergeMethod)
+	}
+	if !captured.Containerized {
+		t.Errorf("expected Containerized=true")
+	}
+}
+
+func TestRunSetup_GitHub_WizardDefaults(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: just tracker choice; wizard gets all defaults via EOF
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader("1\n"), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "github" {
+		t.Errorf("expected provider github, got %q", captured.Provider)
+	}
+	if captured.Label != "queued" {
+		t.Errorf("expected default label queued, got %q", captured.Label)
+	}
+	if captured.PlanFirst {
+		t.Errorf("expected PlanFirst=false (default)")
+	}
+	if !captured.FixCI {
+		t.Errorf("expected FixCI=true (default)")
+	}
+	if !captured.AutoReview {
+		t.Errorf("expected AutoReview=true (default)")
+	}
+	if captured.MergeMethod != "rebase" {
+		t.Errorf("expected MergeMethod=rebase (default), got %q", captured.MergeMethod)
 	}
 }
 
 func TestRunSetup_Asana(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader("2\n"), &out, allFoundChecker)
+	err := runSetupWithIO(strings.NewReader("2\n"), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,17 +228,38 @@ func TestRunSetup_Asana(t *testing.T) {
 	if !strings.Contains(output, "app.asana.com/0/my-apps") {
 		t.Errorf("expected Asana Developer Console URL, got:\n%s", output)
 	}
-	if !strings.Contains(output, "provider: asana") {
-		t.Errorf("expected workflow YAML snippet, got:\n%s", output)
+	if !strings.Contains(output, "Workflow Configuration") {
+		t.Errorf("expected workflow wizard section, got:\n%s", output)
 	}
-	if !strings.Contains(output, "PROJECT_GID") {
-		t.Errorf("expected project GID placeholder, got:\n%s", output)
+}
+
+func TestRunSetup_Asana_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=2, project=1234, tag=ready, completion=Done, plan=n, fixci=y, autoreview=y, reviewer=, method=, containers=n
+	input := "2\n1234\nready\nDone\nn\ny\ny\n\n\nn\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "asana" {
+		t.Errorf("expected provider asana, got %q", captured.Provider)
+	}
+	if captured.Project != "1234" {
+		t.Errorf("expected project 1234, got %q", captured.Project)
+	}
+	if captured.Label != "ready" {
+		t.Errorf("expected label ready, got %q", captured.Label)
+	}
+	if captured.CompletionSection != "Done" {
+		t.Errorf("expected CompletionSection=Done, got %q", captured.CompletionSection)
 	}
 }
 
 func TestRunSetup_Linear(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader("3\n"), &out, allFoundChecker)
+	err := runSetupWithIO(strings.NewReader("3\n"), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,17 +273,38 @@ func TestRunSetup_Linear(t *testing.T) {
 	if !strings.Contains(output, "linear.app") {
 		t.Errorf("expected Linear URL, got:\n%s", output)
 	}
-	if !strings.Contains(output, "provider: linear") {
-		t.Errorf("expected workflow YAML snippet, got:\n%s", output)
+	if !strings.Contains(output, "Workflow Configuration") {
+		t.Errorf("expected workflow wizard section, got:\n%s", output)
 	}
-	if !strings.Contains(output, "TEAM_ID") {
-		t.Errorf("expected team ID placeholder, got:\n%s", output)
+}
+
+func TestRunSetup_Linear_WizardCaptures(t *testing.T) {
+	var captured workflow.WizardConfig
+	// Input: tracker=3, team=team-xyz, label=queued, completionState=Merged, then defaults
+	input := "3\nteam-xyz\n\nMerged\n"
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.Provider != "linear" {
+		t.Errorf("expected provider linear, got %q", captured.Provider)
+	}
+	if captured.Team != "team-xyz" {
+		t.Errorf("expected team team-xyz, got %q", captured.Team)
+	}
+	if captured.Label != "queued" {
+		t.Errorf("expected default label queued, got %q", captured.Label)
+	}
+	if captured.CompletionState != "Merged" {
+		t.Errorf("expected CompletionState=Merged, got %q", captured.CompletionState)
 	}
 }
 
 func TestRunSetup_InvalidChoice(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader("5\n"), &out, allFoundChecker)
+	err := runSetupWithIO(strings.NewReader("5\n"), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -190,7 +316,7 @@ func TestRunSetup_InvalidChoice(t *testing.T) {
 
 func TestRunSetup_EmptyInput(t *testing.T) {
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader(""), &out, allFoundChecker)
+	err := runSetupWithIO(strings.NewReader(""), &out, allFoundChecker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -204,7 +330,7 @@ func TestRunSetup_PrereqStatusSymbols(t *testing.T) {
 	// git found (required), claude found (required), gh not found (optional)
 	checker := partialChecker(map[string]bool{"git": true, "claude": true, "gh": false})
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader("\n"), &out, checker)
+	err := runSetupWithIO(strings.NewReader("\n"), &out, checker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,7 +354,7 @@ func TestRunSetup_PrereqStatusSymbols(t *testing.T) {
 func TestRunSetup_RequiredMissingSymbol(t *testing.T) {
 	checker := partialChecker(map[string]bool{"git": false, "claude": true, "gh": true})
 	var out bytes.Buffer
-	err := runSetupWithIO(strings.NewReader(""), &out, checker)
+	err := runSetupWithIO(strings.NewReader(""), &out, checker, ".", noopWriter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,4 +362,49 @@ func TestRunSetup_RequiredMissingSymbol(t *testing.T) {
 	if !strings.Contains(output, "✗ git") {
 		t.Errorf("expected ✗ for missing required git, got:\n%s", output)
 	}
+}
+
+func TestRunSetup_WorkflowFileAlreadyExists(t *testing.T) {
+	existsWriter := func(repoPath string, cfg workflow.WizardConfig) (string, error) {
+		fp := filepath.Join(repoPath, ".erg", "workflow.yaml")
+		return fp, &alreadyExistsError{fp: fp}
+	}
+
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader("1\n"), &out, allFoundChecker, ".", existsWriter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "already exists") {
+		t.Errorf("expected 'already exists' message, got:\n%s", output)
+	}
+	// Should still show erg start since setup is otherwise complete
+	if !strings.Contains(output, "erg start") {
+		t.Errorf("expected erg start instruction even when file exists, got:\n%s", output)
+	}
+}
+
+func TestRunSetup_ShowsErgStart(t *testing.T) {
+	var out bytes.Buffer
+	err := runSetupWithIO(strings.NewReader("1\n"), &out, allFoundChecker, ".", noopWriter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "erg start") {
+		t.Errorf("expected 'erg start' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Setup complete") {
+		t.Errorf("expected 'Setup complete' in output, got:\n%s", output)
+	}
+}
+
+// alreadyExistsError simulates a "file already exists" error from WriteFromWizard.
+type alreadyExistsError struct {
+	fp string
+}
+
+func (e *alreadyExistsError) Error() string {
+	return e.fp + " already exists"
 }
