@@ -128,10 +128,6 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
 
-	if err := validateWorkflowConfig(wfCfg); err != nil {
-		return err
-	}
-
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
@@ -144,7 +140,15 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		if built {
 			fmt.Println("Container image built successfully.")
 		}
-		_ = image // image cached; child will find it
+		if wfCfg.Settings == nil {
+			wfCfg.Settings = &workflow.SettingsConfig{}
+		}
+		wfCfg.Settings.ContainerImage = image
+	}
+
+	// Validate after auto-detection so the config is fully populated.
+	if err := validateWorkflowConfig(wfCfg); err != nil {
+		return err
 	}
 
 	// Build args for re-exec
@@ -335,10 +339,6 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
 
-	if err := validateWorkflowConfig(wfCfg); err != nil {
-		return err
-	}
-
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
@@ -353,6 +353,11 @@ func runForeground(_ *cobra.Command, _ []string) error {
 			wfCfg.Settings = &workflow.SettingsConfig{}
 		}
 		wfCfg.Settings.ContainerImage = image
+	}
+
+	// Validate after auto-detection so the config is fully populated.
+	if err := validateWorkflowConfig(wfCfg); err != nil {
+		return err
 	}
 
 	// Run daemon in a goroutine
