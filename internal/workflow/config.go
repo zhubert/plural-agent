@@ -198,7 +198,8 @@ var ValidActions = map[string]bool{
 	"git.validate_diff":     true,
 	"asana.comment":          true,
 	"asana.move_to_section": true,
-	"linear.comment":        true,
+	"linear.comment":         true,
+	"linear.move_to_state":  true,
 	"slack.notify":          true,
 	"webhook.post":          true,
 	"workflow.retry":        true,
@@ -222,7 +223,8 @@ var RetryableActions = map[string]bool{
 	"git.rebase":            true,
 	"asana.comment":          true,
 	"asana.move_to_section": true,
-	"linear.comment":        true,
+	"linear.comment":         true,
+	"linear.move_to_state":  true,
 }
 
 // DefaultRetryConfig returns a standard retry configuration for network-bound actions:
@@ -253,7 +255,8 @@ var ValidEvents = map[string]bool{
 	"pr.mergeable":       true,
 	"gate.approved":      true,
 	"plan.user_replied":  true,
-	"asana.in_section":  true,
+	"asana.in_section":   true,
+	"linear.in_state":   true,
 }
 
 // ValidStateTypes is the set of recognized state types.

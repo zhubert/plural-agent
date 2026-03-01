@@ -874,6 +874,362 @@ func TestLinearProvider_GetIssueComments_NoAPIKey(t *testing.T) {
 	}
 }
 
+// --- Interface checks for section support ---
+
+func TestLinearProvider_ImplementsProviderSectionChecker(t *testing.T) {
+	var _ ProviderSectionChecker = (*LinearProvider)(nil)
+}
+
+func TestLinearProvider_ImplementsProviderSectionMover(t *testing.T) {
+	var _ ProviderSectionMover = (*LinearProvider)(nil)
+}
+
+// --- IsInSection tests ---
+
+func TestLinearProvider_IsInSection_Match(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"id":    "uuid-eng-123",
+					"state": map[string]any{"name": "In Progress"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	ok, err := p.IsInSection(context.Background(), "/repo", "ENG-123", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Error("expected true when state matches")
+	}
+}
+
+func TestLinearProvider_IsInSection_CaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"id":    "uuid-eng-123",
+					"state": map[string]any{"name": "In Progress"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	ok, err := p.IsInSection(context.Background(), "/repo", "ENG-123", "in progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Error("expected true for case-insensitive match")
+	}
+}
+
+func TestLinearProvider_IsInSection_DifferentState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"id":    "uuid-eng-123",
+					"state": map[string]any{"name": "Backlog"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	ok, err := p.IsInSection(context.Background(), "/repo", "ENG-123", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected false when state does not match")
+	}
+}
+
+func TestLinearProvider_IsInSection_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	p := NewLinearProvider(nil)
+
+	_, err := p.IsInSection(context.Background(), "/repo", "ENG-123", "Done")
+	if err == nil {
+		t.Error("expected error without API key")
+	}
+}
+
+func TestLinearProvider_IsInSection_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+
+	_, err := p.IsInSection(context.Background(), "/repo", "ENG-123", "Done")
+	if err == nil {
+		t.Error("expected error from API failure")
+	}
+}
+
+// --- MoveToSection tests ---
+
+func TestLinearProvider_MoveToSection_Success(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, _ := io.ReadAll(r.Body)
+		var req linearGraphQLRequest
+		json.Unmarshal(body, &req)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.Contains(req.Query, "states") {
+			// Team states query
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"team": map[string]any{
+						"states": map[string]any{
+							"nodes": []map[string]any{
+								{"id": "state-backlog", "name": "Backlog"},
+								{"id": "state-in-progress", "name": "In Progress"},
+								{"id": "state-done", "name": "Done"},
+							},
+						},
+					},
+				},
+			})
+		} else if strings.Contains(req.Query, "issueUpdate") {
+			// State update mutation
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issueUpdate": map[string]any{"success": true},
+				},
+			})
+		} else {
+			// Issue lookup
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issue": map[string]any{"id": "uuid-eng-123"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	cfg.SetLinearTeam("/repo", "team-123")
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-123", "In Progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestCount != 3 {
+		t.Errorf("expected 3 API calls (states + lookup + update), got %d", requestCount)
+	}
+}
+
+func TestLinearProvider_MoveToSection_CaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req linearGraphQLRequest
+		json.Unmarshal(body, &req)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.Contains(req.Query, "states") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"team": map[string]any{
+						"states": map[string]any{
+							"nodes": []map[string]any{
+								{"id": "state-done", "name": "Done"},
+							},
+						},
+					},
+				},
+			})
+		} else if strings.Contains(req.Query, "issueUpdate") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issueUpdate": map[string]any{"success": true},
+				},
+			})
+		} else {
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issue": map[string]any{"id": "uuid-eng-123"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	cfg.SetLinearTeam("/repo", "team-123")
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-123", "done")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLinearProvider_MoveToSection_StateNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"team": map[string]any{
+					"states": map[string]any{
+						"nodes": []map[string]any{
+							{"id": "state-backlog", "name": "Backlog"},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	cfg.SetLinearTeam("/repo", "team-123")
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-123", "Nonexistent")
+	if err == nil {
+		t.Error("expected error when state not found")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestLinearProvider_MoveToSection_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	cfg := &config.Config{}
+	cfg.SetLinearTeam("/repo", "team-123")
+	p := NewLinearProvider(cfg)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-123", "Done")
+	if err == nil {
+		t.Error("expected error without API key")
+	}
+}
+
+func TestLinearProvider_MoveToSection_NoTeamConfigured(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	p := NewLinearProvider(cfg)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-123", "Done")
+	if err == nil {
+		t.Error("expected error when team not configured")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("expected 'not configured' in error, got: %v", err)
+	}
+}
+
+func TestLinearProvider_MoveToSection_IssueNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req linearGraphQLRequest
+		json.Unmarshal(body, &req)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.Contains(req.Query, "states") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"team": map[string]any{
+						"states": map[string]any{
+							"nodes": []map[string]any{
+								{"id": "state-done", "name": "Done"},
+							},
+						},
+					},
+				},
+			})
+		} else {
+			// Issue not found
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{
+					"issue": nil,
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	cfg.SetLinearTeam("/repo", "team-123")
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+
+	err := p.MoveToSection(context.Background(), "/repo", "ENG-NOTFOUND", "Done")
+	if err == nil {
+		t.Error("expected error when issue not found")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
 // contains checks if a string contains a substring.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)

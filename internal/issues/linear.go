@@ -425,6 +425,139 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 	return nil
 }
 
+// linearIssueStateQuery fetches a Linear issue's current workflow state by identifier.
+const linearIssueStateQuery = `query($id: String!) {
+  issue(id: $id) {
+    id
+    state {
+      name
+    }
+  }
+}`
+
+// linearIssueStateResponse is the GraphQL response for an issue's workflow state.
+type linearIssueStateResponse struct {
+	Data struct {
+		Issue struct {
+			ID    string `json:"id"`
+			State struct {
+				Name string `json:"name"`
+			} `json:"state"`
+		} `json:"issue"`
+	} `json:"data"`
+}
+
+// linearTeamStatesQuery fetches all workflow states for a team.
+const linearTeamStatesQuery = `query($teamId: String!) {
+  team(id: $teamId) {
+    states {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+}`
+
+// linearWorkflowState represents a workflow state from the Linear API.
+type linearWorkflowState struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// linearTeamStatesResponse is the GraphQL response for a team's workflow states.
+type linearTeamStatesResponse struct {
+	Data struct {
+		Team struct {
+			States struct {
+				Nodes []linearWorkflowState `json:"nodes"`
+			} `json:"states"`
+		} `json:"team"`
+	} `json:"data"`
+}
+
+// linearIssueUpdateStateMutation updates a Linear issue's workflow state.
+const linearIssueUpdateStateMutation = `mutation($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) {
+    success
+  }
+}`
+
+// IsInSection returns true if the Linear issue is currently in the named workflow state.
+// The state name is matched case-insensitively.
+// Implements ProviderSectionChecker.
+func (p *LinearProvider) IsInSection(ctx context.Context, repoPath string, issueID string, section string) (bool, error) {
+	var resp linearIssueStateResponse
+	if err := p.linearGraphQL(ctx, linearIssueStateQuery, map[string]any{"id": issueID}, "", &resp); err != nil {
+		return false, fmt.Errorf("failed to fetch issue state: %w", err)
+	}
+
+	return strings.EqualFold(resp.Data.Issue.State.Name, section), nil
+}
+
+// MoveToSection moves a Linear issue to the named workflow state.
+// It looks up the team's available states to find the target state ID,
+// then updates the issue. The state name is matched case-insensitively.
+// Implements ProviderSectionMover.
+func (p *LinearProvider) MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error {
+	teamID := p.config.GetLinearTeam(repoPath)
+	if teamID == "" {
+		return fmt.Errorf("Linear team ID not configured for this repository")
+	}
+
+	// Fetch the team's workflow states.
+	var statesResp linearTeamStatesResponse
+	if err := p.linearGraphQL(ctx, linearTeamStatesQuery, map[string]any{"teamId": teamID}, "", &statesResp); err != nil {
+		return fmt.Errorf("failed to fetch team workflow states: %w", err)
+	}
+
+	// Find the target state by name (case-insensitive).
+	var targetStateID string
+	for _, s := range statesResp.Data.Team.States.Nodes {
+		if strings.EqualFold(s.Name, section) {
+			targetStateID = s.ID
+			break
+		}
+	}
+	if targetStateID == "" {
+		return fmt.Errorf("workflow state %q not found for team", section)
+	}
+
+	// Look up the issue UUID.
+	var issueResp struct {
+		Data struct {
+			Issue struct {
+				ID string `json:"id"`
+			} `json:"issue"`
+		} `json:"data"`
+	}
+	lookupQuery := `query($id: String!) { issue(id: $id) { id } }`
+	if err := p.linearGraphQL(ctx, lookupQuery, map[string]any{"id": issueID}, "", &issueResp); err != nil {
+		return fmt.Errorf("failed to look up issue UUID: %w", err)
+	}
+	issueUUID := issueResp.Data.Issue.ID
+	if issueUUID == "" {
+		return fmt.Errorf("issue %q not found in Linear", issueID)
+	}
+
+	// Update the issue's state.
+	var updateResp struct {
+		Data struct {
+			IssueUpdate struct {
+				Success bool `json:"success"`
+			} `json:"issueUpdate"`
+		} `json:"data"`
+	}
+	if err := p.linearGraphQL(ctx, linearIssueUpdateStateMutation, map[string]any{
+		"id":      issueUUID,
+		"stateId": targetStateID,
+	}, "", &updateResp); err != nil {
+		return fmt.Errorf("failed to update issue state: %w", err)
+	}
+
+	return nil
+}
+
 // FetchTeams retrieves all teams accessible to the user.
 func (p *LinearProvider) FetchTeams(ctx context.Context) ([]LinearTeam, error) {
 	var gqlResp linearTeamsResponse

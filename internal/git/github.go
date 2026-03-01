@@ -1228,6 +1228,7 @@ Diff:
 
 // GetPRLinkText returns the appropriate text to add to a PR body based on the issue source.
 // For GitHub issues: returns "\n\nFixes #123"
+// For Linear issues: returns "\n\nFixes ENG-123" (Linear supports auto-close via identifier mentions)
 // For Asana tasks: returns "" (no auto-close support)
 // For unknown sources: returns ""
 func GetPRLinkText(issueRef *config.IssueRef) string {
@@ -1238,6 +1239,8 @@ func GetPRLinkText(issueRef *config.IssueRef) string {
 	switch issueRef.Source {
 	case "github":
 		return fmt.Sprintf("\n\nFixes #%s", issueRef.ID)
+	case "linear":
+		return fmt.Sprintf("\n\nFixes %s", issueRef.ID)
 	case "asana":
 		// Asana doesn't support auto-closing tasks via commit message keywords.
 		// Users can manually link PRs in Asana or use the Asana GitHub integration.

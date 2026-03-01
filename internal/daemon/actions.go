@@ -342,6 +342,26 @@ func (a *linearCommentAction) Execute(ctx context.Context, ac *workflow.ActionCo
 	return workflow.ActionResult{Success: true}
 }
 
+// linearMoveToStateAction implements the linear.move_to_state action.
+type linearMoveToStateAction struct {
+	daemon *Daemon
+}
+
+// Execute moves the Linear issue to the configured workflow state.
+func (a *linearMoveToStateAction) Execute(ctx context.Context, ac *workflow.ActionContext) workflow.ActionResult {
+	d := a.daemon
+	item, ok := d.state.GetWorkItem(ac.WorkItemID)
+	if !ok {
+		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
+	}
+
+	if err := d.moveToState(ctx, item, ac.Params); err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("linear move_to_state failed: %w", err)}
+	}
+
+	return workflow.ActionResult{Success: true}
+}
+
 // addLabelAction implements the github.add_label action.
 type addLabelAction struct {
 	daemon *Daemon

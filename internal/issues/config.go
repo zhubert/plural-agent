@@ -17,4 +17,5 @@ type AsanaConfigProvider interface {
 // LinearConfigProvider defines the configuration interface required by LinearProvider.
 type LinearConfigProvider interface {
 	HasLinearTeam(repoPath string) bool
+	GetLinearTeam(repoPath string) string
 }

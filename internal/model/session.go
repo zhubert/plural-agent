@@ -8,7 +8,7 @@ import (
 // IssueRef represents a reference to an issue/task from any supported source.
 // This is the generic replacement for the deprecated IssueNumber field.
 type IssueRef struct {
-	Source string `json:"source"` // "github" or "asana"
+	Source string `json:"source"` // "github", "asana", or "linear"
 	ID     string `json:"id"`     // Issue/task ID (number for GitHub, GID for Asana)
 	Title  string `json:"title"`  // Issue/task title for display
 	URL    string `json:"url"`    // Link to the issue/task

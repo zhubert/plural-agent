@@ -277,7 +277,40 @@ func TestAgentConfig_IssueProviderCompat(t *testing.T) {
 	}
 
 	if c.HasLinearTeam("/repo") {
-		t.Error("HasLinearTeam should return false")
+		t.Error("HasLinearTeam should return false before SetLinearTeam")
+	}
+	if c.GetLinearTeam("/repo") != "" {
+		t.Error("GetLinearTeam should return empty string before SetLinearTeam")
+	}
+}
+
+func TestAgentConfig_LinearTeamCompat(t *testing.T) {
+	c := NewAgentConfig()
+
+	if c.HasLinearTeam("/repo") {
+		t.Error("HasLinearTeam should return false before SetLinearTeam")
+	}
+	if c.GetLinearTeam("/repo") != "" {
+		t.Error("GetLinearTeam should return empty string before SetLinearTeam")
+	}
+
+	c.SetLinearTeam("/repo", "team-abc-123")
+	if !c.HasLinearTeam("/repo") {
+		t.Error("HasLinearTeam should return true after SetLinearTeam")
+	}
+	if got := c.GetLinearTeam("/repo"); got != "team-abc-123" {
+		t.Errorf("GetLinearTeam = %q, want %q", got, "team-abc-123")
+	}
+
+	// Different repo should still return empty
+	if c.GetLinearTeam("/other") != "" {
+		t.Error("GetLinearTeam should return empty for unconfigured repo")
+	}
+
+	// Clear with empty string
+	c.SetLinearTeam("/repo", "")
+	if c.HasLinearTeam("/repo") {
+		t.Error("HasLinearTeam should return false after clearing with empty string")
 	}
 }
 
