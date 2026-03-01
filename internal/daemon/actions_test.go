@@ -5204,8 +5204,23 @@ func TestAddressReviewAction_Execute_WorkItemNotFound(t *testing.T) {
 
 func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 	cfg := testConfig()
-	d := testDaemon(cfg)
+	mockExec := exec.NewMockExecutor(nil)
 
+	// Mock PR number lookup for countAddressReviewRoundsFromPR
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "number"},
+		exec.MockResponse{Stdout: []byte(`{"number": 42}`)})
+
+	// Mock comments listing: return 3 comments that each contain the round marker
+	roundMarkerComment := `{"id": %d, "body": "Starting review address round %d.\n` + AddressReviewRoundMarker + `"}`
+	commentsJSON := fmt.Sprintf("[%s,%s,%s]",
+		fmt.Sprintf(roundMarkerComment, 1, 1),
+		fmt.Sprintf(roundMarkerComment, 2, 2),
+		fmt.Sprintf(roundMarkerComment, 3, 3),
+	)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"},
+		exec.MockResponse{Stdout: []byte(commentsJSON)})
+
+	d := testDaemonWithExec(cfg, mockExec)
 	sess := testSession("sess-1")
 	cfg.AddSession(*sess)
 	d.state.AddWorkItem(&daemonstate.WorkItem{
@@ -5213,7 +5228,7 @@ func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
 		SessionID: "sess-1",
 		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"review_rounds": 3},
+		StepData:  map[string]any{},
 	})
 
 	action := &addressReviewAction{daemon: d}
@@ -5230,35 +5245,6 @@ func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "max review rounds exceeded") {
 		t.Errorf("expected 'max review rounds exceeded' error, got: %v", result.Error)
-	}
-}
-
-func TestAddressReviewAction_Execute_MaxRoundsFloat64(t *testing.T) {
-	// JSON deserialization produces float64 for numbers
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	sess := testSession("sess-1")
-	cfg.AddSession(*sess)
-	d.state.AddWorkItem(&daemonstate.WorkItem{
-		ID:        "item-1",
-		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
-		SessionID: "sess-1",
-		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"review_rounds": float64(3)},
-	})
-
-	action := &addressReviewAction{daemon: d}
-	params := workflow.NewParamHelper(map[string]any{"max_review_rounds": 3})
-	ac := &workflow.ActionContext{
-		WorkItemID: "item-1",
-		Params:     params,
-	}
-
-	result := action.Execute(context.Background(), ac)
-
-	if result.Success {
-		t.Error("expected error when max rounds exceeded (float64)")
 	}
 }
 
@@ -5290,25 +5276,82 @@ func TestAddressReviewAction_Execute_NoSession(t *testing.T) {
 	}
 }
 
-func TestGetReviewRounds(t *testing.T) {
-	tests := []struct {
-		name     string
-		stepData map[string]any
-		want     int
-	}{
-		{"missing", map[string]any{}, 0},
-		{"int zero", map[string]any{"review_rounds": 0}, 0},
-		{"int one", map[string]any{"review_rounds": 1}, 1},
-		{"int three", map[string]any{"review_rounds": 3}, 3},
-		{"float64 zero", map[string]any{"review_rounds": float64(0)}, 0},
-		{"float64 two", map[string]any{"review_rounds": float64(2)}, 2},
-		{"wrong type", map[string]any{"review_rounds": "oops"}, 0},
+func TestCountAddressReviewRoundsFromPR(t *testing.T) {
+	const branch = "feature-1"
+	const commentsEndpoint = "repos/:owner/:repo/issues/42/comments"
+
+	marker := AddressReviewRoundMarker
+	markerComment := func(id int) string {
+		return fmt.Sprintf(`{"id":%d,"body":"Starting review address round %d.\n%s"}`, id, id, marker)
 	}
+	otherComment := func(id int) string {
+		return fmt.Sprintf(`{"id":%d,"body":"just a regular comment"}`, id)
+	}
+
+	tests := []struct {
+		name         string
+		prViewOutput []byte
+		prViewErr    error
+		commentsJSON []byte
+		commentsErr  error
+		want         int
+	}{
+		{
+			name:      "PR number lookup fails",
+			prViewErr: fmt.Errorf("no PR"),
+			want:      0,
+		},
+		{
+			name:         "comments listing fails",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsErr:  fmt.Errorf("api error"),
+			want:         0,
+		},
+		{
+			name:         "no marker comments",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s]", otherComment(1), otherComment(2))),
+			want:         0,
+		},
+		{
+			name:         "one round marker",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s]", markerComment(1))),
+			want:         1,
+		},
+		{
+			name:         "three round markers",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s,%s]", markerComment(1), markerComment(2), markerComment(3))),
+			want:         3,
+		},
+		{
+			name:         "two markers among other comments",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s,%s,%s]", otherComment(1), markerComment(2), otherComment(3), markerComment(4))),
+			want:         2,
+		},
+	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := getReviewRounds(tc.stepData)
+			cfg := testConfig()
+			mockExec := exec.NewMockExecutor(nil)
+
+			mockExec.AddExactMatch("gh",
+				[]string{"pr", "view", branch, "--json", "number"},
+				exec.MockResponse{Stdout: tc.prViewOutput, Err: tc.prViewErr})
+			if tc.prViewErr == nil {
+				mockExec.AddExactMatch("gh",
+					[]string{"api", commentsEndpoint},
+					exec.MockResponse{Stdout: tc.commentsJSON, Err: tc.commentsErr})
+			}
+
+			d := testDaemonWithExec(cfg, mockExec)
+
+			got := d.countAddressReviewRoundsFromPR(context.Background(), "/test/repo", branch)
 			if got != tc.want {
-				t.Errorf("getReviewRounds(%v) = %d, want %d", tc.stepData, got, tc.want)
+				t.Errorf("countAddressReviewRoundsFromPR() = %d, want %d", got, tc.want)
 			}
 		})
 	}

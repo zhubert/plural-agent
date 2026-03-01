@@ -774,16 +774,34 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	// Check max rounds
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
+	}
+
+	// Derive round count from observable PR state rather than local StepData,
+	// so the counter is correct even after daemon restarts or step re-runs.
+	countCtx, countCancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer countCancel()
 	maxRounds := ac.Params.Int("max_review_rounds", 3)
-	rounds := getReviewRounds(item.StepData)
+	rounds := d.countAddressReviewRoundsFromPR(countCtx, sess.RepoPath, item.Branch)
 	if rounds >= maxRounds {
 		return workflow.ActionResult{Error: fmt.Errorf("max review rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
 
-	sess, err := d.getSessionOrError(item.SessionID)
-	if err != nil {
-		return workflow.ActionResult{Error: err}
+	// Post a marker comment on the PR to record this round. The comment is
+	// intentionally not deduplicated: each invocation creates a new comment so
+	// that countAddressReviewRoundsFromPR can derive the count on future runs.
+	markerCtx, markerCancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer markerCancel()
+	prNum, prErr := d.gitService.GetPRNumber(markerCtx, sess.RepoPath, item.Branch)
+	if prErr == nil {
+		body := fmt.Sprintf("Starting review address round %d.\n%s", rounds+1, AddressReviewRoundMarker)
+		if err := d.gitService.CommentOnIssue(markerCtx, sess.RepoPath, prNum, body); err != nil {
+			d.logger.Warn("failed to post address-review round marker", "error", err, "round", rounds+1)
+		}
+	} else {
+		d.logger.Warn("failed to get PR number for address-review round marker", "error", prErr)
 	}
 
 	// Fetch review comments
@@ -797,12 +815,6 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 
 	// Filter out daemon transcript comments
 	reviewComments := worker.FilterTranscriptComments(comments)
-
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["review_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
 
 	// Resume session
 	if err := d.startAddressReview(ctx, item, sess, rounds+1, reviewComments); err != nil {
