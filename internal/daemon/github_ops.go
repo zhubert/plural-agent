@@ -139,6 +139,16 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 		return err
 	}
 
+	// Check PR state before attempting merge — if already merged, return
+	// success without re-attempting (idempotent).
+	stateCtx, stateCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+	prState, stateErr := d.gitService.GetPRState(stateCtx, sess.RepoPath, item.Branch)
+	stateCancel()
+	if stateErr == nil && prState == git.PRStateMerged {
+		d.logger.Info("PR already merged, skipping merge", "workItem", item.ID, "branch", item.Branch)
+		return nil
+	}
+
 	method := d.getEffectiveMergeMethod(sess.RepoPath)
 
 	mergeCtx, cancel := context.WithTimeout(ctx, timeoutGitHubMerge)

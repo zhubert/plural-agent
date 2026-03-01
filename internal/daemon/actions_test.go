@@ -2962,6 +2962,100 @@ func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
 	}
 }
 
+func TestMergePR_AlreadyMerged_ReturnsSuccess(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns MERGED
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	mergeItem, _ := d.state.GetWorkItem("item-1")
+	err := d.mergePR(context.Background(), mergeItem)
+	if err != nil {
+		t.Fatalf("expected nil error for already-merged PR, got: %v", err)
+	}
+
+	// Verify that gh pr merge was NOT called (merge was skipped)
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "pr" && call.Args[1] == "merge" {
+			t.Error("expected gh pr merge to NOT be called when PR is already merged")
+		}
+	}
+}
+
+func TestMergePR_NotMerged_ProceedsWithMerge(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns OPEN
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	// Mock merge success
+	mockExec.AddPrefixMatch("gh", []string{"pr", "merge"}, exec.MockResponse{
+		Stdout: []byte("merged"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	mergeItem, _ := d.state.GetWorkItem("item-1")
+	err := d.mergePR(context.Background(), mergeItem)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that gh pr merge was called
+	mergeCallFound := false
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "pr" && call.Args[1] == "merge" {
+			mergeCallFound = true
+			break
+		}
+	}
+	if !mergeCallFound {
+		t.Error("expected gh pr merge to be called for an open PR")
+	}
+}
+
 // TestHandleAsyncComplete_RunsFormatterOnSuccess verifies that when
 // _format_command is stored in step data and the worker exits successfully,
 // handleAsyncComplete runs the formatter (producing a formatting commit).
