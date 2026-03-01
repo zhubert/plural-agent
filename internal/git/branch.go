@@ -211,6 +211,30 @@ func (s *GitService) CheckoutBranchIgnoreWorktrees(ctx context.Context, repoPath
 	return nil
 }
 
+// CountMergeCommits returns the number of merge commits reachable from HEAD
+// but not from origin/<baseBranch> (falling back to <baseBranch> if the remote
+// ref is not available locally). Each completed conflict-resolution round
+// produces exactly one merge commit, so this count equals the number of rounds
+// that have already finished.
+func (s *GitService) CountMergeCommits(ctx context.Context, worktreePath, baseBranch string) (int, error) {
+	ref := "origin/" + baseBranch
+	if !s.RemoteBranchExists(ctx, worktreePath, ref) {
+		ref = baseBranch
+	}
+
+	output, err := s.executor.Output(ctx, worktreePath, "git", "rev-list", "--merges", "--count",
+		ref+"..HEAD")
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --merges --count %s..HEAD failed: %w", ref, err)
+	}
+
+	count, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		return 0, fmt.Errorf("unexpected git rev-list output %q: %w", string(output), err)
+	}
+	return count, nil
+}
+
 // sanitizeBranchName ensures a branch name is valid for git
 func sanitizeBranchName(name string) string {
 	// Convert to lowercase
