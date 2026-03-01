@@ -141,8 +141,8 @@ func TestRunSetup_Asana(t *testing.T) {
 	if !strings.Contains(output, "ASANA_PAT") {
 		t.Errorf("expected ASANA_PAT env var mention, got:\n%s", output)
 	}
-	if !strings.Contains(output, "app.asana.com") {
-		t.Errorf("expected Asana URL, got:\n%s", output)
+	if !strings.Contains(output, "app.asana.com/0/my-apps") {
+		t.Errorf("expected Asana Developer Console URL, got:\n%s", output)
 	}
 	if !strings.Contains(output, "provider: asana") {
 		t.Errorf("expected workflow YAML snippet, got:\n%s", output)
