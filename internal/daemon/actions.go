@@ -582,7 +582,11 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		})
 	}
 
-	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1, "clean", result.Clean)
+	logRound := rounds
+	if !result.Clean {
+		logRound = rounds + 1
+	}
+	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", logRound, "clean", result.Clean)
 	return workflow.ActionResult{
 		Success: true,
 		Data: map[string]any{
