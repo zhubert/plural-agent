@@ -286,6 +286,20 @@ func TestValidateWorkflowConfig_Invalid(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowConfig_WithContainerImage(t *testing.T) {
+	// Validation must see a fully-populated config including the container image
+	// that auto-detection fills in. This ensures validation always runs after
+	// auto-detection completes.
+	cfg := workflow.DefaultWorkflowConfig()
+	if cfg.Settings == nil {
+		cfg.Settings = &workflow.SettingsConfig{}
+	}
+	cfg.Settings.ContainerImage = "erg:auto-detected"
+	if err := validateWorkflowConfig(cfg); err != nil {
+		t.Errorf("expected no error for config with auto-detected image, got: %v", err)
+	}
+}
+
 func TestWorkflowCommandRemoved(t *testing.T) {
 	for _, cmd := range rootCmd.Commands() {
 		if cmd.Use == "workflow" {
