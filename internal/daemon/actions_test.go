@@ -4138,11 +4138,11 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 		t.Errorf("expected success, got error: %v", result.Error)
 	}
 
-	// Verify rounds incremented
+	// Verify rounds NOT incremented (no-op rebase — HEAD unchanged)
 	item, _ := d.state.GetWorkItem("item-1")
 	rounds := getRebaseRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected rebase_rounds=1, got %d", rounds)
+	if rounds != 0 {
+		t.Errorf("expected rebase_rounds=0 (no-op), got %d", rounds)
 	}
 
 	// Verify rebase status data returned
@@ -4154,6 +4154,70 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 	}
 	if _, ok := result.Data["last_rebase_at"].(string); !ok {
 		t.Errorf("expected last_rebase_at to be a string timestamp, got %T", result.Data["last_rebase_at"])
+	}
+}
+
+func TestRebaseAction_Execute_NonNoopIncrementsRounds(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Use stateful matchers so the two rev-parse HEAD calls return different values,
+	// simulating a rebase that actually changes the commit (Clean=false).
+	revParseCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name != "git" || len(args) != 2 || args[0] != "rev-parse" || args[1] != "HEAD" {
+			return false
+		}
+		revParseCount++
+		return revParseCount == 1 // matches only the first call
+	}, exec.MockResponse{Stdout: []byte("abc123\n")})
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name != "git" || len(args) != 2 || args[0] != "rev-parse" || args[1] != "HEAD" {
+			return false
+		}
+		return revParseCount >= 2 // matches the second call onward
+	}, exec.MockResponse{Stdout: []byte("def456\n")})
+
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-sess-1"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify rounds incremented (HEAD changed → non-no-op rebase)
+	item, _ := d.state.GetWorkItem("item-1")
+	rounds := getRebaseRounds(item.StepData)
+	if rounds != 1 {
+		t.Errorf("expected rebase_rounds=1, got %d", rounds)
+	}
+
+	if result.Data["last_rebase_clean"] != false {
+		t.Errorf("expected last_rebase_clean=false (actual rebase), got %v", result.Data["last_rebase_clean"])
 	}
 }
 

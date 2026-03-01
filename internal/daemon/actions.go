@@ -563,12 +563,6 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["rebase_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
-
 	// Perform the rebase
 	workDir := sess.GetWorkDir()
 
@@ -578,6 +572,14 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 	result, err := d.gitService.RebaseBranchWithStatus(rebaseCtx, workDir, item.Branch, baseBranch)
 	if err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("rebase failed: %w", err)}
+	}
+
+	// Only increment rounds when the rebase actually changed something
+	if !result.Clean {
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.StepData["rebase_rounds"] = rounds + 1
+			it.UpdatedAt = time.Now()
+		})
 	}
 
 	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1, "clean", result.Clean)
