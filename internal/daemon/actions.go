@@ -563,12 +563,6 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["rebase_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
-
 	// Perform the rebase
 	workDir := sess.GetWorkDir()
 
@@ -580,7 +574,19 @@ func (a *rebaseAction) Execute(ctx context.Context, ac *workflow.ActionContext) 
 		return workflow.ActionResult{Error: fmt.Errorf("rebase failed: %w", err)}
 	}
 
-	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", rounds+1, "clean", result.Clean)
+	// Only increment rounds when the rebase actually changed something
+	if !result.Clean {
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			it.StepData["rebase_rounds"] = rounds + 1
+			it.UpdatedAt = time.Now()
+		})
+	}
+
+	logRound := rounds
+	if !result.Clean {
+		logRound = rounds + 1
+	}
+	d.logger.Info("rebased branch successfully", "workItem", item.ID, "branch", item.Branch, "baseBranch", baseBranch, "round", logRound, "clean", result.Clean)
 	return workflow.ActionResult{
 		Success: true,
 		Data: map[string]any{
@@ -652,12 +658,7 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 		return workflow.ActionResult{Error: err}
 	}
 
-	// Check max rounds
 	maxRounds := ac.Params.Int("max_conflict_rounds", 3)
-	rounds := getConflictRounds(item.StepData)
-	if rounds >= maxRounds {
-		return workflow.ActionResult{Error: fmt.Errorf("max conflict resolution rounds exceeded (%d/%d)", rounds, maxRounds)}
-	}
 
 	// Refresh stale session to ensure worktree exists
 	sess = d.refreshStaleSession(ctx, item, sess)
@@ -668,19 +669,24 @@ func (a *resolveConflictsAction) Execute(ctx context.Context, ac *workflow.Actio
 		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
 	}
 
-	// Abort any stale merge that may be in progress from a previous attempt
 	workDir := sess.GetWorkDir()
 
+	// Derive round count from git state: each completed conflict-resolution
+	// round leaves exactly one merge commit on the branch.
+	rounds, err := d.gitService.CountMergeCommits(ctx, workDir, baseBranch)
+	if err != nil {
+		return workflow.ActionResult{Error: fmt.Errorf("failed to count conflict rounds: %w", err)}
+	}
+
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max conflict resolution rounds exceeded (%d/%d)", rounds, maxRounds)}
+	}
+
+	// Abort any stale merge that may be in progress from a previous attempt
 	mergeInProgress, _ := d.gitService.IsMergeInProgress(ctx, workDir)
 	if mergeInProgress {
 		d.gitService.AbortMerge(ctx, workDir)
 	}
-
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["conflict_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
 
 	// Merge base branch into feature branch
 	mergeCtx, cancel := context.WithTimeout(ctx, timeoutGitRewrite)
@@ -768,16 +774,34 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	// Check max rounds
+	sess, err := d.getSessionOrError(item.SessionID)
+	if err != nil {
+		return workflow.ActionResult{Error: err}
+	}
+
+	// Derive round count from observable PR state rather than local StepData,
+	// so the counter is correct even after daemon restarts or step re-runs.
+	countCtx, countCancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer countCancel()
 	maxRounds := ac.Params.Int("max_review_rounds", 3)
-	rounds := getReviewRounds(item.StepData)
+	rounds := d.countAddressReviewRoundsFromPR(countCtx, sess.RepoPath, item.Branch)
 	if rounds >= maxRounds {
 		return workflow.ActionResult{Error: fmt.Errorf("max review rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
 
-	sess, err := d.getSessionOrError(item.SessionID)
-	if err != nil {
-		return workflow.ActionResult{Error: err}
+	// Post a marker comment on the PR to record this round. The comment is
+	// intentionally not deduplicated: each invocation creates a new comment so
+	// that countAddressReviewRoundsFromPR can derive the count on future runs.
+	markerCtx, markerCancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer markerCancel()
+	prNum, prErr := d.gitService.GetPRNumber(markerCtx, sess.RepoPath, item.Branch)
+	if prErr == nil {
+		body := fmt.Sprintf("Starting review address round %d.\n%s", rounds+1, AddressReviewRoundMarker)
+		if err := d.gitService.CommentOnIssue(markerCtx, sess.RepoPath, prNum, body); err != nil {
+			d.logger.Warn("failed to post address-review round marker", "error", err, "round", rounds+1)
+		}
+	} else {
+		d.logger.Warn("failed to get PR number for address-review round marker", "error", prErr)
 	}
 
 	// Fetch review comments
@@ -791,12 +815,6 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 
 	// Filter out daemon transcript comments
 	reviewComments := worker.FilterTranscriptComments(comments)
-
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["review_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
 
 	// Resume session
 	if err := d.startAddressReview(ctx, item, sess, rounds+1, reviewComments); err != nil {

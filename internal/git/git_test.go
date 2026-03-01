@@ -3254,3 +3254,77 @@ func TestCountCommitsMatchingMessage_Integration(t *testing.T) {
 		t.Errorf("expected 2 marker commits, got %d", count)
 	}
 }
+
+func TestCountMergeCommits_ZeroRounds(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	// RemoteBranchExists: origin/main found
+	mock.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, pexec.MockResponse{})
+	// rev-list returns 0
+	mock.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	count, err := svc.CountMergeCommits(context.Background(), "/worktree", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 merge commits, got %d", count)
+	}
+}
+
+func TestCountMergeCommits_MultipleRounds(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	count, err := svc.CountMergeCommits(context.Background(), "/worktree", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 merge commits, got %d", count)
+	}
+}
+
+func TestCountMergeCommits_FallsBackToLocalBranch(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	// RemoteBranchExists: origin/main not found
+	mock.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, pexec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
+	// Falls back to local main
+	mock.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "main..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("1\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	count, err := svc.CountMergeCommits(context.Background(), "/worktree", "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 merge commit, got %d", count)
+	}
+}
+
+func TestCountMergeCommits_RevListError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, pexec.MockResponse{
+		Err: fmt.Errorf("git error"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.CountMergeCommits(context.Background(), "/worktree", "main")
+	if err == nil {
+		t.Fatal("expected error from rev-list failure")
+	}
+	if !strings.Contains(err.Error(), "git rev-list") {
+		t.Errorf("expected rev-list error, got: %v", err)
+	}
+}

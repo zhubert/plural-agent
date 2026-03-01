@@ -141,6 +141,7 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 	fullBranchName := branchPrefix + branchName
 
 	// Check if branch already exists (stale from a previous crashed session)
+	var sess *config.Session
 	if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
 		// Before cleaning up, check if there's a live PR on this branch.
 		// If so, create a minimal tracking session so the workflow can advance
@@ -179,17 +180,36 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 			return fmt.Errorf("branch %s has an existing %s PR: %w", fullBranchName, prState, errExistingPR)
 		}
 
-		log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
-		d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
-		if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
-			return fmt.Errorf("branch %s exists and could not be cleaned up", fullBranchName)
+		// Check if the branch has commits ahead of the base branch.
+		// If it does, the branch IS the state — resume work on it instead of throwing it away.
+		baseBranch := d.sessionService.GetDefaultBranch(ctx, repoPath)
+		divCtx, divCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+		divergence, divErr := d.gitService.GetBranchDivergence(divCtx, repoPath, baseBranch, fullBranchName)
+		divCancel()
+		if divErr == nil && divergence.Ahead > 0 {
+			log.Info("branch has commits ahead of base, resuming instead of cleaning up",
+				"branch", fullBranchName, "commitsAhead", divergence.Ahead)
+			resumeSess, resumeErr := d.sessionService.CreateOnExistingBranch(ctx, repoPath, fullBranchName, baseBranch)
+			if resumeErr != nil {
+				return fmt.Errorf("failed to resume existing branch %s: %w", fullBranchName, resumeErr)
+			}
+			sess = resumeSess
+		} else {
+			log.Warn("stale branch from previous attempt, cleaning up", "branch", fullBranchName)
+			d.cleanupStaleBranch(ctx, repoPath, fullBranchName)
+			if d.sessionService.BranchExists(ctx, repoPath, fullBranchName) {
+				return fmt.Errorf("branch %s exists and could not be cleaned up", fullBranchName)
+			}
 		}
 	}
 
-	// Create new session
-	sess, err := d.sessionService.Create(ctx, repoPath, branchName, branchPrefix, session.BasePointOrigin)
-	if err != nil {
-		return fmt.Errorf("session creation failed: %w", err)
+	if sess == nil {
+		// Create new session on a fresh branch
+		newSess, err := d.sessionService.Create(ctx, repoPath, branchName, branchPrefix, session.BasePointOrigin)
+		if err != nil {
+			return fmt.Errorf("session creation failed: %w", err)
+		}
+		sess = newSess
 	}
 
 	// Configure session from workflow config params
@@ -906,21 +926,6 @@ INSTRUCTIONS:
 DO NOT push — the system handles pushing after you commit.`, round, fileList)
 }
 
-// getConflictRounds extracts the conflict resolution round counter from step data.
-func getConflictRounds(stepData map[string]any) int {
-	v, ok := stepData["conflict_rounds"]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	default:
-		return 0
-	}
-}
 
 // getRebaseRounds extracts the rebase round counter from step data.
 func getRebaseRounds(stepData map[string]any) int {
@@ -1011,20 +1016,35 @@ INSTRUCTIONS:
 DO NOT push or create PRs — the system handles this.`, round)
 }
 
-// getReviewRounds extracts the review round counter from step data.
-func getReviewRounds(stepData map[string]any) int {
-	v, ok := stepData["review_rounds"]
-	if !ok {
+// AddressReviewRoundMarker is the HTML comment marker embedded in PR comments
+// to track each address-review round. It is invisible when rendered by GitHub's
+// Markdown parser. The round count is derived by counting PR comments that
+// contain this marker — each invocation posts a new comment rather than updating
+// an existing one, so the count equals the number of rounds started.
+const AddressReviewRoundMarker = "<!-- erg:address_review_round -->"
+
+// countAddressReviewRoundsFromPR counts how many address-review rounds have been
+// started by counting PR comments that contain AddressReviewRoundMarker.
+// Returns 0 if the PR number cannot be resolved or comments cannot be listed,
+// so that a transient failure does not block progress.
+func (d *Daemon) countAddressReviewRoundsFromPR(ctx context.Context, repoPath, branch string) int {
+	prNum, err := d.gitService.GetPRNumber(ctx, repoPath, branch)
+	if err != nil {
+		d.logger.Debug("countAddressReviewRoundsFromPR: could not get PR number, returning 0", "error", err)
 		return 0
 	}
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	default:
+	comments, err := d.gitService.ListIssueComments(ctx, repoPath, prNum)
+	if err != nil {
+		d.logger.Debug("countAddressReviewRoundsFromPR: could not list comments, returning 0", "error", err)
 		return 0
 	}
+	count := 0
+	for _, c := range comments {
+		if strings.Contains(c.Body, AddressReviewRoundMarker) {
+			count++
+		}
+	}
+	return count
 }
 
 // writePRDescription generates a rich PR description from the branch diff and updates the PR body.

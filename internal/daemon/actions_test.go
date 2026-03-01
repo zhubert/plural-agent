@@ -927,6 +927,139 @@ func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	}
 }
 
+// TestStartCoding_ResumesWhenBranchHasCommitsAhead verifies that when a branch
+// already exists with commits ahead of the base branch (and no open PR),
+// startCoding resumes on that branch instead of cleaning it up.
+func TestStartCoding_ResumesWhenBranchHasCommitsAhead(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns error (no PR found).
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	// GetBranchDivergence: git rev-list --count --left-right main...issue-10 → "0\t3" (3 ahead)
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--count" && args[2] == "--left-right"
+	}, exec.MockResponse{Stdout: []byte("0\t3\n")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Resume work"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx := t.Context()
+
+	err := d.startCoding(ctx, *item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed when resuming existing branch, got: %v", err)
+	}
+
+	// A session should have been created on the existing branch.
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a session to be created")
+	}
+	if sessions[0].Branch != "issue-10" {
+		t.Errorf("expected session branch 'issue-10', got %q", sessions[0].Branch)
+	}
+
+	// Work item should be active with session linked.
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist in state")
+	}
+	if updatedItem.SessionID == "" {
+		t.Error("item.SessionID must be set")
+	}
+	if updatedItem.Branch != "issue-10" {
+		t.Errorf("item.Branch must be 'issue-10', got %q", updatedItem.Branch)
+	}
+	if updatedItem.State != daemonstate.WorkItemActive {
+		t.Errorf("item.State must be WorkItemActive, got %q", updatedItem.State)
+	}
+
+	// The branch should NOT have been deleted (cleanup skipped).
+	calls := mockExec.GetCalls()
+	for _, c := range calls {
+		if c.Name == "git" && len(c.Args) >= 3 && c.Args[0] == "branch" && c.Args[1] == "-D" {
+			t.Error("branch should not have been deleted when resuming")
+		}
+	}
+}
+
+// TestStartCoding_CleansUpWhenBranchHasNoCommitsAhead verifies that when a
+// branch exists but has zero commits ahead of the base (empty/stale), it is
+// cleaned up and a fresh session is started.
+func TestStartCoding_CleansUpWhenBranchHasNoCommitsAhead(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns error (no PR found).
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	// GetBranchDivergence: returns "0\t0" (0 ahead).
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--count" && args[2] == "--left-right"
+	}, exec.MockResponse{Stdout: []byte("0\t0\n")})
+
+	// BranchExists: first call returns true (exists), second returns false (cleaned up).
+	branchCheckCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "git" && len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "issue-10" {
+			branchCheckCount++
+			return branchCheckCount > 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx := t.Context()
+
+	err := d.startCoding(ctx, *item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed after cleaning up empty stale branch, got: %v", err)
+	}
+
+	// A new session should have been created.
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a new session to be created")
+	}
+	if sessions[0].Branch != "issue-10" {
+		t.Errorf("expected new session branch 'issue-10', got %q", sessions[0].Branch)
+	}
+}
+
 func TestParseWorktreeForBranch(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -3019,6 +3152,100 @@ func TestMergePR_SavesRepoPathBeforeCleanup(t *testing.T) {
 	}
 }
 
+func TestMergePR_AlreadyMerged_ReturnsSuccess(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns MERGED
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "MERGED"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	mergeItem, _ := d.state.GetWorkItem("item-1")
+	err := d.mergePR(context.Background(), mergeItem)
+	if err != nil {
+		t.Fatalf("expected nil error for already-merged PR, got: %v", err)
+	}
+
+	// Verify that gh pr merge was NOT called (merge was skipped)
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "pr" && call.Args[1] == "merge" {
+			t.Error("expected gh pr merge to NOT be called when PR is already merged")
+		}
+	}
+}
+
+func TestMergePR_NotMerged_ProceedsWithMerge(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns OPEN
+	prViewJSON, _ := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "OPEN"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+
+	// Mock merge success
+	mockExec.AddPrefixMatch("gh", []string{"pr", "merge"}, exec.MockResponse{
+		Stdout: []byte("merged"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+
+	sess := testSession("sess-1")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "1"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	mergeItem, _ := d.state.GetWorkItem("item-1")
+	err := d.mergePR(context.Background(), mergeItem)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that gh pr merge was called
+	mergeCallFound := false
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "pr" && call.Args[1] == "merge" {
+			mergeCallFound = true
+			break
+		}
+	}
+	if !mergeCallFound {
+		t.Error("expected gh pr merge to be called for an open PR")
+	}
+}
+
 // TestHandleAsyncComplete_RunsFormatterOnSuccess verifies that when
 // _format_command is stored in step data and the worker exits successfully,
 // handleAsyncComplete runs the formatter (producing a formatting commit).
@@ -4101,11 +4328,11 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 		t.Errorf("expected success, got error: %v", result.Error)
 	}
 
-	// Verify rounds incremented
+	// Verify rounds NOT incremented (no-op rebase — HEAD unchanged)
 	item, _ := d.state.GetWorkItem("item-1")
 	rounds := getRebaseRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected rebase_rounds=1, got %d", rounds)
+	if rounds != 0 {
+		t.Errorf("expected rebase_rounds=0 (no-op), got %d", rounds)
 	}
 
 	// Verify rebase status data returned
@@ -4117,6 +4344,70 @@ func TestRebaseAction_Execute_Success(t *testing.T) {
 	}
 	if _, ok := result.Data["last_rebase_at"].(string); !ok {
 		t.Errorf("expected last_rebase_at to be a string timestamp, got %T", result.Data["last_rebase_at"])
+	}
+}
+
+func TestRebaseAction_Execute_NonNoopIncrementsRounds(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Use stateful matchers so the two rev-parse HEAD calls return different values,
+	// simulating a rebase that actually changes the commit (Clean=false).
+	revParseCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name != "git" || len(args) != 2 || args[0] != "rev-parse" || args[1] != "HEAD" {
+			return false
+		}
+		revParseCount++
+		return revParseCount == 1 // matches only the first call
+	}, exec.MockResponse{Stdout: []byte("abc123\n")})
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name != "git" || len(args) != 2 || args[0] != "rev-parse" || args[1] != "HEAD" {
+			return false
+		}
+		return revParseCount >= 2 // matches the second call onward
+	}, exec.MockResponse{Stdout: []byte("def456\n")})
+
+	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"rebase", "origin/main"}, exec.MockResponse{})
+	mockExec.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-sess-1"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &rebaseAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_rebase_rounds": 3})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+	}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify rounds incremented (HEAD changed → non-no-op rebase)
+	item, _ := d.state.GetWorkItem("item-1")
+	rounds := getRebaseRounds(item.StepData)
+	if rounds != 1 {
+		t.Errorf("expected rebase_rounds=1, got %d", rounds)
+	}
+
+	if result.Data["last_rebase_clean"] != false {
+		t.Errorf("expected last_rebase_clean=false (actual rebase), got %v", result.Data["last_rebase_clean"])
 	}
 }
 
@@ -4382,9 +4673,19 @@ func TestResolveConflictsAction_NoSession(t *testing.T) {
 
 func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 	cfg := testConfig()
-	d := testDaemon(cfg)
+	mockExec := exec.NewMockExecutor(nil)
+
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: git rev-list returns 3 (max already reached)
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("3\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
 
 	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
 	cfg.AddSession(*sess)
 
 	d.state.AddWorkItem(&daemonstate.WorkItem{
@@ -4392,7 +4693,7 @@ func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
 		SessionID: "sess-1",
 		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"conflict_rounds": 3},
+		StepData:  map[string]any{},
 	})
 
 	action := &resolveConflictsAction{daemon: d}
@@ -4415,42 +4716,16 @@ func TestResolveConflictsAction_MaxRoundsExceeded(t *testing.T) {
 	}
 }
 
-func TestResolveConflictsAction_MaxRoundsFloat64(t *testing.T) {
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	sess := testSession("sess-1")
-	cfg.AddSession(*sess)
-
-	d.state.AddWorkItem(&daemonstate.WorkItem{
-		ID:        "item-1",
-		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
-		SessionID: "sess-1",
-		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"conflict_rounds": float64(3)},
-	})
-
-	action := &resolveConflictsAction{daemon: d}
-	params := workflow.NewParamHelper(map[string]any{"max_conflict_rounds": 3})
-	ac := &workflow.ActionContext{
-		WorkItemID: "item-1",
-		Params:     params,
-	}
-
-	result := action.Execute(context.Background(), ac)
-
-	if result.Success {
-		t.Error("expected failure when max rounds exceeded (float64)")
-	}
-	if result.Error == nil {
-		t.Error("expected error when max rounds exceeded (float64)")
-	}
-}
-
 func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: 0 completed rounds so far
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
 	// Mock IsMergeInProgress (git rev-parse --verify MERGE_HEAD fails = no merge)
 	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "MERGE_HEAD"}, exec.MockResponse{
 		Err: fmt.Errorf("not found"),
@@ -4459,10 +4734,6 @@ func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	mockExec.AddExactMatch("git", []string{"fetch", "origin", "main"}, exec.MockResponse{})
 	// Mock git merge (clean)
 	mockExec.AddExactMatch("git", []string{"merge", "origin/main", "--no-edit"}, exec.MockResponse{})
-	// Mock GetDefaultBranch
-	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
-		Stdout: []byte("refs/remotes/origin/main"),
-	})
 
 	d := testDaemonWithExec(cfg, mockExec)
 
@@ -4493,19 +4764,18 @@ func TestResolveConflictsAction_CleanMerge(t *testing.T) {
 	if result.Async {
 		t.Error("expected sync result for clean merge (no Claude needed)")
 	}
-
-	// Verify rounds incremented
-	item, _ := d.state.GetWorkItem("item-1")
-	rounds := getConflictRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected conflict_rounds=1, got %d", rounds)
-	}
 }
 
 func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
+	// CountMergeCommits: RemoteBranchExists → origin/main exists
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	// CountMergeCommits: 0 completed rounds so far
+	mockExec.AddExactMatch("git", []string{"rev-list", "--merges", "--count", "origin/main..HEAD"}, exec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
 	// Mock IsMergeInProgress (no stale merge)
 	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "MERGE_HEAD"}, exec.MockResponse{
 		Err: fmt.Errorf("not found"),
@@ -4519,10 +4789,6 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	// Mock GetConflictedFiles
 	mockExec.AddExactMatch("git", []string{"diff", "--name-only", "--diff-filter=U"}, exec.MockResponse{
 		Stdout: []byte("file1.go\nfile2.go\n"),
-	})
-	// Mock GetDefaultBranch
-	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
-		Stdout: []byte("refs/remotes/origin/main"),
 	})
 
 	d := testDaemonWithExec(cfg, mockExec)
@@ -4554,38 +4820,8 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	if !result.Async {
 		t.Error("expected async result when conflicts need Claude resolution")
 	}
-
-	// Verify rounds incremented
-	item, _ := d.state.GetWorkItem("item-1")
-	rounds := getConflictRounds(item.StepData)
-	if rounds != 1 {
-		t.Errorf("expected conflict_rounds=1, got %d", rounds)
-	}
 }
 
-func TestGetConflictRounds(t *testing.T) {
-	tests := []struct {
-		name     string
-		stepData map[string]any
-		expected int
-	}{
-		{"nil step data", nil, 0},
-		{"empty step data", map[string]any{}, 0},
-		{"int value", map[string]any{"conflict_rounds": 2}, 2},
-		{"float64 value (JSON)", map[string]any{"conflict_rounds": float64(3)}, 3},
-		{"string value (invalid)", map[string]any{"conflict_rounds": "2"}, 0},
-		{"zero value", map[string]any{"conflict_rounds": 0}, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getConflictRounds(tt.stepData)
-			if got != tt.expected {
-				t.Errorf("expected %d, got %d", tt.expected, got)
-			}
-		})
-	}
-}
 
 func TestFormatConflictResolutionPrompt(t *testing.T) {
 	prompt := formatConflictResolutionPrompt(2, []string{"file1.go", "file2.go"})
@@ -5158,8 +5394,23 @@ func TestAddressReviewAction_Execute_WorkItemNotFound(t *testing.T) {
 
 func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 	cfg := testConfig()
-	d := testDaemon(cfg)
+	mockExec := exec.NewMockExecutor(nil)
 
+	// Mock PR number lookup for countAddressReviewRoundsFromPR
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "number"},
+		exec.MockResponse{Stdout: []byte(`{"number": 42}`)})
+
+	// Mock comments listing: return 3 comments that each contain the round marker
+	roundMarkerComment := `{"id": %d, "body": "Starting review address round %d.\n` + AddressReviewRoundMarker + `"}`
+	commentsJSON := fmt.Sprintf("[%s,%s,%s]",
+		fmt.Sprintf(roundMarkerComment, 1, 1),
+		fmt.Sprintf(roundMarkerComment, 2, 2),
+		fmt.Sprintf(roundMarkerComment, 3, 3),
+	)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"},
+		exec.MockResponse{Stdout: []byte(commentsJSON)})
+
+	d := testDaemonWithExec(cfg, mockExec)
 	sess := testSession("sess-1")
 	cfg.AddSession(*sess)
 	d.state.AddWorkItem(&daemonstate.WorkItem{
@@ -5167,7 +5418,7 @@ func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
 		SessionID: "sess-1",
 		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"review_rounds": 3},
+		StepData:  map[string]any{},
 	})
 
 	action := &addressReviewAction{daemon: d}
@@ -5184,35 +5435,6 @@ func TestAddressReviewAction_Execute_MaxRoundsExceeded(t *testing.T) {
 	}
 	if result.Error == nil || !strings.Contains(result.Error.Error(), "max review rounds exceeded") {
 		t.Errorf("expected 'max review rounds exceeded' error, got: %v", result.Error)
-	}
-}
-
-func TestAddressReviewAction_Execute_MaxRoundsFloat64(t *testing.T) {
-	// JSON deserialization produces float64 for numbers
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	sess := testSession("sess-1")
-	cfg.AddSession(*sess)
-	d.state.AddWorkItem(&daemonstate.WorkItem{
-		ID:        "item-1",
-		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
-		SessionID: "sess-1",
-		Branch:    "feature-sess-1",
-		StepData:  map[string]any{"review_rounds": float64(3)},
-	})
-
-	action := &addressReviewAction{daemon: d}
-	params := workflow.NewParamHelper(map[string]any{"max_review_rounds": 3})
-	ac := &workflow.ActionContext{
-		WorkItemID: "item-1",
-		Params:     params,
-	}
-
-	result := action.Execute(context.Background(), ac)
-
-	if result.Success {
-		t.Error("expected error when max rounds exceeded (float64)")
 	}
 }
 
@@ -5244,25 +5466,82 @@ func TestAddressReviewAction_Execute_NoSession(t *testing.T) {
 	}
 }
 
-func TestGetReviewRounds(t *testing.T) {
-	tests := []struct {
-		name     string
-		stepData map[string]any
-		want     int
-	}{
-		{"missing", map[string]any{}, 0},
-		{"int zero", map[string]any{"review_rounds": 0}, 0},
-		{"int one", map[string]any{"review_rounds": 1}, 1},
-		{"int three", map[string]any{"review_rounds": 3}, 3},
-		{"float64 zero", map[string]any{"review_rounds": float64(0)}, 0},
-		{"float64 two", map[string]any{"review_rounds": float64(2)}, 2},
-		{"wrong type", map[string]any{"review_rounds": "oops"}, 0},
+func TestCountAddressReviewRoundsFromPR(t *testing.T) {
+	const branch = "feature-1"
+	const commentsEndpoint = "repos/:owner/:repo/issues/42/comments"
+
+	marker := AddressReviewRoundMarker
+	markerComment := func(id int) string {
+		return fmt.Sprintf(`{"id":%d,"body":"Starting review address round %d.\n%s"}`, id, id, marker)
 	}
+	otherComment := func(id int) string {
+		return fmt.Sprintf(`{"id":%d,"body":"just a regular comment"}`, id)
+	}
+
+	tests := []struct {
+		name         string
+		prViewOutput []byte
+		prViewErr    error
+		commentsJSON []byte
+		commentsErr  error
+		want         int
+	}{
+		{
+			name:      "PR number lookup fails",
+			prViewErr: fmt.Errorf("no PR"),
+			want:      0,
+		},
+		{
+			name:         "comments listing fails",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsErr:  fmt.Errorf("api error"),
+			want:         0,
+		},
+		{
+			name:         "no marker comments",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s]", otherComment(1), otherComment(2))),
+			want:         0,
+		},
+		{
+			name:         "one round marker",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s]", markerComment(1))),
+			want:         1,
+		},
+		{
+			name:         "three round markers",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s,%s]", markerComment(1), markerComment(2), markerComment(3))),
+			want:         3,
+		},
+		{
+			name:         "two markers among other comments",
+			prViewOutput: []byte(`{"number":42}`),
+			commentsJSON: []byte(fmt.Sprintf("[%s,%s,%s,%s]", otherComment(1), markerComment(2), otherComment(3), markerComment(4))),
+			want:         2,
+		},
+	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := getReviewRounds(tc.stepData)
+			cfg := testConfig()
+			mockExec := exec.NewMockExecutor(nil)
+
+			mockExec.AddExactMatch("gh",
+				[]string{"pr", "view", branch, "--json", "number"},
+				exec.MockResponse{Stdout: tc.prViewOutput, Err: tc.prViewErr})
+			if tc.prViewErr == nil {
+				mockExec.AddExactMatch("gh",
+					[]string{"api", commentsEndpoint},
+					exec.MockResponse{Stdout: tc.commentsJSON, Err: tc.commentsErr})
+			}
+
+			d := testDaemonWithExec(cfg, mockExec)
+
+			got := d.countAddressReviewRoundsFromPR(context.Background(), "/test/repo", branch)
 			if got != tc.want {
-				t.Errorf("getReviewRounds(%v) = %d, want %d", tc.stepData, got, tc.want)
+				t.Errorf("countAddressReviewRoundsFromPR() = %d, want %d", got, tc.want)
 			}
 		})
 	}
