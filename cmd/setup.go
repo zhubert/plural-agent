@@ -172,21 +172,52 @@ func runWorkflowWizard(scanner *bufio.Scanner, output io.Writer, provider string
 		fmt.Fprint(output, "Asana project GID (from URL: https://app.asana.com/0/GID/list): ")
 		cfg.Project = readLine(scanner)
 
-		fmt.Fprint(output, "Asana tag to watch for new tasks? [queued]: ")
-		cfg.Label = readWithDefault(scanner, "queued")
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "How do you organize work in Asana?")
+		fmt.Fprintln(output, "  1. By tags (label tasks with a tag like \"queued\")")
+		fmt.Fprintln(output, "  2. By board sections (Kanban)")
+		fmt.Fprint(output, "Enter choice [1-2]: ")
+		orgChoice := readWithDefault(scanner, "1")
 
-		fmt.Fprint(output, "Move completed tasks to which section? (press Enter to skip): ")
-		cfg.CompletionSection = readLine(scanner)
+		if orgChoice == "2" {
+			cfg.Kanban = true
+			fmt.Fprint(output, "Which section has new tasks? [To do]: ")
+			cfg.Section = readWithDefault(scanner, "To do")
+			cfg.Label = ""
+			fmt.Fprint(output, "Completion section? [Done]: ")
+			cfg.CompletionSection = readWithDefault(scanner, "Done")
+		} else {
+			fmt.Fprint(output, "Asana tag to watch for new tasks? [queued]: ")
+			cfg.Label = readWithDefault(scanner, "queued")
+			fmt.Fprint(output, "Filter to section? (press Enter to skip): ")
+			cfg.Section = readLine(scanner)
+			fmt.Fprint(output, "Move completed tasks to which section? (press Enter to skip): ")
+			cfg.CompletionSection = readLine(scanner)
+		}
 
 	case "linear":
 		fmt.Fprint(output, "Linear team ID (from Settings → API): ")
 		cfg.Team = readLine(scanner)
 
-		fmt.Fprint(output, "Linear label to watch for new issues? [queued]: ")
-		cfg.Label = readWithDefault(scanner, "queued")
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "How do you organize work in Linear?")
+		fmt.Fprintln(output, "  1. By labels (label issues with \"queued\")")
+		fmt.Fprintln(output, "  2. By workflow states (Kanban)")
+		fmt.Fprint(output, "Enter choice [1-2]: ")
+		orgChoice := readWithDefault(scanner, "1")
 
-		fmt.Fprint(output, "Move completed issues to which state? (press Enter to skip): ")
-		cfg.CompletionState = readLine(scanner)
+		if orgChoice == "2" {
+			cfg.Kanban = true
+			fmt.Fprint(output, "Label to identify erg-managed issues? [queued]: ")
+			cfg.Label = readWithDefault(scanner, "queued")
+			fmt.Fprint(output, "Completion state? [Done]: ")
+			cfg.CompletionState = readWithDefault(scanner, "Done")
+		} else {
+			fmt.Fprint(output, "Linear label to watch for new issues? [queued]: ")
+			cfg.Label = readWithDefault(scanner, "queued")
+			fmt.Fprint(output, "Move completed issues to which state? (press Enter to skip): ")
+			cfg.CompletionState = readLine(scanner)
+		}
 
 	default: // github
 		fmt.Fprint(output, "Label to watch for new issues? [queued]: ")
@@ -215,6 +246,16 @@ func runWorkflowWizard(scanner *bufio.Scanner, output io.Writer, provider string
 
 	fmt.Fprint(output, "Run sessions in Docker containers? [y/N]: ")
 	cfg.Containerized = readYesNo(scanner, false)
+
+	fmt.Fprint(output, "Send Slack notifications on failure? [y/N]: ")
+	cfg.NotifySlack = readYesNo(scanner, false)
+	if cfg.NotifySlack {
+		fmt.Fprint(output, "Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL): ")
+		cfg.SlackWebhook = readLine(scanner)
+		if cfg.SlackWebhook == "" {
+			cfg.NotifySlack = false
+		}
+	}
 
 	return cfg
 }
