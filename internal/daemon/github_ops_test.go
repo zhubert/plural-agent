@@ -344,3 +344,51 @@ func TestParseReviewRequests(t *testing.T) {
 
 // Silence unused import warning for config (used in testSession from daemon_test.go).
 var _ = config.Session{}
+
+func TestParseIssueState(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantState string
+		wantErr   bool
+	}{
+		{
+			name:      "open issue",
+			input:     `{"state": "OPEN"}`,
+			wantState: "OPEN",
+		},
+		{
+			name:      "closed issue",
+			input:     `{"state": "CLOSED"}`,
+			wantState: "CLOSED",
+		},
+		{
+			name:    "invalid JSON",
+			input:   `not json`,
+			wantErr: true,
+		},
+		{
+			name:      "empty state",
+			input:     `{"state": ""}`,
+			wantState: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseIssueState([]byte(tc.input))
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.wantState {
+				t.Errorf("state = %q, want %q", got, tc.wantState)
+			}
+		})
+	}
+}
