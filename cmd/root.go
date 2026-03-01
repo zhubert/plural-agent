@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	debugMode             bool
 	quietMode             bool
 	version, commit, date string
 )
@@ -20,18 +19,14 @@ func SetVersionInfo(v, c, d string) {
 
 var rootCmd = &cobra.Command{
 	Use:   "erg",
-	Short: "Headless autonomous agent daemon for managing Claude Code sessions",
-	Long: `Persistent orchestrator daemon that manages the full lifecycle of work items:
-picking up issues, coding, PR creation, review feedback cycles, and final merge.
+	Short: "Autonomous coding agent that turns issues into merged PRs",
+	Long: `erg watches your issue tracker for labeled issues, spins up Claude Code
+sessions to implement them, creates PRs, responds to review feedback,
+and merges when CI passes and reviewers approve.
 
-The daemon polls for issues labeled 'queued', creates containerized Claude Code
-sessions, monitors CI and review feedback, and auto-merges approved PRs.
-
-State is persisted to ~/.erg/ and survives restarts. Behavior is configured via
-.erg/workflow.yaml in your repository.
-
-Examples:
-  erg start                        # Start daemon for current repo
+Configure with .erg/workflow.yaml in your repository.
+State is persisted to ~/.erg/ and survives restarts.`,
+	Example: `  erg start                        # Start daemon for current repo
   erg start --repo owner/repo      # Start daemon for specific repo
   erg start -f --repo owner/repo   # Foreground with live status display
   erg status                       # Show daemon status summary
@@ -42,14 +37,22 @@ Examples:
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", true, "Enable debug logging (on by default)")
 	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Reduce logging to info level only")
+
+	// Command groups
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "daemon", Title: "Daemon Commands:"},
+		&cobra.Group{ID: "setup", Title: "Setup Commands:"},
+	)
+
+	// Hide the auto-generated completion command
+	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 }
 
 func initConfig() {
 	if quietMode {
 		logger.SetDebug(false)
-	} else if debugMode {
+	} else {
 		logger.SetDebug(true)
 	}
 }

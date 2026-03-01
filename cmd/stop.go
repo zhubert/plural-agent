@@ -20,8 +20,9 @@ var stopRepo string
 var findDaemonPIDsFunc = findDaemonPIDs
 
 var stopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the daemon gracefully",
+	Use:     "stop",
+	Short:   "Stop the daemon gracefully",
+	GroupID: "daemon",
 	Long: `Send SIGTERM to the running daemon to trigger a graceful shutdown.
 
 The daemon will finish in-flight work before exiting.

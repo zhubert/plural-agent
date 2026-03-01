@@ -13,8 +13,9 @@ import (
 )
 
 var configureCmd = &cobra.Command{
-	Use:   "configure",
-	Short: "Interactive configuration wizard for erg",
+	Use:     "configure",
+	Short:   "Interactive configuration wizard for erg",
+	GroupID: "setup",
 	Long: `Walks you through configuring erg:
 
   - Checks required tools (git, claude, gh) and shows install instructions

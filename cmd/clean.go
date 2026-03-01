@@ -16,8 +16,9 @@ import (
 var agentCleanSkipConfirm bool
 
 var agentCleanCmd = &cobra.Command{
-	Use:   "clean",
-	Short: "Remove all agent daemon state and ephemeral files",
+	Use:     "clean",
+	Short:   "Remove all daemon state and ephemeral files",
+	GroupID: "setup",
 	Long: `Clears daemon state (work item tracking), removes lock files, worktrees,
 session message files, container auth files (erg-auth-*),
 MCP config files (erg-mcp-*.json), and log files (erg.log, mcp-*.log, stream-*.log).

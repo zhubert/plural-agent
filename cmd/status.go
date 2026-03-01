@@ -22,8 +22,9 @@ var (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show daemon status summary",
+	Use:     "status",
+	Short:   "Show daemon status summary",
+	GroupID: "daemon",
 	Long: `Shows a one-shot summary of the daemon status including PID, uptime,
 and work item counts.
 

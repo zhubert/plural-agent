@@ -11,8 +11,9 @@ var (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the daemon",
+	Use:     "start",
+	Short:   "Start the daemon",
+	GroupID: "daemon",
 	Long: `Start the erg daemon for the given repository.
 
 By default, forks into the background and detaches from the terminal.
