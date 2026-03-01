@@ -207,7 +207,7 @@ func TestRunAgentClean_OnlyLocks(t *testing.T) {
 	}
 }
 
-func TestRunAgentClean_RemovesAuthFilesAndLogs(t *testing.T) {
+func TestRunAgentClean_RemovesEphemeralFiles(t *testing.T) {
 	dataDir, stateDir := setupAgentCleanTest(t)
 
 	// Reset logger so it picks up the new paths
@@ -230,6 +230,15 @@ func TestRunAgentClean_RemovesAuthFilesAndLogs(t *testing.T) {
 	for _, name := range []string{"erg-mcp-sess1.json", "erg-mcp-sess2.json"} {
 		if err := os.WriteFile(filepath.Join(configDir, name), []byte("{}"), 0o600); err != nil {
 			t.Fatalf("failed to create MCP config file: %v", err)
+		}
+	}
+
+	// Create session message files in data dir
+	sessDir := filepath.Join(dataDir, "sessions")
+	os.MkdirAll(sessDir, 0o755)
+	for _, name := range []string{"aaa.json", "bbb.json"} {
+		if err := os.WriteFile(filepath.Join(sessDir, name), []byte("[]"), 0o644); err != nil {
+			t.Fatalf("failed to create session file: %v", err)
 		}
 	}
 
@@ -260,6 +269,12 @@ func TestRunAgentClean_RemovesAuthFilesAndLogs(t *testing.T) {
 	mcpFiles, _ := filepath.Glob(filepath.Join(configDir, "erg-mcp-*.json"))
 	if len(mcpFiles) != 0 {
 		t.Errorf("expected 0 MCP config files, got %d", len(mcpFiles))
+	}
+
+	// Verify session message files removed
+	sessFiles, _ := filepath.Glob(filepath.Join(sessDir, "*.json"))
+	if len(sessFiles) != 0 {
+		t.Errorf("expected 0 session files, got %d", len(sessFiles))
 	}
 
 	// Verify log files removed

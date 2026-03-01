@@ -96,6 +96,30 @@ func DeleteSessionMessages(sessionID string) error {
 	return err
 }
 
+// CountSessionMessageFiles returns the number of session message files.
+func CountSessionMessageFiles() (int, error) {
+	dir, err := paths.SessionsDir()
+	if err != nil {
+		return 0, err
+	}
+
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // ClearAllSessionMessages deletes all session message files.
 // Returns the number of files deleted.
 func ClearAllSessionMessages() (int, error) {

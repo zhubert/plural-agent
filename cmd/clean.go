@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/logger"
 	"github.com/zhubert/erg/internal/paths"
@@ -16,14 +17,14 @@ var agentCleanSkipConfirm bool
 
 var agentCleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Remove agent daemon state, lock files, worktrees, auth files, MCP configs, and logs",
+	Short: "Remove all agent daemon state and ephemeral files",
 	Long: `Clears daemon state (work item tracking), removes lock files, worktrees,
-container auth files (erg-auth-*), MCP config files (erg-mcp-*.json),
-and log files (erg.log, mcp-*.log, stream-*.log).
+session message files, container auth files (erg-auth-*),
+MCP config files (erg-mcp-*.json), and log files (erg.log, mcp-*.log, stream-*.log).
 
 This is useful when the daemon state becomes stale or corrupted,
 when a lock file is left behind after an unclean shutdown,
-or when orphaned auth/log/config files accumulate over time.
+or when orphaned files accumulate over time.
 
 It will prompt for confirmation before proceeding unless the --yes flag is used.`,
 	RunE: runAgentClean,
@@ -72,12 +73,16 @@ func runAgentCleanWithReader(input io.Reader) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: error finding MCP config files: %v\n", err)
 	}
+	sessionFileCount, err := config.CountSessionMessageFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: error counting session files: %v\n", err)
+	}
 	logFileCount, err := logger.FindLogFiles()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: error finding log files: %v\n", err)
 	}
 
-	if !stateExists && len(lockFiles) == 0 && len(wtEntries) == 0 && len(authFiles) == 0 && len(mcpConfigFiles) == 0 && logFileCount == 0 {
+	if !stateExists && len(lockFiles) == 0 && len(wtEntries) == 0 && len(authFiles) == 0 && len(mcpConfigFiles) == 0 && sessionFileCount == 0 && logFileCount == 0 {
 		fmt.Println("Nothing to clean.")
 		return nil
 	}
@@ -104,6 +109,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	}
 	if len(mcpConfigFiles) > 0 {
 		fmt.Printf("  - %d MCP config file(s)\n", len(mcpConfigFiles))
+	}
+	if sessionFileCount > 0 {
+		fmt.Printf("  - %d session message file(s)\n", sessionFileCount)
 	}
 	if logFileCount > 0 {
 		fmt.Printf("  - %d log file(s)\n", logFileCount)
@@ -156,6 +164,12 @@ func runAgentCleanWithReader(input io.Reader) error {
 		fmt.Fprintf(os.Stderr, "Warning: error removing MCP config files: %v\n", err)
 	}
 
+	// Clean session message files
+	sessionsRemoved, err := config.ClearAllSessionMessages()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: error removing session files: %v\n", err)
+	}
+
 	// Clean log files
 	logsRemoved, err := logger.ClearLogs()
 	if err != nil {
@@ -179,6 +193,9 @@ func runAgentCleanWithReader(input io.Reader) error {
 	}
 	if mcpRemoved > 0 {
 		fmt.Printf("  - %d MCP config file(s) removed\n", mcpRemoved)
+	}
+	if sessionsRemoved > 0 {
+		fmt.Printf("  - %d session message file(s) removed\n", sessionsRemoved)
 	}
 	if logsRemoved > 0 {
 		fmt.Printf("  - %d log file(s) removed\n", logsRemoved)

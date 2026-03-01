@@ -2370,3 +2370,39 @@ func TestConfig_Save_Atomic(t *testing.T) {
 		t.Errorf("Unexpected repos after Save(): %v", loaded.Repos)
 	}
 }
+
+func TestCountSessionMessageFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpDir, "state"))
+	paths.Reset()
+	t.Cleanup(func() { paths.Reset() })
+
+	// Empty — no sessions dir yet
+	count, err := CountSessionMessageFiles()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0, got %d", count)
+	}
+
+	// Create some session files
+	sessDir := filepath.Join(tmpDir, "data", "erg", "sessions")
+	os.MkdirAll(sessDir, 0o755)
+	for _, name := range []string{"aaa.json", "bbb.json", "ccc.json"} {
+		os.WriteFile(filepath.Join(sessDir, name), []byte("[]"), 0o644)
+	}
+	// Non-json file should be ignored
+	os.WriteFile(filepath.Join(sessDir, "readme.txt"), []byte("hi"), 0o644)
+
+	count, err = CountSessionMessageFiles()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3, got %d", count)
+	}
+}
