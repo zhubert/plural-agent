@@ -785,16 +785,17 @@ func TestLinearProvider_GetIssueComments_ReturnsComments(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		resp := linearIssueCommentsResponse{}
 		resp.Data.Issue.Comments.Nodes = []struct {
+			ID        string `json:"id"`
 			Body      string `json:"body"`
 			CreatedAt string `json:"createdAt"`
 			User      struct {
 				Name string `json:"name"`
 			} `json:"user"`
 		}{
-			{Body: "Looks good!", CreatedAt: "2024-01-15T10:00:00Z", User: struct {
+			{ID: "cmt-1", Body: "Looks good!", CreatedAt: "2024-01-15T10:00:00Z", User: struct {
 				Name string `json:"name"`
 			}{Name: "alice"}},
-			{Body: "Please fix the tests", CreatedAt: "2024-01-14T09:00:00Z", User: struct {
+			{ID: "cmt-2", Body: "Please fix the tests", CreatedAt: "2024-01-14T09:00:00Z", User: struct {
 				Name string `json:"name"`
 			}{Name: "bob"}},
 		}
@@ -834,16 +835,17 @@ func TestLinearProvider_GetIssueComments_EmptyBodyExcluded(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		resp := linearIssueCommentsResponse{}
 		resp.Data.Issue.Comments.Nodes = []struct {
+			ID        string `json:"id"`
 			Body      string `json:"body"`
 			CreatedAt string `json:"createdAt"`
 			User      struct {
 				Name string `json:"name"`
 			} `json:"user"`
 		}{
-			{Body: "", CreatedAt: "2024-01-15T10:00:00Z", User: struct {
+			{ID: "cmt-1", Body: "", CreatedAt: "2024-01-15T10:00:00Z", User: struct {
 				Name string `json:"name"`
 			}{Name: "alice"}},
-			{Body: "real comment", CreatedAt: "2024-01-15T11:00:00Z", User: struct {
+			{ID: "cmt-2", Body: "real comment", CreatedAt: "2024-01-15T11:00:00Z", User: struct {
 				Name string `json:"name"`
 			}{Name: "bob"}},
 		}
@@ -1235,6 +1237,123 @@ func TestLinearProvider_MoveToSection_IssueNotFound(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestLinearProvider_GetIssueComments_IncludesID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"comments": map[string]any{
+						"nodes": []map[string]any{
+							{
+								"id":        "comment-uuid-1",
+								"body":      "First comment <!-- erg:step=notify -->",
+								"createdAt": "2024-01-01T10:00:00.000Z",
+								"user":      map[string]any{"name": "Bot"},
+							},
+							{
+								"id":        "comment-uuid-2",
+								"body":      "Second comment",
+								"createdAt": "2024-01-01T11:00:00.000Z",
+								"user":      map[string]any{"name": "User"},
+							},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "ENG-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].ID != "comment-uuid-1" {
+		t.Errorf("expected ID 'comment-uuid-1', got %q", comments[0].ID)
+	}
+	if !strings.Contains(comments[0].Body, "<!-- erg:step=notify -->") {
+		t.Errorf("expected marker in comment body, got %q", comments[0].Body)
+	}
+	if comments[1].ID != "comment-uuid-2" {
+		t.Errorf("expected ID 'comment-uuid-2', got %q", comments[1].ID)
+	}
+}
+
+func TestLinearProvider_UpdateComment_Success(t *testing.T) {
+	var capturedVars map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		json.NewDecoder(r.Body).Decode(&req)
+		if vars, ok := req["variables"].(map[string]any); ok {
+			capturedVars = vars
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"commentUpdate": map[string]any{"success": true},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+	err := p.UpdateComment(context.Background(), "/repo", "ENG-123", "comment-uuid-1", "Updated body <!-- erg:step=notify -->")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedVars["id"] != "comment-uuid-1" {
+		t.Errorf("expected id 'comment-uuid-1', got %v", capturedVars["id"])
+	}
+	if !strings.Contains(capturedVars["body"].(string), "Updated body") {
+		t.Errorf("expected body to contain 'Updated body', got %v", capturedVars["body"])
+	}
+}
+
+func TestLinearProvider_UpdateComment_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	p := NewLinearProvider(nil)
+	err := p.UpdateComment(context.Background(), "/repo", "ENG-123", "comment-uuid-1", "body")
+	if err == nil {
+		t.Fatal("expected error without API key")
+	}
+}
+
+func TestLinearProvider_UpdateComment_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	cfg := &config.Config{}
+	p := NewLinearProviderWithClient(cfg, server.Client(), server.URL)
+	err := p.UpdateComment(context.Background(), "/repo", "ENG-123", "comment-uuid-1", "body")
+	if err == nil {
+		t.Fatal("expected error on server error response")
 	}
 }
 

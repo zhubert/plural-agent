@@ -2634,3 +2634,142 @@ func TestGetPRLinkText(t *testing.T) {
 		})
 	}
 }
+
+func TestListIssueComments_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
+		Stdout: []byte(`[{"id":1001,"body":"First comment"},{"id":1002,"body":"Second comment <!-- erg:step=notify -->"}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.ListIssueComments(context.Background(), "/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].ID != 1001 || comments[0].Body != "First comment" {
+		t.Errorf("unexpected first comment: %+v", comments[0])
+	}
+	if comments[1].ID != 1002 {
+		t.Errorf("expected comment ID 1002, got %d", comments[1].ID)
+	}
+	if !strings.Contains(comments[1].Body, "<!-- erg:step=notify -->") {
+		t.Errorf("expected marker in comment body, got %q", comments[1].Body)
+	}
+}
+
+func TestListIssueComments_Empty(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/5/comments"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.ListIssueComments(context.Background(), "/repo", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments, got %d", len(comments))
+	}
+}
+
+func TestListIssueComments_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
+		Err: fmt.Errorf("gh api failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.ListIssueComments(context.Background(), "/repo", 42)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestListIssueComments_InvalidJSON(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
+		Stdout: []byte(`not valid json`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.ListIssueComments(context.Background(), "/repo", 42)
+	if err == nil {
+		t.Fatal("expected parse error, got nil")
+	}
+}
+
+func TestUpdateIssueComment_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{
+		"api", "--method", "PATCH",
+		"repos/:owner/:repo/issues/comments/1001",
+		"-f", "body=Updated body <!-- erg:step=notify -->",
+	}, pexec.MockResponse{
+		Stdout: []byte(`{"id":1001,"body":"Updated body <!-- erg:step=notify -->"}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.UpdateIssueComment(context.Background(), "/repo", 1001, "Updated body <!-- erg:step=notify -->")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdateIssueComment_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddPrefixMatch("gh", []string{"api", "--method", "PATCH"}, pexec.MockResponse{
+		Err: fmt.Errorf("gh api PATCH failed"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.UpdateIssueComment(context.Background(), "/repo", 1001, "body")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetPRNumber_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "number"}, pexec.MockResponse{
+		Stdout: []byte(`{"number":42}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	num, err := svc.GetPRNumber(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if num != 42 {
+		t.Errorf("expected PR number 42, got %d", num)
+	}
+}
+
+func TestGetPRNumber_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "number"}, pexec.MockResponse{
+		Err: fmt.Errorf("no PR found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.GetPRNumber(context.Background(), "/repo", "feature-branch")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetPRNumber_InvalidJSON(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "number"}, pexec.MockResponse{
+		Stdout: []byte(`invalid json`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.GetPRNumber(context.Background(), "/repo", "feature-branch")
+	if err == nil {
+		t.Fatal("expected parse error, got nil")
+	}
+}

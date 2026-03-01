@@ -126,6 +126,7 @@ func (e *Engine) processTaskState(ctx context.Context, item *WorkItemView, state
 		SessionID:  item.SessionID,
 		RepoPath:   item.RepoPath,
 		Branch:     item.Branch,
+		Step:       item.CurrentStep,
 		Params:     params,
 		Logger:     e.logger,
 		Extra:      item.Extra,

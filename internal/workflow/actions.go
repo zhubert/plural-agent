@@ -18,6 +18,7 @@ type ActionContext struct {
 	SessionID  string
 	RepoPath   string
 	Branch     string
+	Step       string // current workflow state name, used as idempotency marker for comment actions
 	Params     *ParamHelper
 	Logger     *slog.Logger
 

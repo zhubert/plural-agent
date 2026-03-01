@@ -1390,3 +1390,110 @@ func TestAsanaProvider_FetchIssues_NoLabelReturnsAll(t *testing.T) {
 		t.Fatalf("expected 2 issues (no label filter), got %d", len(issues))
 	}
 }
+
+func TestAsanaProvider_GetIssueComments_IncludesGID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"gid":        "story-gid-1",
+					"type":       "comment",
+					"text":       "First comment [erg:step=notify]",
+					"created_at": "2024-01-01T10:00:00Z",
+					"created_by": map[string]any{"name": "Bot"},
+				},
+				{
+					"gid":        "story-gid-2",
+					"type":       "comment",
+					"text":       "Second comment",
+					"created_at": "2024-01-01T11:00:00Z",
+					"created_by": map[string]any{"name": "User"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "task-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].ID != "story-gid-1" {
+		t.Errorf("expected ID 'story-gid-1', got %q", comments[0].ID)
+	}
+	if !strings.Contains(comments[0].Body, "[erg:step=notify]") {
+		t.Errorf("expected marker in comment body, got %q", comments[0].Body)
+	}
+	if comments[1].ID != "story-gid-2" {
+		t.Errorf("expected ID 'story-gid-2', got %q", comments[1].ID)
+	}
+}
+
+func TestAsanaProvider_UpdateComment_Success(t *testing.T) {
+	var capturedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		if !strings.HasSuffix(r.URL.Path, "/stories/story-gid-1") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	err := p.UpdateComment(context.Background(), "/repo", "task-123", "story-gid-1", "Updated body [erg:step=notify]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedBody, "Updated body") {
+		t.Errorf("expected updated body in request, got: %s", capturedBody)
+	}
+}
+
+func TestAsanaProvider_UpdateComment_NoPAT(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "")
+
+	p := NewAsanaProvider(nil)
+	err := p.UpdateComment(context.Background(), "/repo", "task-123", "story-gid-1", "body")
+	if err == nil {
+		t.Fatal("expected error without PAT")
+	}
+}
+
+func TestAsanaProvider_UpdateComment_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Not Found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	err := p.UpdateComment(context.Background(), "/repo", "task-123", "story-gid-1", "body")
+	if err == nil {
+		t.Fatal("expected error on server error response")
+	}
+}

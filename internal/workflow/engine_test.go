@@ -1591,3 +1591,46 @@ func TestEngine_FindRecoveryWaitStep_NilConfig(t *testing.T) {
 		t.Errorf("FindRecoveryWaitStep(nil config) = %q, want empty string", got)
 	}
 }
+
+func TestEngine_ProcessStep_StepPopulatedInActionContext(t *testing.T) {
+	// Verify that the ActionContext.Step field is set to the current workflow state name.
+	var capturedStep string
+	capturingAction := &captureStepAction{capturedStep: &capturedStep}
+
+	cfg := &Config{
+		Start: "notify",
+		States: map[string]*State{
+			"notify": {
+				Type:   StateTypeTask,
+				Action: "test.action",
+				Next:   "done",
+			},
+			"done": {Type: StateTypeSucceed},
+		},
+	}
+	registry := NewActionRegistry()
+	registry.Register("test.action", capturingAction)
+	engine := NewEngine(cfg, registry, nil, testutil.DiscardLogger())
+
+	view := &WorkItemView{
+		ID:          "wi-1",
+		CurrentStep: "notify",
+	}
+	_, err := engine.ProcessStep(context.Background(), view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedStep != "notify" {
+		t.Errorf("expected Step='notify' in ActionContext, got %q", capturedStep)
+	}
+}
+
+// captureStepAction is a test action that captures the Step value from ActionContext.
+type captureStepAction struct {
+	capturedStep *string
+}
+
+func (a *captureStepAction) Execute(_ context.Context, ac *ActionContext) ActionResult {
+	*a.capturedStep = ac.Step
+	return ActionResult{Success: true}
+}
