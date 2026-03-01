@@ -1719,6 +1719,196 @@ func TestFormatCIFixPrompt(t *testing.T) {
 	}
 }
 
+// TestFixCIAction_Execute_MaxRoundsFromGit verifies that ai.fix_ci uses the git-derived
+// round count (marker commits) to enforce the max_ci_fix_rounds limit.
+func TestFixCIAction_Execute_MaxRoundsFromGit(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Session with explicit BaseBranch to avoid GetDefaultBranch complexity.
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	// RemoteBranchExists: git rev-parse --verify origin/main → success (returns "abc")
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	// CountCommitsMatchingMessage: return 3 (max reached)
+	mockExec.AddPrefixMatch("git", []string{"rev-list", "--count", "--grep=" + git.CIFixMarkerMessage}, exec.MockResponse{
+		Stdout: []byte("3\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when git-derived max rounds exceeded")
+	}
+	if result.Error == nil {
+		t.Error("expected error")
+	}
+	if !strings.Contains(result.Error.Error(), "max CI fix rounds exceeded") {
+		t.Errorf("expected 'max CI fix rounds exceeded' error, got: %v", result.Error)
+	}
+}
+
+// TestFixCIAction_Execute_GitRoundsBelowMax verifies that when git reports fewer
+// rounds than the max, the action does not reject with "max CI fix rounds exceeded".
+func TestFixCIAction_Execute_GitRoundsBelowMax(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	// RemoteBranchExists: origin/main exists
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	// CountCommitsMatchingMessage: return 1 (one round done, below max of 3)
+	mockExec.AddPrefixMatch("git", []string{"rev-list", "--count", "--grep=" + git.CIFixMarkerMessage}, exec.MockResponse{
+		Stdout: []byte("1\n"),
+	})
+	// gh run list (CI logs fetch) — return empty so it falls back to generic message
+	mockExec.AddPrefixMatch("gh", []string{"run", "list"}, exec.MockResponse{
+		Stdout: []byte("[]\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	// The action may fail for other reasons (e.g., no failed CI runs), but must NOT
+	// fail with "max CI fix rounds exceeded" when the git count is below the limit.
+	if result.Error != nil && strings.Contains(result.Error.Error(), "max CI fix rounds exceeded") {
+		t.Errorf("should not fail for max rounds when git count is below max: %v", result.Error)
+	}
+}
+
+// TestFixCIAction_Execute_FallsBackToStepDataOnGitError verifies that when the git
+// count fails, the action falls back to StepData to enforce the round limit.
+func TestFixCIAction_Execute_FallsBackToStepDataOnGitError(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+	cfg.AddSession(*sess)
+
+	// RemoteBranchExists: origin/main exists
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	// CountCommitsMatchingMessage: git rev-list fails
+	mockExec.AddPrefixMatch("git", []string{"rev-list", "--count", "--grep=" + git.CIFixMarkerMessage}, exec.MockResponse{
+		Err: fmt.Errorf("exit status 128"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	// StepData has 3 rounds (at max), so fallback should trigger max exceeded
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"ci_fix_rounds": 3},
+	})
+
+	action := &fixCIAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_ci_fix_rounds": 3})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure: StepData fallback should have detected max rounds")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "max CI fix rounds exceeded") {
+		t.Errorf("expected 'max CI fix rounds exceeded', got: %v", result.Error)
+	}
+}
+
+// TestCountCIFixRoundsFromGit_UsesRemoteBranch verifies that countCIFixRoundsFromGit
+// prefers origin/<baseBranch> when it exists.
+func TestCountCIFixRoundsFromGit_UsesRemoteBranch(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// origin/main exists
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{
+		Stdout: []byte("abc123\n"),
+	})
+	// rev-list with origin/main as base
+	mockExec.AddExactMatch("git", []string{"rev-list", "--count", "--grep=" + git.CIFixMarkerMessage, "origin/main..feature"}, exec.MockResponse{
+		Stdout: []byte("2\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+
+	count, err := d.countCIFixRoundsFromGit(context.Background(), sess, "feature")
+	if err != nil {
+		t.Fatalf("countCIFixRoundsFromGit failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2, got %d", count)
+	}
+}
+
+// TestCountCIFixRoundsFromGit_FallsBackToLocalBase verifies that when origin/<baseBranch>
+// does not exist, the local base branch is used.
+func TestCountCIFixRoundsFromGit_FallsBackToLocalBase(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// origin/main does NOT exist (Run returns error)
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{
+		Err: fmt.Errorf("exit status 128"),
+	})
+	// rev-list with local main as base
+	mockExec.AddExactMatch("git", []string{"rev-list", "--count", "--grep=" + git.CIFixMarkerMessage, "main..feature"}, exec.MockResponse{
+		Stdout: []byte("1\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	sess := testSession("sess-1")
+	sess.BaseBranch = "main"
+
+	count, err := d.countCIFixRoundsFromGit(context.Background(), sess, "feature")
+	if err != nil {
+		t.Fatalf("countCIFixRoundsFromGit failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1, got %d", count)
+	}
+}
+
 func TestCommentPRAction_Execute_EmptyBody(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)

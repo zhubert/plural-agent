@@ -717,10 +717,34 @@ func (d *Daemon) runFormatter(ctx context.Context, item daemonstate.WorkItem, pa
 	return nil
 }
 
+// countCIFixRoundsFromGit derives the number of CI fix rounds already attempted
+// by counting marker commits on the branch. Each ai.fix_ci invocation records
+// an empty commit with CIFixMarkerMessage before starting Claude, so the count
+// of such commits is the number of completed (or in-progress) fix rounds.
+func (d *Daemon) countCIFixRoundsFromGit(ctx context.Context, sess *config.Session, branch string) (int, error) {
+	baseBranch := sess.BaseBranch
+	if baseBranch == "" {
+		baseBranch = d.gitService.GetDefaultBranch(ctx, sess.RepoPath)
+	}
+	// Prefer the remote tracking branch so local divergence doesn't skew the count.
+	remoteBranch := "origin/" + baseBranch
+	if !d.gitService.RemoteBranchExists(ctx, sess.RepoPath, remoteBranch) {
+		remoteBranch = baseBranch
+	}
+	return d.gitService.CountCommitsMatchingMessage(ctx, sess.RepoPath, branch, remoteBranch, git.CIFixMarkerMessage)
+}
+
 // startFixCI resumes the coding session with CI failure context.
 func (d *Daemon) startFixCI(ctx context.Context, item daemonstate.WorkItem, sess *config.Session, round int, ciLogs string) error {
 	// Refresh stale session (same reason as addressFeedback)
 	sess = d.refreshStaleSession(ctx, item, sess)
+
+	// Record a marker commit so round count is observable from git history.
+	// This allows countCIFixRoundsFromGit to derive the counter without relying
+	// on StepData, which can be stale if the step re-runs.
+	if err := d.gitService.CreateEmptyCommit(ctx, sess.GetWorkDir(), git.CIFixMarkerMessage); err != nil {
+		d.logger.Warn("failed to create CI fix marker commit", "error", err)
+	}
 
 	prompt := formatCIFixPrompt(round, ciLogs)
 

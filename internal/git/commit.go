@@ -3,10 +3,43 @@ package git
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/zhubert/erg/internal/logger"
 )
+
+// CIFixMarkerMessage is the empty-commit message the daemon adds at the start
+// of each ai.fix_ci session. Counting these commits on a branch gives the
+// number of CI fix rounds that have been attempted, so the round counter can be
+// derived from observable git state rather than local StepData.
+const CIFixMarkerMessage = "ci-fix: start"
+
+// CreateEmptyCommit creates an empty commit (no file changes) with the given
+// message in the specified worktree. This is used to record CI fix round
+// markers directly in the branch history.
+func (s *GitService) CreateEmptyCommit(ctx context.Context, worktreePath, message string) error {
+	if output, err := s.executor.CombinedOutput(ctx, worktreePath, "git", "commit", "--allow-empty", "-m", message); err != nil {
+		return fmt.Errorf("git commit --allow-empty failed: %s - %w", string(output), err)
+	}
+	return nil
+}
+
+// CountCommitsMatchingMessage counts commits on branch (relative to baseBranch)
+// whose commit messages contain grepPattern. Uses git rev-list --grep which
+// performs a full-text search against each commit's log message.
+func (s *GitService) CountCommitsMatchingMessage(ctx context.Context, repoPath, branch, baseBranch, grepPattern string) (int, error) {
+	output, err := s.executor.Output(ctx, repoPath, "git", "rev-list", "--count",
+		"--grep="+grepPattern, baseBranch+".."+branch)
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list failed: %w", err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse commit count %q: %w", strings.TrimSpace(string(output)), err)
+	}
+	return count, nil
+}
 
 // Configuration constants for commit operations
 const (
