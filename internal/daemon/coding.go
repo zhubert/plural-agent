@@ -161,7 +161,6 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 				DaemonManaged: true,
 				Autonomous:    true,
 				Containerized: true,
-				PRCreated:     true,
 			}
 			d.config.AddSession(*trackingSess)
 

@@ -593,9 +593,6 @@ func TestStartCoding_SkipsCleanupWhenPRExists(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 tracking session, got %d", len(sessions))
 	}
-	if !sessions[0].PRCreated {
-		t.Error("tracking session should have PRCreated=true")
-	}
 	updatedItem, ok := d.state.GetWorkItem(item.ID)
 	if !ok {
 		t.Fatal("work item should exist in state")
@@ -2010,7 +2007,6 @@ func TestDaemon_RefreshStaleSession_NoActiveWorker(t *testing.T) {
 		Autonomous:    true,
 		Containerized: true,
 		Started:       true,
-		PRCreated:     true,
 	}
 	cfg.AddSession(*sess)
 
@@ -2050,9 +2046,6 @@ func TestDaemon_RefreshStaleSession_NoActiveWorker(t *testing.T) {
 	}
 	if !newSess.Containerized {
 		t.Error("expected Containerized=true")
-	}
-	if !newSess.PRCreated {
-		t.Error("expected PRCreated=true")
 	}
 
 	// Work item should reference new session
@@ -2147,7 +2140,6 @@ func TestDaemon_RefreshStaleSession_RecreatesWorktree(t *testing.T) {
 		Autonomous:    true,
 		Containerized: true,
 		Started:       true,
-		PRCreated:     true,
 	}
 	cfg.AddSession(*sess)
 
@@ -2215,7 +2207,6 @@ func TestDaemon_RefreshStaleSession_RemovesStaleWorktree(t *testing.T) {
 		Autonomous:    true,
 		Containerized: true,
 		Started:       true,
-		PRCreated:     true,
 	}
 	cfg.AddSession(*sess)
 
@@ -2677,12 +2668,13 @@ func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	// GetPRState returns OPEN via "gh pr view" prefix
-	prViewJSON, _ := json.Marshal(struct {
+	// GetPRForBranch returns OPEN via "gh pr list --head issue-54"
+	prListJSON, _ := json.Marshal([]struct {
+		URL   string `json:"url"`
 		State string `json:"state"`
-	}{State: "OPEN"})
-	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
-		Stdout: prViewJSON,
+	}{{URL: "https://github.com/owner/repo/pull/54", State: "OPEN"}})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list", "--head", "issue-54"}, exec.MockResponse{
+		Stdout: prListJSON,
 	})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -2690,12 +2682,12 @@ func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
 	d.gitService = gitSvc
 	d.repoFilter = "/test/repo"
 
+	// No PRCreated flag needed — GitHub state is the source of truth
 	sess := &config.Session{
-		ID:        "sess-existing",
-		RepoPath:  "/test/repo",
-		WorkTree:  "/test/worktree",
-		Branch:    "issue-54",
-		PRCreated: true,
+		ID:       "sess-existing",
+		RepoPath: "/test/repo",
+		WorkTree: "/test/worktree",
+		Branch:   "issue-54",
 	}
 	cfg.AddSession(*sess)
 
@@ -2708,12 +2700,13 @@ func TestCreatePR_ExistingPR_ReturnsWithoutError(t *testing.T) {
 	})
 
 	item, _ := d.state.GetWorkItem("item-existing")
-	_, err := d.createPR(context.Background(), item, false)
+	url, err := d.createPR(context.Background(), item, false)
 	if err != nil {
 		t.Fatalf("expected no error for existing PR, got: %v", err)
 	}
-	// Note: getPRURL uses os/exec directly and won't find a real PR in test,
-	// but createPR should still return without error (URL may be empty).
+	if url != "https://github.com/owner/repo/pull/54" {
+		t.Errorf("expected PR URL from list response, got %q", url)
+	}
 }
 
 func TestCreatePRAction_NoChanges_ClosesIssue(t *testing.T) {

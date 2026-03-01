@@ -26,21 +26,14 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft 
 
 	log := d.logger.With("workItem", item.ID, "branch", item.Branch)
 
-	// If the session already has a PR (e.g., from a previous attempt that was
-	// recovered via the existing-PR path in startCoding), return its URL
-	// instead of trying to create a duplicate.
-	if sess.PRCreated {
-		prCtx, prCancel := context.WithTimeout(ctx, timeoutQuickAPI)
-		prState, prErr := d.gitService.GetPRState(prCtx, sess.RepoPath, sess.Branch)
-		prCancel()
-		if prErr == nil && prState == git.PRStateOpen {
-			prURL, urlErr := getPRURL(ctx, sess.RepoPath, sess.Branch)
-			if urlErr != nil {
-				log.Debug("failed to get existing PR URL, using empty", "error", urlErr)
-			}
-			log.Info("PR already exists, returning existing URL", "url", prURL)
-			return prURL, nil
-		}
+	// Always check if a PR already exists for this branch before creating.
+	// This is idempotent: querying GitHub state instead of relying on local flags.
+	prCheckCtx, prCheckCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+	existingState, existingURL, prCheckErr := d.gitService.GetPRForBranch(prCheckCtx, sess.RepoPath, sess.Branch)
+	prCheckCancel()
+	if prCheckErr == nil && existingState == git.PRStateOpen {
+		log.Info("PR already exists, returning existing URL", "url", existingURL)
+		return existingURL, nil
 	}
 
 	// Check if there are any changes to create a PR for.
@@ -78,10 +71,6 @@ func (d *Daemon) createPR(ctx context.Context, item daemonstate.WorkItem, draft 
 	if lastErr != nil {
 		return "", lastErr
 	}
-
-	// Mark session as PR created
-	d.config.MarkSessionPRCreated(item.SessionID)
-	d.saveConfig("createPR")
 
 	return prURL, nil
 }
@@ -647,28 +636,6 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 	if err := d.closeIssue(opCtx, item); err != nil {
 		log.Debug("failed to close issue during graceful close", "error", err)
 	}
-}
-
-// getPRURL fetches the URL of an existing PR for the given branch using the gh CLI.
-func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
-	prCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
-	defer cancel()
-
-	cmd := osexec.CommandContext(prCtx, "gh", "pr", "view", branch, "--json", "url")
-	cmd.Dir = repoPath
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("gh pr view failed: %w", err)
-	}
-
-	var result struct {
-		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return "", fmt.Errorf("failed to parse PR URL: %w", err)
-	}
-
-	return result.URL, nil
 }
 
 // parseReviewRequests parses the JSON output of "gh pr view --json reviewRequests"

@@ -109,20 +109,6 @@ func (c *Config) MarkSessionMerged(sessionID string) bool {
 	return false
 }
 
-// MarkSessionPRCreated marks a session as having a PR created
-func (c *Config) MarkSessionPRCreated(sessionID string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := range c.Sessions {
-		if c.Sessions[i].ID == sessionID {
-			c.Sessions[i].PRCreated = true
-			return true
-		}
-	}
-	return false
-}
-
 // MarkSessionPRMerged marks a session's PR as merged on GitHub
 func (c *Config) MarkSessionPRMerged(sessionID string) bool {
 	c.mu.Lock()

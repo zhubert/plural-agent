@@ -752,30 +752,6 @@ func TestConfig_MarkSessionMerged(t *testing.T) {
 	}
 }
 
-func TestConfig_MarkSessionPRCreated(t *testing.T) {
-	cfg := &Config{
-		Repos: []string{},
-		Sessions: []Session{
-			{ID: "session-1", RepoPath: "/path", WorkTree: "/wt", Branch: "b1", PRCreated: false},
-		},
-	}
-
-	// Test marking existing session as having PR created
-	if !cfg.MarkSessionPRCreated("session-1") {
-		t.Error("MarkSessionPRCreated should return true for existing session")
-	}
-
-	sess := cfg.GetSession("session-1")
-	if !sess.PRCreated {
-		t.Error("Session should be marked as having PR created")
-	}
-
-	// Test marking non-existent session
-	if cfg.MarkSessionPRCreated("nonexistent") {
-		t.Error("MarkSessionPRCreated should return false for non-existent session")
-	}
-}
-
 func TestConfig_MarkSessionMergedToParent(t *testing.T) {
 	cfg := &Config{
 		Repos: []string{},
@@ -1881,7 +1857,7 @@ func TestConfig_MarkSessionPRMerged(t *testing.T) {
 	cfg := &Config{
 		Repos: []string{},
 		Sessions: []Session{
-			{ID: "session-1", RepoPath: "/path", WorkTree: "/wt", Branch: "b1", PRCreated: true},
+			{ID: "session-1", RepoPath: "/path", WorkTree: "/wt", Branch: "b1"},
 		},
 	}
 
@@ -1905,7 +1881,7 @@ func TestConfig_MarkSessionPRClosed(t *testing.T) {
 	cfg := &Config{
 		Repos: []string{},
 		Sessions: []Session{
-			{ID: "session-1", RepoPath: "/path", WorkTree: "/wt", Branch: "b1", PRCreated: true},
+			{ID: "session-1", RepoPath: "/path", WorkTree: "/wt", Branch: "b1"},
 		},
 	}
 
