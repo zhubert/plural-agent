@@ -3092,3 +3092,165 @@ func TestLoadTranscript_EmptyMessages(t *testing.T) {
 		t.Errorf("expected empty string for session with no messages, got %q", result)
 	}
 }
+
+// --- CreateEmptyCommit tests ---
+
+func TestCreateEmptyCommit_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"commit", "--allow-empty", "-m", "ci-fix: start"}, pexec.MockResponse{
+		Stdout: []byte("[main abc1234] ci-fix: start\n"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	err := s.CreateEmptyCommit(ctx, "/worktree", "ci-fix: start")
+	if err != nil {
+		t.Fatalf("CreateEmptyCommit failed: %v", err)
+	}
+
+	calls := mock.GetCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Args[0] != "commit" || calls[0].Args[1] != "--allow-empty" {
+		t.Errorf("unexpected args: %v", calls[0].Args)
+	}
+}
+
+func TestCreateEmptyCommit_Failure(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"commit", "--allow-empty", "-m", "ci-fix: start"}, pexec.MockResponse{
+		Err: fmt.Errorf("exit status 1"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	err := s.CreateEmptyCommit(ctx, "/worktree", "ci-fix: start")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCreateEmptyCommit_Integration(t *testing.T) {
+	repoPath := createTestRepo(t)
+	defer os.RemoveAll(repoPath)
+
+	err := svc.CreateEmptyCommit(context.Background(), repoPath, CIFixMarkerMessage)
+	if err != nil {
+		t.Fatalf("CreateEmptyCommit failed: %v", err)
+	}
+
+	// Verify the commit exists in git log
+	cmd := exec.Command("git", "log", "--oneline", "-1")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if !strings.Contains(string(out), CIFixMarkerMessage) {
+		t.Errorf("expected commit message %q in git log, got: %s", CIFixMarkerMessage, out)
+	}
+}
+
+// --- CountCommitsMatchingMessage tests ---
+
+func TestCountCommitsMatchingMessage_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "--grep=ci-fix: start", "main..feature"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	count, err := s.CountCommitsMatchingMessage(ctx, "/repo", "feature", "main", "ci-fix: start")
+	if err != nil {
+		t.Fatalf("CountCommitsMatchingMessage failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected count 2, got %d", count)
+	}
+}
+
+func TestCountCommitsMatchingMessage_Zero(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "--grep=ci-fix: start", "main..feature"}, pexec.MockResponse{
+		Stdout: []byte("0\n"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	count, err := s.CountCommitsMatchingMessage(ctx, "/repo", "feature", "main", "ci-fix: start")
+	if err != nil {
+		t.Fatalf("CountCommitsMatchingMessage failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected count 0, got %d", count)
+	}
+}
+
+func TestCountCommitsMatchingMessage_GitError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "--grep=ci-fix: start", "main..feature"}, pexec.MockResponse{
+		Err: fmt.Errorf("exit status 128"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	_, err := s.CountCommitsMatchingMessage(ctx, "/repo", "feature", "main", "ci-fix: start")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCountCommitsMatchingMessage_BadOutput(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "--grep=ci-fix: start", "main..feature"}, pexec.MockResponse{
+		Stdout: []byte("not-a-number\n"),
+	})
+	s := NewGitServiceWithExecutor(mock)
+
+	_, err := s.CountCommitsMatchingMessage(ctx, "/repo", "feature", "main", "ci-fix: start")
+	if err == nil {
+		t.Fatal("expected error for non-numeric output, got nil")
+	}
+}
+
+func TestCountCommitsMatchingMessage_Integration(t *testing.T) {
+	repoPath := createTestRepo(t)
+	defer os.RemoveAll(repoPath)
+
+	// Get the default branch name (may be "main" or "master" depending on git config).
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get current branch: %v", err)
+	}
+	baseBranch := strings.TrimSpace(string(out))
+
+	// Create a feature branch
+	cmd = exec.Command("git", "checkout", "-b", "feature-ci-fix")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create feature branch: %v", err)
+	}
+
+	// Add two CI fix marker commits
+	for i := 0; i < 2; i++ {
+		cmd = exec.Command("git", "commit", "--allow-empty", "-m", CIFixMarkerMessage)
+		cmd.Dir = repoPath
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to create marker commit %d: %v", i, err)
+		}
+	}
+
+	// Add a non-marker commit
+	cmd = exec.Command("git", "commit", "--allow-empty", "-m", "fix: resolve test error")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create non-marker commit: %v", err)
+	}
+
+	count, err := svc.CountCommitsMatchingMessage(context.Background(), repoPath, "feature-ci-fix", baseBranch, CIFixMarkerMessage)
+	if err != nil {
+		t.Fatalf("CountCommitsMatchingMessage failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 marker commits, got %d", count)
+	}
+}

@@ -496,17 +496,22 @@ func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) w
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	// Check max rounds
-	maxRounds := ac.Params.Int("max_ci_fix_rounds", 3)
-	rounds := getCIFixRounds(item.StepData)
-	if rounds >= maxRounds {
-		return workflow.ActionResult{Error: fmt.Errorf("max CI fix rounds exceeded (%d/%d)", rounds, maxRounds)}
-	}
-
-	// Fetch CI failure logs
+	// Fetch session first — needed for git-based round counting.
 	sess, err := d.getSessionOrError(item.SessionID)
 	if err != nil {
 		return workflow.ActionResult{Error: err}
+	}
+
+	// Derive round count from git history (marker commits added by startFixCI).
+	// Fall back to StepData when the git query fails (e.g., no worktree yet).
+	maxRounds := ac.Params.Int("max_ci_fix_rounds", 3)
+	rounds, gitErr := d.countCIFixRoundsFromGit(ctx, sess, item.Branch)
+	if gitErr != nil {
+		d.logger.Warn("failed to count CI fix rounds from git, falling back to StepData", "error", gitErr)
+		rounds = getCIFixRounds(item.StepData)
+	}
+	if rounds >= maxRounds {
+		return workflow.ActionResult{Error: fmt.Errorf("max CI fix rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
 
 	logs, err := fetchCIFailureLogs(ctx, sess.RepoPath, item.Branch)
@@ -515,13 +520,8 @@ func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) w
 		logs = "(CI failure logs unavailable)"
 	}
 
-	// Increment rounds
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.StepData["ci_fix_rounds"] = rounds + 1
-		it.UpdatedAt = time.Now()
-	})
-
-	// Resume session
+	// Resume session — startFixCI records a marker commit before starting Claude,
+	// so the next invocation can derive the updated count from git.
 	if err := d.startFixCI(ctx, item, sess, rounds+1, logs); err != nil {
 		return workflow.ActionResult{Error: err}
 	}
