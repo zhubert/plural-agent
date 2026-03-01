@@ -2349,6 +2349,9 @@ func TestGetIssueComments_InvalidJSON(t *testing.T) {
 
 func TestCreateRelease_Success_GenerateNotes(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.2.3", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
 	mock.AddExactMatch("gh", []string{"release", "create", "v1.2.3", "--generate-notes"}, pexec.MockResponse{
 		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.2.3\n"),
 	})
@@ -2365,6 +2368,9 @@ func TestCreateRelease_Success_GenerateNotes(t *testing.T) {
 
 func TestCreateRelease_Success_CustomNotes(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v2.0.0", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
 	mock.AddExactMatch("gh", []string{"release", "create", "v2.0.0", "--title", "Version 2", "--notes", "Breaking changes."}, pexec.MockResponse{
 		Stdout: []byte("https://github.com/owner/repo/releases/tag/v2.0.0\n"),
 	})
@@ -2381,6 +2387,9 @@ func TestCreateRelease_Success_CustomNotes(t *testing.T) {
 
 func TestCreateRelease_Success_DraftPrerelease(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.0.0-beta.1", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
 	mock.AddExactMatch("gh", []string{"release", "create", "v1.0.0-beta.1", "--generate-notes", "--draft", "--prerelease", "--target", "dev"}, pexec.MockResponse{
 		Stdout: []byte("https://github.com/owner/repo/releases/tag/v1.0.0-beta.1\n"),
 	})
@@ -2407,6 +2416,9 @@ func TestCreateRelease_EmptyTag(t *testing.T) {
 
 func TestCreateRelease_CLIError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("release not found"),
+	})
 	mock.AddExactMatch("gh", []string{"release", "create", "v1.0.0", "--generate-notes"}, pexec.MockResponse{
 		Err: fmt.Errorf("gh: tag already exists"),
 	})
@@ -2461,6 +2473,46 @@ func TestCreateRelease_ViewFails_ProceedsToCreate(t *testing.T) {
 	}
 	if url != "https://github.com/owner/repo/releases/tag/v1.0.0" {
 		t.Errorf("unexpected release URL: %s", url)
+	}
+}
+
+func TestCreateRelease_ViewFails_NonNotFoundError_ReturnsError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, pexec.MockResponse{
+		Err: fmt.Errorf("HTTP 500: internal server error"),
+	})
+	// gh release create should NOT be called on non-not-found errors.
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.CreateRelease(context.Background(), "/repo", "v1.0.0", "", "", false, false, "")
+	if err == nil {
+		t.Fatal("expected error when gh release view fails with non-not-found error")
+	}
+	if !strings.Contains(err.Error(), "gh release view failed") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	// Verify gh release create was never called.
+	for _, call := range mock.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "release" && call.Args[1] == "create" {
+			t.Error("gh release create should not be called on view errors other than not-found")
+		}
+	}
+}
+
+func TestCreateRelease_ViewSuccess_InvalidJSON_ReturnsError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"release", "view", "v1.0.0", "--json", "url"}, pexec.MockResponse{
+		Stdout: []byte("not valid json"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.CreateRelease(context.Background(), "/repo", "v1.0.0", "", "", false, false, "")
+	if err == nil {
+		t.Fatal("expected error when gh release view returns invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "unexpected response from gh release view") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
