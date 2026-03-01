@@ -128,6 +128,10 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
 
+	if err := validateWorkflowConfig(wfCfg); err != nil {
+		return err
+	}
+
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
@@ -331,6 +335,10 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
 
+	if err := validateWorkflowConfig(wfCfg); err != nil {
+		return err
+	}
+
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 		detected := container.Detect(ctx, agentRepo)
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
@@ -466,6 +474,20 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacqu
 		return err
 	}
 	return nil
+}
+
+// validateWorkflowConfig returns an error if the workflow config has validation problems.
+func validateWorkflowConfig(cfg *workflow.Config) error {
+	errs := workflow.Validate(cfg)
+	if len(errs) == 0 {
+		return nil
+	}
+	var sb strings.Builder
+	sb.WriteString("workflow configuration errors:\n")
+	for _, e := range errs {
+		sb.WriteString(fmt.Sprintf("  - %s: %s\n", e.Field, e.Message))
+	}
+	return fmt.Errorf("%s", sb.String())
 }
 
 // cwdGitRootGetter abstracts the GetCurrentDirGitRoot call for testability.

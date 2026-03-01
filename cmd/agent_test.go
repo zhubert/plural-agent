@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 // mockCWDGetter implements cwdGitRootGetter for tests.
@@ -258,6 +259,38 @@ func TestDaemonFlagIsHidden(t *testing.T) {
 	}
 	if !flag.Hidden {
 		t.Error("expected --_daemon flag to be hidden")
+	}
+}
+
+// ---- validateWorkflowConfig ----
+
+func TestValidateWorkflowConfig_Valid(t *testing.T) {
+	cfg := workflow.DefaultWorkflowConfig()
+	if err := validateWorkflowConfig(cfg); err != nil {
+		t.Errorf("expected no error for valid config, got: %v", err)
+	}
+}
+
+func TestValidateWorkflowConfig_Invalid(t *testing.T) {
+	cfg := &workflow.Config{
+		Source: workflow.SourceConfig{
+			Provider: "jira", // unknown provider
+		},
+	}
+	err := validateWorkflowConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid config")
+	}
+	if !strings.Contains(err.Error(), "workflow configuration errors:") {
+		t.Errorf("error should start with 'workflow configuration errors:', got: %v", err)
+	}
+}
+
+func TestWorkflowCommandRemoved(t *testing.T) {
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Use == "workflow" {
+			t.Error("'erg workflow' command should have been removed")
+		}
 	}
 }
 
