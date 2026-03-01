@@ -328,6 +328,7 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("asana.comment", &asanaCommentAction{daemon: d})
 	registry.Register("asana.move_to_section", &asanaMoveToSectionAction{daemon: d})
 	registry.Register("linear.comment", &linearCommentAction{daemon: d})
+	registry.Register("linear.move_to_state", &linearMoveToStateAction{daemon: d})
 	registry.Register("github.create_release", &createReleaseAction{daemon: d})
 	registry.Register("slack.notify", &slackNotifyAction{daemon: d})
 	registry.Register("webhook.post", &webhookPostAction{daemon: d})

@@ -433,6 +433,39 @@ func (d *Daemon) moveToSection(ctx context.Context, item daemonstate.WorkItem, p
 	return sm.MoveToSection(moveCtx, repoPath, item.IssueRef.ID, section)
 }
 
+// moveToState moves a Linear issue to a named workflow state.
+func (d *Daemon) moveToState(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+	if issues.Source(item.IssueRef.Source) != issues.SourceLinear {
+		d.logger.Warn("linear.move_to_state skipped: not a linear issue",
+			"workItem", item.ID, "source", item.IssueRef.Source)
+		return nil
+	}
+
+	state := params.String("state", "")
+	if state == "" {
+		return fmt.Errorf("state parameter is required")
+	}
+
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		return fmt.Errorf("no repo path found for work item %s", item.ID)
+	}
+
+	p := d.issueRegistry.GetProvider(issues.SourceLinear)
+	if p == nil {
+		return fmt.Errorf("linear provider not registered")
+	}
+	sm, ok := p.(issues.ProviderSectionMover)
+	if !ok {
+		return fmt.Errorf("linear provider does not support moving to states")
+	}
+
+	moveCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer cancel()
+
+	return sm.MoveToSection(moveCtx, repoPath, item.IssueRef.ID, state)
+}
+
 // closeIssue closes the GitHub issue for a work item.
 func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) error {
 	if item.IssueRef.Source != "github" {

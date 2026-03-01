@@ -3121,3 +3121,223 @@ func TestCheckEvent_AsanaInSection_Dispatches(t *testing.T) {
 		t.Error("expected CheckEvent to dispatch to asana.in_section and fire")
 	}
 }
+
+// --- linear.in_state event tests ---
+
+func TestCheckLinearInState_Fires(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, data, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when issue is in the target state")
+	}
+	if data["state"] != "In Progress" {
+		t.Errorf("expected state=In Progress in data, got %v", data["state"])
+	}
+}
+
+func TestCheckLinearInState_NotFired(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, inSection: false}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when issue is not in the target state")
+	}
+}
+
+func TestCheckLinearInState_WrongSource(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false for non-linear issue source")
+	}
+}
+
+func TestCheckLinearInState_MissingState(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{}) // no state param
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when state param is missing")
+	}
+}
+
+func TestCheckLinearInState_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	view := &workflow.WorkItemView{ID: "nonexistent"}
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when work item not found")
+	}
+}
+
+func TestCheckLinearInState_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg) // no provider registered
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "Done"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when no linear provider is registered")
+	}
+}
+
+func TestCheckLinearInState_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{
+		src:        issues.SourceLinear,
+		sectionErr: fmt.Errorf("linear API error"),
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.checkLinearInState(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false on provider error")
+	}
+}
+
+func TestCheckEvent_LinearInState_Dispatches(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockGateProvider{src: issues.SourceLinear, inSection: true}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_state",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"state": "Done"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+
+	fired, _, err := checker.CheckEvent(context.Background(), "linear.in_state", params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected CheckEvent to dispatch to linear.in_state and fire")
+	}
+}

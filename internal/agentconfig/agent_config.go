@@ -33,6 +33,7 @@ type AgentConfig struct {
 	mergeMethod    string
 
 	asanaProjects map[string]string // repo path → Asana project GID
+	linearTeams   map[string]string // repo path → Linear team ID
 }
 
 // Compile-time interface satisfaction check.
@@ -282,5 +283,28 @@ func (c *AgentConfig) SetAsanaProject(repoPath, projectGID string) {
 	}
 }
 
-// HasLinearTeam returns false; Linear teams are not configured in agent mode.
-func (c *AgentConfig) HasLinearTeam(_ string) bool { return false }
+// HasLinearTeam returns true if a Linear team ID is configured for the given repo.
+func (c *AgentConfig) HasLinearTeam(repoPath string) bool {
+	return c.GetLinearTeam(repoPath) != ""
+}
+
+// GetLinearTeam returns the Linear team ID for the given repo path.
+func (c *AgentConfig) GetLinearTeam(repoPath string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.linearTeams[repoPath]
+}
+
+// SetLinearTeam stores the Linear team ID for the given repo path.
+func (c *AgentConfig) SetLinearTeam(repoPath, teamID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.linearTeams == nil {
+		c.linearTeams = make(map[string]string)
+	}
+	if teamID == "" {
+		delete(c.linearTeams, repoPath)
+	} else {
+		c.linearTeams[repoPath] = teamID
+	}
+}

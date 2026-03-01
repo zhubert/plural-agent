@@ -437,6 +437,9 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	if wfCfg.Source.Provider == "asana" && wfCfg.Source.Filter.Project != "" {
 		cfg.SetAsanaProject(agentRepo, wfCfg.Source.Filter.Project)
 	}
+	if wfCfg.Source.Provider == "linear" && wfCfg.Source.Filter.Team != "" {
+		cfg.SetLinearTeam(agentRepo, wfCfg.Source.Filter.Team)
+	}
 
 	// Initialize issue providers
 	githubProvider := issues.NewGitHubProvider(gitSvc)

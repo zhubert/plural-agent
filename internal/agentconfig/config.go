@@ -37,8 +37,9 @@ type Config interface {
 	GetAutoMergeMethod() string
 	GetIssueMaxConcurrent() int
 
-	// Asana
+	// Issue providers
 	SetAsanaProject(repoPath, projectGID string)
+	SetLinearTeam(repoPath, teamID string)
 
 	// Persistence
 	Save() error

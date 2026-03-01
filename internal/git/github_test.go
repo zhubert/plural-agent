@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zhubert/erg/internal/config"
 	pexec "github.com/zhubert/erg/internal/exec"
 )
 
@@ -2588,5 +2589,48 @@ func TestCherryPick_PushFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "git push") {
 		t.Errorf("expected push error, got: %v", err)
+	}
+}
+
+func TestGetPRLinkText(t *testing.T) {
+	tests := []struct {
+		name     string
+		issueRef *config.IssueRef
+		expected string
+	}{
+		{
+			name:     "nil issueRef",
+			issueRef: nil,
+			expected: "",
+		},
+		{
+			name:     "github issue",
+			issueRef: &config.IssueRef{Source: "github", ID: "42"},
+			expected: "\n\nFixes #42",
+		},
+		{
+			name:     "linear issue",
+			issueRef: &config.IssueRef{Source: "linear", ID: "ENG-123"},
+			expected: "\n\nFixes ENG-123",
+		},
+		{
+			name:     "asana task",
+			issueRef: &config.IssueRef{Source: "asana", ID: "1234567890"},
+			expected: "",
+		},
+		{
+			name:     "unknown source",
+			issueRef: &config.IssueRef{Source: "jira", ID: "PROJ-1"},
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetPRLinkText(tc.issueRef)
+			if result != tc.expected {
+				t.Errorf("GetPRLinkText() = %q, want %q", result, tc.expected)
+			}
+		})
 	}
 }

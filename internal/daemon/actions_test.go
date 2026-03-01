@@ -7882,3 +7882,183 @@ func TestCreatePRAction_DraftParam_PassedThrough(t *testing.T) {
 		t.Error("expected non-nil error")
 	}
 }
+
+// --- linearMoveToStateAction tests ---
+
+func TestLinearMoveToStateAction_WorkItemNotFound(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "nonexistent", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Error == nil {
+		t.Error("expected error for missing work item")
+	}
+}
+
+func TestLinearMoveToStateAction_SourceMismatch(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	// Work item has asana source, not linear — should be a no-op.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "item-1",
+		IssueRef: config.IssueRef{Source: "asana", ID: "task-1"},
+	})
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Error("expected success (no-op) for non-linear source")
+	}
+}
+
+func TestLinearMoveToStateAction_MissingState(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{}) // no state param
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when state param is missing")
+	}
+	if result.Error == nil {
+		t.Error("expected error when state param is missing")
+	}
+}
+
+func TestLinearMoveToStateAction_Success(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceLinear}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"state": "In Progress"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if len(provider.moveCalls) != 1 {
+		t.Fatalf("expected 1 MoveToSection call, got %d", len(provider.moveCalls))
+	}
+	if provider.moveCalls[0].section != "In Progress" {
+		t.Errorf("expected section 'In Progress', got %q", provider.moveCalls[0].section)
+	}
+	if provider.moveCalls[0].issueID != "ENG-123" {
+		t.Errorf("expected issueID 'ENG-123', got %q", provider.moveCalls[0].issueID)
+	}
+}
+
+func TestLinearMoveToStateAction_ProviderError(t *testing.T) {
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{
+		src:     issues.SourceLinear,
+		moveErr: fmt.Errorf("linear API error"),
+	}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"state": "Done"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure on provider error")
+	}
+	if result.Error == nil {
+		t.Error("expected non-nil error on provider error")
+	}
+}
+
+func TestLinearMoveToStateAction_NoProvider(t *testing.T) {
+	cfg := testConfig()
+	registry := issues.NewProviderRegistry() // no Linear provider
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "linear", ID: "ENG-123"},
+		SessionID: "sess-1",
+	})
+
+	action := &linearMoveToStateAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"state": "Done"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure when linear provider not registered")
+	}
+	if result.Error == nil {
+		t.Error("expected error when linear provider not registered")
+	}
+}

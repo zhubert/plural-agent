@@ -39,6 +39,8 @@ func (c *eventChecker) CheckEvent(ctx context.Context, event string, params *wor
 		return c.checkPlanUserReplied(ctx, params, item)
 	case "asana.in_section":
 		return c.checkAsanaInSection(ctx, params, item)
+	case "linear.in_state":
+		return c.checkLinearInState(ctx, params, item)
 	default:
 		return false, nil, nil
 	}
@@ -686,5 +688,77 @@ func (c *eventChecker) checkAsanaInSection(ctx context.Context, params *workflow
 	}
 
 	log.Debug("task not yet in target section", "section", section)
+	return false, nil, nil
+}
+
+// checkLinearInState implements the linear.in_state event.
+// It fires when the Linear issue has been moved to a specific named workflow state.
+// Useful for gating on human state transitions in Linear (e.g., waiting for an
+// issue to be moved to "In Progress").
+//
+// Params:
+//
+//	state - workflow state name to watch for (case-insensitive)
+//
+// Data returned on fire:
+//
+//	state - the state name as specified in the workflow params
+func (c *eventChecker) checkLinearInState(ctx context.Context, params *workflow.ParamHelper, item *workflow.WorkItemView) (bool, map[string]any, error) {
+	d := c.daemon
+	log := d.logger.With("workItem", item.ID, "event", "linear.in_state")
+
+	workItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		log.Warn("work item not found")
+		return false, nil, nil
+	}
+
+	if issues.Source(workItem.IssueRef.Source) != issues.SourceLinear {
+		log.Warn("linear.in_state skipped: not a linear issue", "source", workItem.IssueRef.Source)
+		return false, nil, nil
+	}
+
+	state := params.String("state", "")
+	if state == "" {
+		log.Warn("linear.in_state requires state param")
+		return false, nil, nil
+	}
+
+	repoPath := item.RepoPath
+	if repoPath == "" {
+		log.Warn("no repo path for work item")
+		return false, nil, nil
+	}
+
+	if d.issueRegistry == nil {
+		log.Debug("no issue registry configured")
+		return false, nil, nil
+	}
+	p := d.issueRegistry.GetProvider(issues.SourceLinear)
+	if p == nil {
+		log.Debug("linear provider not registered")
+		return false, nil, nil
+	}
+	sc, ok := p.(issues.ProviderSectionChecker)
+	if !ok {
+		log.Warn("linear provider does not support state checking")
+		return false, nil, nil
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
+	defer cancel()
+
+	inState, err := sc.IsInSection(pollCtx, repoPath, workItem.IssueRef.ID, state)
+	if err != nil {
+		log.Debug("failed to check state", "state", state, "error", err)
+		return false, nil, nil
+	}
+
+	if inState {
+		log.Info("issue is in target state", "state", state)
+		return true, map[string]any{"state": state}, nil
+	}
+
+	log.Debug("issue not yet in target state", "state", state)
 	return false, nil, nil
 }
