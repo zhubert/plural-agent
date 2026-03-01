@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/agentconfig"
+	"github.com/zhubert/erg/internal/claude"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
@@ -158,6 +159,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.lock = lock
 	}
 	defer d.releaseLock()
+
+	// Clean up stale auth files from previous runs that were killed ungracefully
+	if n, err := claude.ClearAuthFiles(); err != nil {
+		d.logger.Warn("failed to clean stale auth files", "error", err)
+	} else if n > 0 {
+		d.logger.Info("cleaned stale auth files from previous run", "count", n)
+	}
 
 	// Load or create state
 	state, err := daemonstate.LoadDaemonState(d.repoFilter)
