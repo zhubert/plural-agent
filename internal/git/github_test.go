@@ -1868,6 +1868,9 @@ func TestSquashBranch_Success(t *testing.T) {
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
 	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
+	})
 	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"commit", "-m", "my squash message"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
@@ -1880,17 +1883,15 @@ func TestSquashBranch_Success(t *testing.T) {
 }
 
 func TestSquashBranch_AutoMessage_SingleCommit(t *testing.T) {
+	// A branch with a single commit is already squashed — verify no-op.
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
 	})
-	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
-		Stdout: []byte("add feature X\n"),
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("1\n"),
 	})
-	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
-	mock.AddExactMatch("git", []string{"commit", "-m", "add feature X"}, pexec.MockResponse{})
-	mock.AddExactMatch("git", []string{"push", "--force-with-lease", "origin", "feature-branch"}, pexec.MockResponse{})
 
 	svc := NewGitServiceWithExecutor(mock)
 	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "")
@@ -1904,6 +1905,9 @@ func TestSquashBranch_AutoMessage_MultipleCommits(t *testing.T) {
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("3\n"),
 	})
 	// git log newest-first: "third commit\nsecond commit\nfirst commit"
 	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
@@ -1922,6 +1926,25 @@ func TestSquashBranch_AutoMessage_MultipleCommits(t *testing.T) {
 	}
 }
 
+func TestSquashBranch_AlreadySquashed(t *testing.T) {
+	// When there is exactly one commit ahead of the merge base, SquashBranch
+	// should be a no-op and return nil without resetting, committing, or pushing.
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
+	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
+		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("1\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	err := svc.SquashBranch(context.Background(), "/worktree", "feature-branch", "main", "already squashed msg")
+	if err != nil {
+		t.Fatalf("expected no error for already-squashed branch, got: %v", err)
+	}
+}
+
 func TestSquashBranch_FetchFails_FallsBackToLocal(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{
@@ -1930,6 +1953,9 @@ func TestSquashBranch_FetchFails_FallsBackToLocal(t *testing.T) {
 	// Fallback: merge-base with local branch
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
 	})
 	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"commit", "-m", "squash msg"}, pexec.MockResponse{})
@@ -1947,6 +1973,9 @@ func TestSquashBranch_NoCommits(t *testing.T) {
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("0\n"),
 	})
 	// No commits on the branch
 	mock.AddExactMatch("git", []string{"log", "--format=%s", "abc1234567890..HEAD"}, pexec.MockResponse{
@@ -1989,6 +2018,9 @@ func TestSquashBranch_ResetFails(t *testing.T) {
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
 	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
+	})
 	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{
 		Err: fmt.Errorf("reset failed"),
 	})
@@ -2008,6 +2040,9 @@ func TestSquashBranch_CommitFails(t *testing.T) {
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
 	})
 	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"commit", "-m", "msg"}, pexec.MockResponse{
@@ -2029,6 +2064,9 @@ func TestSquashBranch_PushFails(t *testing.T) {
 	mock.AddExactMatch("git", []string{"fetch", "origin", "main"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"merge-base", "HEAD", "origin/main"}, pexec.MockResponse{
 		Stdout: []byte("abc1234567890\n"),
+	})
+	mock.AddExactMatch("git", []string{"rev-list", "--count", "abc1234567890..HEAD"}, pexec.MockResponse{
+		Stdout: []byte("2\n"),
 	})
 	mock.AddExactMatch("git", []string{"reset", "--soft", "abc1234567890"}, pexec.MockResponse{})
 	mock.AddExactMatch("git", []string{"commit", "-m", "msg"}, pexec.MockResponse{})

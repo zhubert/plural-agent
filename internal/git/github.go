@@ -602,6 +602,15 @@ func (s *GitService) SquashBranch(ctx context.Context, worktreePath, branch, bas
 		mergeBaseRef = strings.TrimSpace(string(out))
 	}
 
+	// Idempotency check: if the branch already has exactly one commit ahead of
+	// the merge base, it is already squashed — return success without any changes.
+	if countOut, err := s.executor.Output(ctx, worktreePath, "git", "rev-list", "--count", mergeBaseRef+"..HEAD"); err == nil {
+		if strings.TrimSpace(string(countOut)) == "1" {
+			log.Info("branch already squashed, skipping", "branch", branch)
+			return nil
+		}
+	}
+
 	// Collect commit subjects when no explicit message is provided.
 	if message == "" {
 		out, err := s.executor.Output(ctx, worktreePath, "git", "log", "--format=%s", mergeBaseRef+"..HEAD")
