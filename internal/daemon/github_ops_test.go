@@ -284,5 +284,63 @@ func TestMergePR_NonRebaseMethodNoRetry(t *testing.T) {
 	}
 }
 
+func TestParseReviewRequests(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLogins []string
+		wantErr   bool
+	}{
+		{
+			name:       "empty list",
+			input:      `{"reviewRequests": []}`,
+			wantLogins: nil,
+		},
+		{
+			name:       "single reviewer",
+			input:      `{"reviewRequests": [{"login": "octocat"}]}`,
+			wantLogins: []string{"octocat"},
+		},
+		{
+			name:       "multiple reviewers",
+			input:      `{"reviewRequests": [{"login": "alice"}, {"login": "bob"}]}`,
+			wantLogins: []string{"alice", "bob"},
+		},
+		{
+			name:       "case-insensitive storage",
+			input:      `{"reviewRequests": [{"login": "OctoCat"}]}`,
+			wantLogins: []string{"octocat"},
+		},
+		{
+			name:    "invalid JSON",
+			input:   `not json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseReviewRequests([]byte(tc.input))
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, login := range tc.wantLogins {
+				if !got[login] {
+					t.Errorf("expected reviewer %q in result set", login)
+				}
+			}
+			if len(got) != len(tc.wantLogins) {
+				t.Errorf("expected %d reviewers, got %d", len(tc.wantLogins), len(got))
+			}
+		})
+	}
+}
+
 // Silence unused import warning for config (used in testSession from daemon_test.go).
 var _ = config.Session{}
