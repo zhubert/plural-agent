@@ -3394,6 +3394,390 @@ func (m *mockCommentProvider) Comment(_ context.Context, repoPath, issueID, body
 	return m.commentErr
 }
 
+// mockIdempotentCommentProvider is a test double that also implements
+// ProviderGateChecker and ProviderCommentUpdater to support idempotent comments.
+type mockIdempotentCommentProvider struct {
+	src           issues.Source
+	commentErr    error
+	updateErr     error
+	existingComments []issues.IssueComment
+	comments      []mockCommentCall
+	updates       []mockUpdateCall
+}
+
+type mockUpdateCall struct {
+	repoPath  string
+	issueID   string
+	commentID string
+	body      string
+}
+
+func (m *mockIdempotentCommentProvider) Name() string                             { return string(m.src) }
+func (m *mockIdempotentCommentProvider) Source() issues.Source                    { return m.src }
+func (m *mockIdempotentCommentProvider) IsConfigured(_ string) bool               { return true }
+func (m *mockIdempotentCommentProvider) GenerateBranchName(_ issues.Issue) string { return "" }
+func (m *mockIdempotentCommentProvider) GetPRLinkText(_ issues.Issue) string      { return "" }
+func (m *mockIdempotentCommentProvider) FetchIssues(_ context.Context, _ string, _ issues.FilterConfig) ([]issues.Issue, error) {
+	return nil, nil
+}
+func (m *mockIdempotentCommentProvider) RemoveLabel(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+func (m *mockIdempotentCommentProvider) Comment(_ context.Context, repoPath, issueID, body string) error {
+	m.comments = append(m.comments, mockCommentCall{repoPath: repoPath, issueID: issueID, body: body})
+	return m.commentErr
+}
+func (m *mockIdempotentCommentProvider) CheckIssueHasLabel(_ context.Context, _ string, _ string, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockIdempotentCommentProvider) GetIssueComments(_ context.Context, _ string, _ string) ([]issues.IssueComment, error) {
+	return m.existingComments, nil
+}
+func (m *mockIdempotentCommentProvider) UpdateComment(_ context.Context, repoPath, issueID, commentID, body string) error {
+	m.updates = append(m.updates, mockUpdateCall{repoPath: repoPath, issueID: issueID, commentID: commentID, body: body})
+	return m.updateErr
+}
+
+func TestErgGitHubMarker(t *testing.T) {
+	marker := ergGitHubMarker("open_pr")
+	if marker != "<!-- erg:step=open_pr -->" {
+		t.Errorf("unexpected marker: %q", marker)
+	}
+}
+
+func TestErgProviderMarker(t *testing.T) {
+	marker := ergProviderMarker("notify")
+	if marker != "[erg:step=notify]" {
+		t.Errorf("unexpected marker: %q", marker)
+	}
+}
+
+func TestCommentIssueAction_Execute_IdempotentCreatesNew(t *testing.T) {
+	// When step is set but no existing comment has the marker, a new comment is created.
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// gh api list comments returns empty array (no existing comments)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
+		Stdout: []byte(`[]`),
+	})
+	// gh issue comment creates the new comment
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/issues/42#issuecomment-999\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+	cfg.Repos = []string{"/test/repo"}
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &commentIssueAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Work started."})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "notify",
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify the comment was created (not updated) with the marker
+	calls := mockExec.GetCalls()
+	var commentCall *exec.MockCall
+	for i, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "issue" && c.Args[1] == "comment" {
+			commentCall = &calls[i]
+			break
+		}
+	}
+	if commentCall == nil {
+		t.Fatal("expected gh issue comment to be called")
+	}
+	// Body should include the marker
+	bodyFound := false
+	for _, arg := range commentCall.Args {
+		if strings.Contains(arg, "<!-- erg:step=notify -->") {
+			bodyFound = true
+		}
+	}
+	if !bodyFound {
+		t.Errorf("expected marker <!-- erg:step=notify --> in comment body args: %v", commentCall.Args)
+	}
+}
+
+func TestCommentIssueAction_Execute_IdempotentUpdatesExisting(t *testing.T) {
+	// When step is set and an existing comment has the marker, it is updated.
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// gh api list comments returns a comment with the marker
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
+		Stdout: []byte(`[{"id":1001,"body":"Old body <!-- erg:step=notify -->"}]`),
+	})
+	// gh api PATCH updates the comment
+	mockExec.AddPrefixMatch("gh", []string{"api", "--method", "PATCH"}, exec.MockResponse{
+		Stdout: []byte(`{"id":1001,"body":"New body <!-- erg:step=notify -->"}`),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+	cfg.Repos = []string{"/test/repo"}
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &commentIssueAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "New body"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "notify",
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Verify gh api PATCH was called (update, not create)
+	calls := mockExec.GetCalls()
+	foundPatch := false
+	foundNewComment := false
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 3 && c.Args[0] == "api" && c.Args[1] == "--method" && c.Args[2] == "PATCH" {
+			foundPatch = true
+		}
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "issue" && c.Args[1] == "comment" {
+			foundNewComment = true
+		}
+	}
+	if !foundPatch {
+		t.Error("expected gh api PATCH to be called when updating existing comment")
+	}
+	if foundNewComment {
+		t.Error("expected NO gh issue comment to be called when updating existing comment")
+	}
+}
+
+func TestCommentIssueAction_Execute_NoStepFallsThrough(t *testing.T) {
+	// When no step is set, the original behavior (always create) is used.
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/repo/issues/42#issuecomment-1\n"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+	cfg.Repos = []string{"/test/repo"}
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	})
+
+	action := &commentIssueAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Hello!"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "", // no step — fall through to original behavior
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Marker should NOT be in the comment body when step is empty
+	calls := mockExec.GetCalls()
+	for _, c := range calls {
+		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "issue" && c.Args[1] == "comment" {
+			for _, arg := range c.Args {
+				if strings.Contains(arg, "erg:step") {
+					t.Errorf("expected no marker when step is empty, found in arg: %q", arg)
+				}
+			}
+		}
+	}
+}
+
+func TestCommentViaProvider_IdempotentCreatesNew(t *testing.T) {
+	// When step is set and no existing comment has the marker, a new comment is created.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	provider := &mockIdempotentCommentProvider{
+		src:              issues.SourceAsana,
+		existingComments: []issues.IssueComment{
+			{ID: "story-1", Body: "Unrelated comment"},
+		},
+	}
+	registry := issues.NewProviderRegistry(provider)
+	d.issueRegistry = registry
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "PR opened!"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "open_pr",
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Should have created a new comment (no update)
+	if len(provider.comments) != 1 {
+		t.Errorf("expected 1 new comment, got %d", len(provider.comments))
+	}
+	if len(provider.updates) != 0 {
+		t.Errorf("expected 0 updates, got %d", len(provider.updates))
+	}
+	// Body should include the provider marker
+	if !strings.Contains(provider.comments[0].body, "[erg:step=open_pr]") {
+		t.Errorf("expected marker in comment body, got: %q", provider.comments[0].body)
+	}
+}
+
+func TestCommentViaProvider_IdempotentUpdatesExisting(t *testing.T) {
+	// When step is set and an existing comment has the marker, it is updated.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	provider := &mockIdempotentCommentProvider{
+		src: issues.SourceAsana,
+		existingComments: []issues.IssueComment{
+			{ID: "story-1", Body: "Old message [erg:step=open_pr]"},
+		},
+	}
+	registry := issues.NewProviderRegistry(provider)
+	d.issueRegistry = registry
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Updated message!"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "open_pr",
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	// Should have updated the existing comment (no new comment)
+	if len(provider.updates) != 1 {
+		t.Errorf("expected 1 update, got %d", len(provider.updates))
+	}
+	if len(provider.comments) != 0 {
+		t.Errorf("expected 0 new comments, got %d", len(provider.comments))
+	}
+	if provider.updates[0].commentID != "story-1" {
+		t.Errorf("expected commentID 'story-1', got %q", provider.updates[0].commentID)
+	}
+	if !strings.Contains(provider.updates[0].body, "[erg:step=open_pr]") {
+		t.Errorf("expected marker in updated body, got: %q", provider.updates[0].body)
+	}
+	if !strings.Contains(provider.updates[0].body, "Updated message!") {
+		t.Errorf("expected updated content in body, got: %q", provider.updates[0].body)
+	}
+}
+
+func TestCommentViaProvider_NoStepFallsThrough(t *testing.T) {
+	// When no step is set, the original behavior (always create) is used without marker.
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoFilter = "/test/repo"
+
+	provider := &mockIdempotentCommentProvider{
+		src: issues.SourceAsana,
+	}
+	registry := issues.NewProviderRegistry(provider)
+	d.issueRegistry = registry
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "sess-1",
+	})
+
+	action := &asanaCommentAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"body": "Hello!"})
+	ac := &workflow.ActionContext{
+		WorkItemID: "item-1",
+		Params:     params,
+		Step:       "", // no step
+	}
+
+	result := action.Execute(context.Background(), ac)
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+
+	if len(provider.comments) != 1 {
+		t.Errorf("expected 1 new comment, got %d", len(provider.comments))
+	}
+	// Body should NOT contain any marker
+	if strings.Contains(provider.comments[0].body, "erg:step") {
+		t.Errorf("expected no marker when step is empty, got: %q", provider.comments[0].body)
+	}
+}
+
 func TestRebaseAction_Execute_NoSession(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)

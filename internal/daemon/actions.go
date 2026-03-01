@@ -255,7 +255,7 @@ func (a *commentIssueAction) Execute(ctx context.Context, ac *workflow.ActionCon
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	if err := d.commentOnIssue(ctx, item, ac.Params); err != nil {
+	if err := d.commentOnIssue(ctx, item, ac.Params, ac.Step); err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("issue comment failed: %w", err)}
 	}
 
@@ -275,7 +275,7 @@ func (a *commentPRAction) Execute(ctx context.Context, ac *workflow.ActionContex
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	if err := d.commentOnPR(ctx, item, ac.Params); err != nil {
+	if err := d.commentOnPR(ctx, item, ac.Params, ac.Step); err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("PR comment failed: %w", err)}
 	}
 
@@ -295,7 +295,7 @@ func (a *asanaCommentAction) Execute(ctx context.Context, ac *workflow.ActionCon
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceAsana); err != nil {
+	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceAsana, ac.Step); err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("asana comment failed: %w", err)}
 	}
 
@@ -335,7 +335,7 @@ func (a *linearCommentAction) Execute(ctx context.Context, ac *workflow.ActionCo
 		return workflow.ActionResult{Error: fmt.Errorf("work item not found: %s", ac.WorkItemID)}
 	}
 
-	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceLinear); err != nil {
+	if err := d.commentViaProvider(ctx, item, ac.Params, issues.SourceLinear, ac.Step); err != nil {
 		return workflow.ActionResult{Error: fmt.Errorf("linear comment failed: %w", err)}
 	}
 

@@ -433,6 +433,7 @@ func (p *AsanaProvider) CheckIssueHasLabel(ctx context.Context, repoPath string,
 
 // asanaStory represents a single story (comment) on an Asana task.
 type asanaStory struct {
+	GID       string `json:"gid"`
 	Type      string `json:"type"`
 	Text      string `json:"text"`
 	CreatedAt string `json:"created_at"`
@@ -454,7 +455,7 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
 	}
 
-	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=type,text,created_at,created_by.name", p.apiBase, issueID)
+	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=gid,type,text,created_at,created_by.name", p.apiBase, issueID)
 
 	var storiesResp asanaStoriesResponse
 	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
@@ -472,6 +473,7 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 		}
 		createdAt, _ := time.Parse(time.RFC3339, story.CreatedAt)
 		comments = append(comments, IssueComment{
+			ID:        story.GID,
 			Author:    story.CreatedBy.Name,
 			Body:      story.Text,
 			CreatedAt: createdAt,
@@ -603,4 +605,20 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 
 	return apiRequest(ctx, p.httpClient, http.MethodPost, storiesURL, strings.NewReader(reqBody),
 		"Bearer "+pat, http.StatusCreated, "", "Asana", nil)
+}
+
+// UpdateComment updates an existing Asana story (comment) by its GID.
+// Implements ProviderCommentUpdater.
+func (p *AsanaProvider) UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	storyURL := fmt.Sprintf("%s/stories/%s", p.apiBase, commentID)
+	textJSON, _ := json.Marshal(body)
+	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
+
+	return apiRequest(ctx, p.httpClient, http.MethodPut, storyURL, strings.NewReader(reqBody),
+		"Bearer "+pat, http.StatusOK, "", "Asana", nil)
 }

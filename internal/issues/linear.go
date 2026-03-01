@@ -234,6 +234,13 @@ const linearCommentCreateMutation = `mutation($issueId: String!, $body: String!)
   }
 }`
 
+// linearCommentUpdateMutation updates an existing Linear comment by its ID.
+const linearCommentUpdateMutation = `mutation($id: String!, $body: String!) {
+  commentUpdate(id: $id, input: { body: $body }) {
+    success
+  }
+}`
+
 // linearIssueUpdateMutation updates a Linear issue's labels.
 const linearIssueUpdateMutation = `mutation($id: String!, $labelIds: [String!]!) {
   issueUpdate(id: $id, input: { labelIds: $labelIds }) {
@@ -284,6 +291,7 @@ const linearIssueCommentsQuery = `query($id: String!) {
   issue(id: $id) {
     comments {
       nodes {
+        id
         body
         createdAt
         user {
@@ -300,6 +308,7 @@ type linearIssueCommentsResponse struct {
 		Issue struct {
 			Comments struct {
 				Nodes []struct {
+					ID        string `json:"id"`
 					Body      string `json:"body"`
 					CreatedAt string `json:"createdAt"`
 					User      struct {
@@ -327,6 +336,7 @@ func (p *LinearProvider) GetIssueComments(ctx context.Context, repoPath string, 
 		}
 		createdAt, _ := time.Parse(time.RFC3339, n.CreatedAt)
 		comments = append(comments, IssueComment{
+			ID:        n.ID,
 			Author:    n.User.Name,
 			Body:      n.Body,
 			CreatedAt: createdAt,
@@ -422,6 +432,25 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 		return fmt.Errorf("failed to create comment: %w", err)
 	}
 
+	return nil
+}
+
+// UpdateComment updates an existing Linear comment by its ID.
+// Implements ProviderCommentUpdater.
+func (p *LinearProvider) UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error {
+	var updateResp struct {
+		Data struct {
+			CommentUpdate struct {
+				Success bool `json:"success"`
+			} `json:"commentUpdate"`
+		} `json:"data"`
+	}
+	if err := p.linearGraphQL(ctx, linearCommentUpdateMutation, map[string]any{
+		"id":   commentID,
+		"body": body,
+	}, "", &updateResp); err != nil {
+		return fmt.Errorf("failed to update comment: %w", err)
+	}
 	return nil
 }
 

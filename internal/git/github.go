@@ -524,6 +524,65 @@ func (s *GitService) CommentOnIssue(ctx context.Context, repoPath string, issueN
 	return nil
 }
 
+// GitHubCommentEntry represents a GitHub issue or PR comment with its database ID.
+type GitHubCommentEntry struct {
+	ID   int64
+	Body string
+}
+
+// ListIssueComments returns all comments on a GitHub issue (or PR, since PRs share
+// the issue comment namespace in the GitHub REST API).
+func (s *GitService) ListIssueComments(ctx context.Context, repoPath string, issueNumber int) ([]GitHubCommentEntry, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "api",
+		fmt.Sprintf("repos/:owner/:repo/issues/%d/comments", issueNumber),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gh api list issue comments failed: %w", err)
+	}
+
+	var raw []struct {
+		ID   int64  `json:"id"`
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse issue comments: %w", err)
+	}
+
+	comments := make([]GitHubCommentEntry, len(raw))
+	for i, c := range raw {
+		comments[i] = GitHubCommentEntry{ID: c.ID, Body: c.Body}
+	}
+	return comments, nil
+}
+
+// UpdateIssueComment updates an existing GitHub issue or PR comment by its database ID.
+func (s *GitService) UpdateIssueComment(ctx context.Context, repoPath string, commentID int64, body string) error {
+	_, _, err := s.executor.Run(ctx, repoPath, "gh", "api", "--method", "PATCH",
+		fmt.Sprintf("repos/:owner/:repo/issues/comments/%d", commentID),
+		"-f", fmt.Sprintf("body=%s", body),
+	)
+	if err != nil {
+		return fmt.Errorf("gh api update comment failed: %w", err)
+	}
+	return nil
+}
+
+// GetPRNumber returns the PR number for the given branch name.
+func (s *GitService) GetPRNumber(ctx context.Context, repoPath, branch string) (int, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "number")
+	if err != nil {
+		return 0, fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var result struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse PR number: %w", err)
+	}
+	return result.Number, nil
+}
+
 // UploadTranscriptToPR posts a session transcript as a comment on the PR for the given branch.
 // The transcript is formatted as a collapsed <details> block so it does not clutter the PR.
 func (s *GitService) UploadTranscriptToPR(ctx context.Context, repoPath, branch, transcript string) error {

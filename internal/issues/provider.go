@@ -116,9 +116,20 @@ func (r *ProviderRegistry) AllProviders() []Provider {
 
 // IssueComment represents a comment on an issue from any supported source.
 type IssueComment struct {
+	ID        string    // Provider-specific comment identifier (for updates; empty if not supported)
 	Author    string    // Username or display name
 	Body      string    // Comment text
 	CreatedAt time.Time // When the comment was posted
+}
+
+// ProviderCommentUpdater extends ProviderActions with the ability to update
+// an existing comment by its provider-specific ID. This is used for idempotent
+// comment actions: if a comment with the matching marker already exists, it is
+// updated in place rather than creating a duplicate.
+type ProviderCommentUpdater interface {
+	// UpdateComment replaces the body of an existing comment identified by commentID.
+	// The commentID comes from IssueComment.ID returned by GetIssueComments.
+	UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error
 }
 
 // ProviderSectionChecker extends Provider with the ability to check which section

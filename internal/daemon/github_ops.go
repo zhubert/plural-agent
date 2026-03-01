@@ -231,8 +231,24 @@ func (d *Daemon) mergePR(ctx context.Context, item daemonstate.WorkItem) error {
 	return nil
 }
 
+// ergGitHubMarker returns the idempotency HTML comment marker for GitHub comments.
+// It is invisible when rendered by GitHub's Markdown parser.
+func ergGitHubMarker(step string) string {
+	return fmt.Sprintf("<!-- erg:step=%s -->", step)
+}
+
+// ergProviderMarker returns the idempotency marker for Asana/Linear comments.
+// Uses a plain-text bracket format since Asana renders stories as plain text
+// and the marker must be visible to be searchable.
+func ergProviderMarker(step string) string {
+	return fmt.Sprintf("[erg:step=%s]", step)
+}
+
 // commentOnIssue posts a comment on the GitHub issue for a work item.
-func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+// When step is non-empty, the comment is idempotent: if a comment with the
+// matching marker already exists it is updated in place rather than creating
+// a duplicate. This mirrors the pattern used by CI bots (Vercel, Codecov, etc.).
+func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper, step string) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.comment_issue skipped: not a github issue",
 			"workItem", item.ID, "source", item.IssueRef.Source)
@@ -270,11 +286,29 @@ func (d *Daemon) commentOnIssue(ctx context.Context, item daemonstate.WorkItem, 
 	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
+	if step != "" {
+		marker := ergGitHubMarker(step)
+		markedBody := body + "\n" + marker
+
+		existing, listErr := d.gitService.ListIssueComments(commentCtx, repoPath, issueNum)
+		if listErr == nil {
+			for _, c := range existing {
+				if strings.Contains(c.Body, marker) {
+					return d.gitService.UpdateIssueComment(commentCtx, repoPath, c.ID, markedBody)
+				}
+			}
+		}
+		// No existing comment found (or listing failed) — create a new one with marker.
+		return d.gitService.CommentOnIssue(commentCtx, repoPath, issueNum, markedBody)
+	}
+
 	return d.gitService.CommentOnIssue(commentCtx, repoPath, issueNum, body)
 }
 
 // commentOnPR posts a comment on the PR for a work item.
-func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
+// When step is non-empty, the comment is idempotent: if a comment with the
+// matching marker already exists it is updated in place rather than creating a duplicate.
+func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper, step string) error {
 	sess, err := d.getSessionOrError(item.SessionID)
 	if err != nil {
 		return err
@@ -292,6 +326,31 @@ func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, par
 	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
+	if step != "" {
+		marker := ergGitHubMarker(step)
+		markedBody := body + "\n" + marker
+
+		prNum, prErr := d.gitService.GetPRNumber(commentCtx, sess.RepoPath, item.Branch)
+		if prErr == nil {
+			existing, listErr := d.gitService.ListIssueComments(commentCtx, sess.RepoPath, prNum)
+			if listErr == nil {
+				for _, c := range existing {
+					if strings.Contains(c.Body, marker) {
+						return d.gitService.UpdateIssueComment(commentCtx, sess.RepoPath, c.ID, markedBody)
+					}
+				}
+			}
+		}
+		// No existing comment found (or PR/list lookup failed) — create a new one with marker.
+		cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", markedBody)
+		cmd.Dir = sess.RepoPath
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("gh pr comment failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+
 	cmd := osexec.CommandContext(commentCtx, "gh", "pr", "comment", item.Branch, "--body", body)
 	cmd.Dir = sess.RepoPath
 	output, err := cmd.CombinedOutput()
@@ -306,7 +365,10 @@ func (d *Daemon) commentOnPR(ctx context.Context, item daemonstate.WorkItem, par
 // if it doesn't, the call is a no-op (with a warning). Returns an error if the
 // provider is not registered, does not implement ProviderActions, the body is
 // empty, or the API call fails.
-func (d *Daemon) commentViaProvider(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper, expectedSource issues.Source) error {
+// When step is non-empty, the comment is idempotent: if the provider also
+// implements ProviderGateChecker and ProviderCommentUpdater, an existing comment
+// with the matching marker is updated in place instead of creating a duplicate.
+func (d *Daemon) commentViaProvider(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper, expectedSource issues.Source, step string) error {
 	if issues.Source(item.IssueRef.Source) != expectedSource {
 		d.logger.Warn("comment action skipped: source mismatch",
 			"workItem", item.ID, "source", item.IssueRef.Source, "expected", expectedSource)
@@ -338,6 +400,27 @@ func (d *Daemon) commentViaProvider(ctx context.Context, item daemonstate.WorkIt
 
 	commentCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
+
+	if step != "" {
+		marker := ergProviderMarker(step)
+		markedBody := body + "\n" + marker
+
+		// Attempt idempotent upsert if the provider supports it.
+		if gc, ok := p.(issues.ProviderGateChecker); ok {
+			if cu, ok := p.(issues.ProviderCommentUpdater); ok {
+				existing, listErr := gc.GetIssueComments(commentCtx, repoPath, item.IssueRef.ID)
+				if listErr == nil {
+					for _, c := range existing {
+						if strings.Contains(c.Body, marker) {
+							return cu.UpdateComment(commentCtx, repoPath, item.IssueRef.ID, c.ID, markedBody)
+						}
+					}
+				}
+			}
+		}
+		// No existing comment found (or provider doesn't support upsert) — create new.
+		return pa.Comment(commentCtx, repoPath, item.IssueRef.ID, markedBody)
+	}
 
 	return pa.Comment(commentCtx, repoPath, item.IssueRef.ID, body)
 }
