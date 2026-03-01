@@ -2116,3 +2116,109 @@ func TestDelete_EmptyWorktreePath_SkipsWorktreeRemoval(t *testing.T) {
 		t.Error("expected branch to be deleted even with empty worktree path")
 	}
 }
+
+func TestCreateOnExistingBranch(t *testing.T) {
+	setupTestPaths(t)
+	repoPath := createTestRepo(t)
+	defer os.RemoveAll(repoPath)
+	defer cleanupWorktrees(t, repoPath)
+
+	// Create a branch with a commit ahead of main.
+	cmd := exec.Command("git", "checkout", "-b", "work-branch")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create work-branch: %v", err)
+	}
+
+	workFile := filepath.Join(repoPath, "work.txt")
+	if err := os.WriteFile(workFile, []byte("in-progress work"), 0644); err != nil {
+		t.Fatalf("Failed to write work file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = repoPath
+	cmd.Run()
+
+	cmd = exec.Command("git", "commit", "-m", "WIP: in progress")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	// Get the branch HEAD before creating session.
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoPath
+	headOut, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get HEAD: %v", err)
+	}
+	branchHeadSHA := strings.TrimSpace(string(headOut))
+
+	// Go back to main so we can add the worktree.
+	cmd = exec.Command("git", "checkout", "master")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		// Try 'main' if 'master' doesn't exist
+		cmd = exec.Command("git", "checkout", "main")
+		cmd.Dir = repoPath
+		cmd.Run()
+	}
+
+	sess, err := svc.CreateOnExistingBranch(ctx, repoPath, "work-branch", "master")
+	if err != nil {
+		// Try with 'main' as base if 'master' failed
+		sess, err = svc.CreateOnExistingBranch(ctx, repoPath, "work-branch", "main")
+		if err != nil {
+			t.Fatalf("CreateOnExistingBranch failed: %v", err)
+		}
+	}
+
+	// Session should point to the existing branch.
+	if sess.Branch != "work-branch" {
+		t.Errorf("Branch = %q, want %q", sess.Branch, "work-branch")
+	}
+	if sess.WorkTree == "" {
+		t.Error("WorkTree should not be empty")
+	}
+	if sess.ID == "" {
+		t.Error("ID should not be empty")
+	}
+	if sess.CreatedAt.IsZero() {
+		t.Error("CreatedAt should be set")
+	}
+
+	// The worktree should exist on disk.
+	if _, err := os.Stat(sess.WorkTree); os.IsNotExist(err) {
+		t.Error("Worktree directory should exist")
+	}
+
+	// The worktree HEAD should match the existing branch HEAD (existing commits preserved).
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = sess.WorkTree
+	wtHead, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get worktree HEAD: %v", err)
+	}
+	if strings.TrimSpace(string(wtHead)) != branchHeadSHA {
+		t.Errorf("Worktree HEAD = %s, want %s (existing branch commit not preserved)",
+			strings.TrimSpace(string(wtHead)), branchHeadSHA)
+	}
+
+	// The work file should be present in the worktree.
+	wtWorkFile := filepath.Join(sess.WorkTree, "work.txt")
+	if _, err := os.Stat(wtWorkFile); os.IsNotExist(err) {
+		t.Error("work.txt should be present in resumed worktree")
+	}
+}
+
+func TestCreateOnExistingBranch_NonExistentBranch(t *testing.T) {
+	setupTestPaths(t)
+	repoPath := createTestRepo(t)
+	defer os.RemoveAll(repoPath)
+	defer cleanupWorktrees(t, repoPath)
+
+	_, err := svc.CreateOnExistingBranch(ctx, repoPath, "no-such-branch", "main")
+	if err == nil {
+		t.Fatal("expected error for non-existent branch, got nil")
+	}
+}

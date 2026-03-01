@@ -927,6 +927,139 @@ func TestStartCoding_WorkItemUpdatedBeforeConfigSave(t *testing.T) {
 	}
 }
 
+// TestStartCoding_ResumesWhenBranchHasCommitsAhead verifies that when a branch
+// already exists with commits ahead of the base branch (and no open PR),
+// startCoding resumes on that branch instead of cleaning it up.
+func TestStartCoding_ResumesWhenBranchHasCommitsAhead(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns error (no PR found).
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	// GetBranchDivergence: git rev-list --count --left-right main...issue-10 → "0\t3" (3 ahead)
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--count" && args[2] == "--left-right"
+	}, exec.MockResponse{Stdout: []byte("0\t3\n")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Resume work"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx := t.Context()
+
+	err := d.startCoding(ctx, *item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed when resuming existing branch, got: %v", err)
+	}
+
+	// A session should have been created on the existing branch.
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a session to be created")
+	}
+	if sessions[0].Branch != "issue-10" {
+		t.Errorf("expected session branch 'issue-10', got %q", sessions[0].Branch)
+	}
+
+	// Work item should be active with session linked.
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist in state")
+	}
+	if updatedItem.SessionID == "" {
+		t.Error("item.SessionID must be set")
+	}
+	if updatedItem.Branch != "issue-10" {
+		t.Errorf("item.Branch must be 'issue-10', got %q", updatedItem.Branch)
+	}
+	if updatedItem.State != daemonstate.WorkItemActive {
+		t.Errorf("item.State must be WorkItemActive, got %q", updatedItem.State)
+	}
+
+	// The branch should NOT have been deleted (cleanup skipped).
+	calls := mockExec.GetCalls()
+	for _, c := range calls {
+		if c.Name == "git" && len(c.Args) >= 3 && c.Args[0] == "branch" && c.Args[1] == "-D" {
+			t.Error("branch should not have been deleted when resuming")
+		}
+	}
+}
+
+// TestStartCoding_CleansUpWhenBranchHasNoCommitsAhead verifies that when a
+// branch exists but has zero commits ahead of the base (empty/stale), it is
+// cleaned up and a fresh session is started.
+func TestStartCoding_CleansUpWhenBranchHasNoCommitsAhead(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRState returns error (no PR found).
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("no pull requests found"),
+	})
+
+	// GetBranchDivergence: returns "0\t0" (0 ahead).
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 4 && args[0] == "rev-list" && args[1] == "--count" && args[2] == "--left-right"
+	}, exec.MockResponse{Stdout: []byte("0\t0\n")})
+
+	// BranchExists: first call returns true (exists), second returns false (cleaned up).
+	branchCheckCount := 0
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name == "git" && len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "issue-10" {
+			branchCheckCount++
+			return branchCheckCount > 1
+		}
+		return false
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "10", Title: "Fix bug"},
+		StepData: map[string]any{},
+	}
+	d.state.AddWorkItem(item)
+
+	ctx := t.Context()
+
+	err := d.startCoding(ctx, *item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed after cleaning up empty stale branch, got: %v", err)
+	}
+
+	// A new session should have been created.
+	sessions := cfg.GetSessions()
+	if len(sessions) == 0 {
+		t.Fatal("expected a new session to be created")
+	}
+	if sessions[0].Branch != "issue-10" {
+		t.Errorf("expected new session branch 'issue-10', got %q", sessions[0].Branch)
+	}
+}
+
 func TestParseWorktreeForBranch(t *testing.T) {
 	tests := []struct {
 		name            string
