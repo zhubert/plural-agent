@@ -588,7 +588,27 @@ func getPRURL(ctx context.Context, repoPath, branch string) (string, error) {
 	return result.URL, nil
 }
 
+// parseReviewRequests parses the JSON output of "gh pr view --json reviewRequests"
+// and returns a set of reviewer logins (lowercased for case-insensitive comparison).
+func parseReviewRequests(data []byte) (map[string]bool, error) {
+	var resp struct {
+		ReviewRequests []struct {
+			Login string `json:"login"`
+		} `json:"reviewRequests"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse reviewRequests JSON: %w", err)
+	}
+	reviewers := make(map[string]bool, len(resp.ReviewRequests))
+	for _, r := range resp.ReviewRequests {
+		reviewers[strings.ToLower(r.Login)] = true
+	}
+	return reviewers, nil
+}
+
 // requestReview requests a review on the PR for a work item.
+// It is idempotent: if the reviewer has already been requested, it returns nil
+// without sending a duplicate notification.
 func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, params *workflow.ParamHelper) error {
 	sess, err := d.getSessionOrError(item.SessionID)
 	if err != nil {
@@ -602,6 +622,17 @@ func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, p
 
 	reviewCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
+
+	// Check existing review requests to avoid sending duplicate notifications.
+	viewCmd := osexec.CommandContext(reviewCtx, "gh", "pr", "view", item.Branch, "--json", "reviewRequests")
+	viewCmd.Dir = sess.RepoPath
+	if viewOutput, viewErr := viewCmd.Output(); viewErr == nil {
+		if existing, parseErr := parseReviewRequests(viewOutput); parseErr == nil {
+			if existing[strings.ToLower(reviewer)] {
+				return nil // already requested, skip to avoid duplicate notification
+			}
+		}
+	}
 
 	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer)
 	cmd.Dir = sess.RepoPath
