@@ -548,7 +548,19 @@ func (d *Daemon) moveToState(ctx context.Context, item daemonstate.WorkItem, par
 	return sm.MoveToSection(moveCtx, repoPath, item.IssueRef.ID, state)
 }
 
+// parseIssueState extracts the state string from `gh issue view --json state` output.
+func parseIssueState(data []byte) (string, error) {
+	var result struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("parse issue state: %w", err)
+	}
+	return result.State, nil
+}
+
 // closeIssue closes the GitHub issue for a work item.
+// It is idempotent: if the issue is already closed, it returns nil.
 func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) error {
 	if item.IssueRef.Source != "github" {
 		d.logger.Warn("github.close_issue skipped: not a github issue",
@@ -563,6 +575,17 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 
 	closeCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
+
+	// Check current state before closing to make this idempotent.
+	viewCmd := osexec.CommandContext(closeCtx, "gh", "issue", "view", item.IssueRef.ID, "--json", "state")
+	viewCmd.Dir = repoPath
+	if viewOutput, viewErr := viewCmd.Output(); viewErr == nil {
+		if state, parseErr := parseIssueState(viewOutput); parseErr == nil && strings.EqualFold(state, "CLOSED") {
+			d.logger.Debug("github.close_issue skipped: issue already closed",
+				"workItem", item.ID, "issue", item.IssueRef.ID)
+			return nil
+		}
+	}
 
 	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID)
 	cmd.Dir = repoPath
