@@ -12,27 +12,27 @@ import (
 	"github.com/zhubert/erg/internal/workflow"
 )
 
-var setupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Interactive setup wizard for erg",
+var configureCmd = &cobra.Command{
+	Use:   "configure",
+	Short: "Interactive configuration wizard for erg",
 	Long: `Walks you through configuring erg:
 
   - Checks required tools (git, claude, gh) and shows install instructions
   - Guides you through setting up your issue tracker (GitHub, Asana, or Linear)
   - Asks workflow questions and generates .erg/workflow.yaml for your repo`,
-	RunE: runSetup,
+	RunE: runConfigure,
 }
 
 func init() {
-	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(configureCmd)
 }
 
-func runSetup(cmd *cobra.Command, args []string) error {
+func runConfigure(cmd *cobra.Command, args []string) error {
 	repoPath, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	return runSetupWithIO(os.Stdin, os.Stdout, cli.CheckAll, repoPath, workflow.WriteFromWizard)
+	return runConfigureWithIO(os.Stdin, os.Stdout, cli.CheckAll, repoPath, workflow.WriteFromWizard)
 }
 
 // prereqCheckerFn is the type for the prerequisite check function.
@@ -41,8 +41,8 @@ type prereqCheckerFn func([]cli.Prerequisite) []cli.CheckResult
 // workflowWriterFn is a function that writes a workflow config based on wizard answers.
 type workflowWriterFn func(repoPath string, cfg workflow.WizardConfig) (string, error)
 
-func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn) error {
-	fmt.Fprintln(output, "=== erg setup ===")
+func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn) error {
+	fmt.Fprintln(output, "=== erg configure ===")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Checking prerequisites...")
 	fmt.Fprintln(output)
@@ -84,7 +84,7 @@ func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, 
 				fmt.Fprintln(output)
 			}
 		}
-		fmt.Fprintln(output, "After installing, run `erg setup` again.")
+		fmt.Fprintln(output, "After installing, run `erg configure` again.")
 		return nil
 	}
 
@@ -119,7 +119,7 @@ func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, 
 		printLinearSetup(output)
 		provider = "linear"
 	default:
-		fmt.Fprintf(output, "Invalid choice %q. Please run `erg setup` again and enter 1, 2, or 3.\n", choice)
+		fmt.Fprintf(output, "Invalid choice %q. Please run `erg configure` again and enter 1, 2, or 3.\n", choice)
 		return nil
 	}
 
@@ -131,7 +131,7 @@ func runSetupWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, 
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			fmt.Fprintf(output, "Note: %s already exists, skipping workflow generation.\n", fp)
-			fmt.Fprintln(output, "      Delete it and run `erg setup` again to reconfigure.")
+			fmt.Fprintln(output, "      Delete it and run `erg configure` again to reconfigure.")
 		} else {
 			fmt.Fprintf(output, "Failed to write workflow config: %v\n", err)
 			return nil
