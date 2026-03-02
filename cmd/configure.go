@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/cli"
 	"github.com/zhubert/erg/internal/workflow"
@@ -33,7 +33,7 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	return runConfigureWithIO(os.Stdin, os.Stdout, cli.CheckAll, repoPath, workflow.WriteFromWizard)
+	return runConfigureWithIO(os.Stdin, os.Stdout, cli.CheckAll, repoPath, workflow.WriteFromWizard, false)
 }
 
 // prereqCheckerFn is the type for the prerequisite check function.
@@ -42,7 +42,90 @@ type prereqCheckerFn func([]cli.Prerequisite) []cli.CheckResult
 // workflowWriterFn is a function that writes a workflow config based on wizard answers.
 type workflowWriterFn func(repoPath string, cfg workflow.WizardConfig) (string, error)
 
-func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn) error {
+func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn, accessible bool) error {
+	// Phase 1: Prerequisites (fmt-based output with ✓/✗/○)
+	if !checkPrereqs(output, checker) {
+		return nil
+	}
+
+	// Phase 2: Tracker selection
+	var provider string
+	trackerForm := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Which issue tracker would you like to use?").
+				Options(
+					huh.NewOption("GitHub Issues  (uses gh CLI — no extra credentials needed)", "github"),
+					huh.NewOption("Asana Tasks    (requires ASANA_PAT environment variable)", "asana"),
+					huh.NewOption("Linear Issues  (requires LINEAR_API_KEY environment variable)", "linear"),
+				).
+				Value(&provider),
+		),
+	}, input, output, accessible)
+	if err := trackerForm.Run(); err != nil {
+		return err
+	}
+
+	// Phase 3: Provider setup + source config
+	cfg := workflow.WizardConfig{
+		Provider:    provider,
+		Label:       "queued",
+		FixCI:       true,
+		AutoReview:  true,
+		MergeMethod: "rebase",
+	}
+	if err := runProviderForm(input, output, accessible, provider, &cfg); err != nil {
+		return err
+	}
+
+	// Phase 4: Workflow behavior
+	if err := runBehaviorForm(input, output, accessible, &cfg); err != nil {
+		return err
+	}
+
+	// Phase 5: Summary + confirm
+	var confirmed bool
+	summaryForm := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewNote().
+				Title("Configuration Summary").
+				Description(buildSummaryText(cfg)),
+			huh.NewConfirm().
+				Title("Write configuration?").
+				Value(&confirmed),
+		),
+	}, input, output, accessible)
+	if err := summaryForm.Run(); err != nil {
+		return err
+	}
+	if !confirmed {
+		fmt.Fprintln(output, "Configuration cancelled.")
+		return nil
+	}
+
+	// Write config
+	fp, err := writer(repoPath, cfg)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			fmt.Fprintf(output, "Note: %s already exists, skipping workflow generation.\n", fp)
+			fmt.Fprintln(output, "      Delete it and run `erg configure` again to reconfigure.")
+		} else {
+			fmt.Fprintf(output, "Failed to write workflow config: %v\n", err)
+			return nil
+		}
+	} else {
+		fmt.Fprintf(output, "Created %s\n", fp)
+	}
+
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Setup complete! Start the daemon:")
+	fmt.Fprintln(output, "  erg start")
+
+	return nil
+}
+
+// checkPrereqs prints prerequisite status and returns true if all required prereqs are met.
+func checkPrereqs(output io.Writer, checker prereqCheckerFn) bool {
 	fmt.Fprintln(output, "=== erg configure ===")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Checking prerequisites...")
@@ -86,272 +169,304 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 			}
 		}
 		fmt.Fprintln(output, "After installing, run `erg configure` again.")
-		return nil
+		return false
 	}
 
 	fmt.Fprintln(output, "All prerequisites installed!")
 	fmt.Fprintln(output)
+	return true
+}
 
-	fmt.Fprintln(output, "Which issue tracker would you like to use?")
-	fmt.Fprintln(output)
-	fmt.Fprintln(output, "  1. GitHub Issues  (uses gh CLI — no extra credentials needed)")
-	fmt.Fprintln(output, "  2. Asana Tasks    (requires ASANA_PAT environment variable)")
-	fmt.Fprintln(output, "  3. Linear Issues  (requires LINEAR_API_KEY environment variable)")
-	fmt.Fprintln(output)
-	fmt.Fprint(output, "Enter choice [1-3]: ")
-
-	scanner := bufio.NewScanner(input)
-	var choice string
-	if scanner.Scan() {
-		choice = strings.TrimSpace(scanner.Text())
+// runProviderForm handles phase 3: provider setup instructions + source config.
+func runProviderForm(input io.Reader, output io.Writer, accessible bool, provider string, cfg *workflow.WizardConfig) error {
+	// Show setup instructions via Note
+	setupForm := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewNote().
+				Title(providerSetupTitle(provider)).
+				Description(buildProviderSetupText(provider)),
+		),
+	}, input, output, accessible)
+	if err := setupForm.Run(); err != nil {
+		return err
 	}
 
-	fmt.Fprintln(output)
+	switch provider {
+	case "github":
+		f := newForm([]*huh.Group{
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Label to watch for new issues?").
+					Value(&cfg.Label),
+			),
+		}, input, output, accessible)
+		return f.Run()
 
-	var provider string
-	switch choice {
-	case "1":
-		printGitHubSetup(output)
-		provider = "github"
-	case "2":
-		printAsanaSetup(output)
-		provider = "asana"
-	case "3":
-		printLinearSetup(output)
-		provider = "linear"
-	default:
-		fmt.Fprintf(output, "Invalid choice %q. Please run `erg configure` again and enter 1, 2, or 3.\n", choice)
-		return nil
+	case "asana":
+		return runAsanaForm(input, output, accessible, cfg)
+
+	case "linear":
+		return runLinearForm(input, output, accessible, cfg)
 	}
-
-	// Run the workflow wizard to generate .erg/workflow.yaml
-	wizardCfg := runWorkflowWizard(scanner, output, provider)
-
-	fmt.Fprintln(output)
-	fp, err := writer(repoPath, wizardCfg)
-	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			fmt.Fprintf(output, "Note: %s already exists, skipping workflow generation.\n", fp)
-			fmt.Fprintln(output, "      Delete it and run `erg configure` again to reconfigure.")
-		} else {
-			fmt.Fprintf(output, "Failed to write workflow config: %v\n", err)
-			return nil
-		}
-	} else {
-		fmt.Fprintf(output, "Created %s\n", fp)
-	}
-
-	fmt.Fprintln(output)
-	fmt.Fprintln(output, "Setup complete! Start the daemon:")
-	fmt.Fprintln(output, "  erg start")
-
 	return nil
 }
 
-// runWorkflowWizard prompts the user for workflow configuration choices and
-// returns a WizardConfig populated from their answers. Pressing Enter accepts
-// the default for each question. EOF (e.g. piped input exhausted) also accepts
-// the default, so existing tests that only provide tracker-selection input
-// still work by getting sensible defaults for all wizard questions.
-func runWorkflowWizard(scanner *bufio.Scanner, output io.Writer, provider string) workflow.WizardConfig {
-	cfg := workflow.WizardConfig{
-		Provider:    provider,
-		Label:       "queued",
-		FixCI:       true,
-		AutoReview:  true,
-		MergeMethod: "rebase",
+// runAsanaForm collects Asana-specific configuration.
+func runAsanaForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
+	var orgChoice string = "tags"
+	f := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Asana project GID (from URL: https://app.asana.com/0/GID/list)").
+				Value(&cfg.Project),
+			huh.NewSelect[string]().
+				Title("How do you organize work in Asana?").
+				Options(
+					huh.NewOption("By tags (label tasks with a tag like \"queued\")", "tags"),
+					huh.NewOption("By board sections (Kanban)", "kanban"),
+				).
+				Value(&orgChoice),
+		),
+	}, input, output, accessible)
+	if err := f.Run(); err != nil {
+		return err
 	}
 
-	fmt.Fprintln(output)
-	fmt.Fprintln(output, "=== Workflow Configuration ===")
-	fmt.Fprintln(output)
-	fmt.Fprintln(output, "Let's configure your workflow. Press Enter to accept defaults.")
-	fmt.Fprintln(output)
-
-	switch provider {
-	case "asana":
-		fmt.Fprint(output, "Asana project GID (from URL: https://app.asana.com/0/GID/list): ")
-		cfg.Project = readLine(scanner)
-
-		fmt.Fprintln(output)
-		fmt.Fprintln(output, "How do you organize work in Asana?")
-		fmt.Fprintln(output, "  1. By tags (label tasks with a tag like \"queued\")")
-		fmt.Fprintln(output, "  2. By board sections (Kanban)")
-		fmt.Fprint(output, "Enter choice [1-2]: ")
-		orgChoice := readWithDefault(scanner, "1")
-
-		if orgChoice == "2" {
-			cfg.Kanban = true
-			fmt.Fprint(output, "Which section has new tasks? [To do]: ")
-			cfg.Section = readWithDefault(scanner, "To do")
-			cfg.Label = ""
-			fmt.Fprint(output, "Completion section? [Done]: ")
-			cfg.CompletionSection = readWithDefault(scanner, "Done")
-		} else {
-			fmt.Fprint(output, "Asana tag to watch for new tasks? [queued]: ")
-			cfg.Label = readWithDefault(scanner, "queued")
-			fmt.Fprint(output, "Filter to section? (press Enter to skip): ")
-			cfg.Section = readLine(scanner)
-			fmt.Fprint(output, "Move completed tasks to which section? (press Enter to skip): ")
-			cfg.CompletionSection = readLine(scanner)
-		}
-
-	case "linear":
-		fmt.Fprint(output, "Linear team ID (from Settings → API): ")
-		cfg.Team = readLine(scanner)
-
-		fmt.Fprintln(output)
-		fmt.Fprintln(output, "How do you organize work in Linear?")
-		fmt.Fprintln(output, "  1. By labels (label issues with \"queued\")")
-		fmt.Fprintln(output, "  2. By workflow states (Kanban)")
-		fmt.Fprint(output, "Enter choice [1-2]: ")
-		orgChoice := readWithDefault(scanner, "1")
-
-		if orgChoice == "2" {
-			cfg.Kanban = true
-			fmt.Fprint(output, "Label to identify erg-managed issues? [queued]: ")
-			cfg.Label = readWithDefault(scanner, "queued")
-			fmt.Fprint(output, "Completion state? [Done]: ")
-			cfg.CompletionState = readWithDefault(scanner, "Done")
-		} else {
-			fmt.Fprint(output, "Linear label to watch for new issues? [queued]: ")
-			cfg.Label = readWithDefault(scanner, "queued")
-			fmt.Fprint(output, "Move completed issues to which state? (press Enter to skip): ")
-			cfg.CompletionState = readLine(scanner)
-		}
-
-	default: // github
-		fmt.Fprint(output, "Label to watch for new issues? [queued]: ")
-		cfg.Label = readWithDefault(scanner, "queued")
+	if orgChoice == "kanban" {
+		cfg.Kanban = true
+		cfg.Label = ""
+		cfg.Section = "To do"
+		cfg.CompletionSection = "Done"
+		kf := newForm([]*huh.Group{
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Which section has new tasks?").
+					Value(&cfg.Section),
+				huh.NewInput().
+					Title("Completion section?").
+					Value(&cfg.CompletionSection),
+			),
+		}, input, output, accessible)
+		return kf.Run()
 	}
 
-	fmt.Fprint(output, "Should Claude plan the approach before coding? [y/N]: ")
-	cfg.PlanFirst = readYesNo(scanner, false)
+	// Tags mode
+	tf := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Asana tag to watch for new tasks?").
+				Value(&cfg.Label),
+			huh.NewInput().
+				Title("Filter to section? (press Enter to skip)").
+				Value(&cfg.Section),
+			huh.NewInput().
+				Title("Move completed tasks to which section? (press Enter to skip)").
+				Value(&cfg.CompletionSection),
+		),
+	}, input, output, accessible)
+	return tf.Run()
+}
 
-	fmt.Fprint(output, "Should Claude try to fix failing CI? [Y/n]: ")
-	cfg.FixCI = readYesNo(scanner, true)
-
-	fmt.Fprint(output, "Should Claude auto-address PR review comments? [Y/n]: ")
-	cfg.AutoReview = readYesNo(scanner, true)
-
-	fmt.Fprint(output, "GitHub username to request as reviewer (press Enter to skip): ")
-	cfg.Reviewer = readLine(scanner)
-
-	fmt.Fprint(output, "Merge method (rebase/squash/merge) [rebase]: ")
-	method := readWithDefault(scanner, "rebase")
-	if method == "squash" || method == "merge" {
-		cfg.MergeMethod = method
-	} else {
-		cfg.MergeMethod = "rebase"
+// runLinearForm collects Linear-specific configuration.
+func runLinearForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
+	var orgChoice string = "labels"
+	f := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Linear team ID (from Settings → API)").
+				Value(&cfg.Team),
+			huh.NewSelect[string]().
+				Title("How do you organize work in Linear?").
+				Options(
+					huh.NewOption("By labels (label issues with \"queued\")", "labels"),
+					huh.NewOption("By workflow states (Kanban)", "kanban"),
+				).
+				Value(&orgChoice),
+		),
+	}, input, output, accessible)
+	if err := f.Run(); err != nil {
+		return err
 	}
 
-	fmt.Fprint(output, "Run sessions in Docker containers? [y/N]: ")
-	cfg.Containerized = readYesNo(scanner, false)
+	if orgChoice == "kanban" {
+		cfg.Kanban = true
+		cfg.CompletionState = "Done"
+		kf := newForm([]*huh.Group{
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Label to identify erg-managed issues?").
+					Value(&cfg.Label),
+				huh.NewInput().
+					Title("Completion state?").
+					Value(&cfg.CompletionState),
+			),
+		}, input, output, accessible)
+		return kf.Run()
+	}
 
-	fmt.Fprint(output, "Send Slack notifications on failure? [y/N]: ")
-	cfg.NotifySlack = readYesNo(scanner, false)
+	// Labels mode
+	lf := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Linear label to watch for new issues?").
+				Value(&cfg.Label),
+			huh.NewInput().
+				Title("Move completed issues to which state? (press Enter to skip)").
+				Value(&cfg.CompletionState),
+		),
+	}, input, output, accessible)
+	return lf.Run()
+}
+
+// runBehaviorForm handles phase 4: workflow behavior options.
+func runBehaviorForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
+	f := newForm([]*huh.Group{
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Should Claude plan the approach before coding?").
+				Value(&cfg.PlanFirst),
+			huh.NewConfirm().
+				Title("Should Claude try to fix failing CI?").
+				Value(&cfg.FixCI),
+			huh.NewConfirm().
+				Title("Should Claude auto-address PR review comments?").
+				Value(&cfg.AutoReview),
+			huh.NewInput().
+				Title("GitHub username to request as reviewer (press Enter to skip)").
+				Value(&cfg.Reviewer),
+			huh.NewSelect[string]().
+				Title("Merge method").
+				Options(
+					huh.NewOption("Rebase", "rebase"),
+					huh.NewOption("Squash", "squash"),
+					huh.NewOption("Merge", "merge"),
+				).
+				Value(&cfg.MergeMethod),
+			huh.NewConfirm().
+				Title("Run sessions in Docker containers?").
+				Value(&cfg.Containerized),
+			huh.NewConfirm().
+				Title("Send Slack notifications on failure?").
+				Value(&cfg.NotifySlack),
+		),
+	}, input, output, accessible)
+	if err := f.Run(); err != nil {
+		return err
+	}
+
+	// Conditionally ask for Slack webhook
 	if cfg.NotifySlack {
-		fmt.Fprint(output, "Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL): ")
-		cfg.SlackWebhook = readLine(scanner)
+		sf := newForm([]*huh.Group{
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL)").
+					Value(&cfg.SlackWebhook),
+			),
+		}, input, output, accessible)
+		if err := sf.Run(); err != nil {
+			return err
+		}
 		if cfg.SlackWebhook == "" {
 			cfg.NotifySlack = false
 		}
 	}
 
-	return cfg
+	return nil
 }
 
-// readLine reads one line from the scanner and returns the trimmed text,
-// or "" if the scanner is exhausted (EOF).
-func readLine(scanner *bufio.Scanner) string {
-	if !scanner.Scan() {
-		return ""
+func providerSetupTitle(provider string) string {
+	switch provider {
+	case "github":
+		return "GitHub Issues Setup"
+	case "asana":
+		return "Asana Tasks Setup"
+	case "linear":
+		return "Linear Issues Setup"
+	default:
+		return "Setup"
 	}
-	return strings.TrimSpace(scanner.Text())
 }
 
-// readWithDefault reads one line and returns def if the input is empty or EOF.
-func readWithDefault(scanner *bufio.Scanner, def string) string {
-	if !scanner.Scan() {
-		return def
+func buildProviderSetupText(provider string) string {
+	var b strings.Builder
+	switch provider {
+	case "github":
+		b.WriteString("GitHub Issues is the default issue tracker for erg.\n")
+		b.WriteString("It uses the gh CLI (which you already have installed).\n\n")
+		b.WriteString("Before we configure your workflow:\n\n")
+		b.WriteString("  1. Authenticate with GitHub (if you haven't already):\n")
+		b.WriteString("       gh auth login\n\n")
+		b.WriteString("  2. Label issues with your chosen label for erg to pick them up.")
+	case "asana":
+		b.WriteString("To use Asana Tasks, you need a Personal Access Token (PAT).\n\n")
+		b.WriteString("Steps to get your PAT:\n\n")
+		b.WriteString("  1. Go to the Asana Developer Console:\n")
+		b.WriteString("       https://app.asana.com/0/my-apps\n")
+		b.WriteString("  2. Click \"+ New access token\"\n")
+		b.WriteString("  3. Give it a description (e.g., \"erg\") and copy the token\n\n")
+		b.WriteString("Add the token to your shell profile (~/.zshrc or ~/.bashrc):\n\n")
+		b.WriteString("  export ASANA_PAT=\"your-token-here\"\n\n")
+		b.WriteString("  # Reload your shell:\n")
+		b.WriteString("  source ~/.zshrc\n\n")
+		b.WriteString("Find your project GID in the Asana project URL:\n")
+		b.WriteString("  https://app.asana.com/0/PROJECT_GID/list")
+	case "linear":
+		b.WriteString("To use Linear Issues, you need an API key.\n\n")
+		b.WriteString("Steps to get your API key:\n\n")
+		b.WriteString("  1. Log in at https://linear.app\n")
+		b.WriteString("  2. Go to Settings → API → Personal API Keys\n")
+		b.WriteString("  3. Click \"New API key\", give it a name (e.g., \"erg\"), and copy the key\n\n")
+		b.WriteString("Add the key to your shell profile (~/.zshrc or ~/.bashrc):\n\n")
+		b.WriteString("  export LINEAR_API_KEY=\"your-key-here\"\n\n")
+		b.WriteString("  # Reload your shell:\n")
+		b.WriteString("  source ~/.zshrc\n\n")
+		b.WriteString("Find your team ID in Linear: Settings → API → or in the team URL.")
 	}
-	text := strings.TrimSpace(scanner.Text())
-	if text == "" {
-		return def
+	return b.String()
+}
+
+func buildSummaryText(cfg workflow.WizardConfig) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Provider:       %s\n", cfg.Provider))
+	if cfg.Label != "" {
+		b.WriteString(fmt.Sprintf("Label:          %s\n", cfg.Label))
 	}
-	return text
-}
-
-// readYesNo reads one line and interprets "y"/"yes" as true, "n"/"no" as false.
-// Empty input or EOF returns defaultYes.
-func readYesNo(scanner *bufio.Scanner, defaultYes bool) bool {
-	if !scanner.Scan() {
-		return defaultYes
+	if cfg.Project != "" {
+		b.WriteString(fmt.Sprintf("Project:        %s\n", cfg.Project))
 	}
-	text := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	if text == "" {
-		return defaultYes
+	if cfg.Team != "" {
+		b.WriteString(fmt.Sprintf("Team:           %s\n", cfg.Team))
 	}
-	return text == "y" || text == "yes"
+	if cfg.Kanban {
+		b.WriteString("Organization:   Kanban\n")
+		if cfg.Section != "" {
+			b.WriteString(fmt.Sprintf("Section:        %s\n", cfg.Section))
+		}
+		if cfg.CompletionSection != "" {
+			b.WriteString(fmt.Sprintf("Done section:   %s\n", cfg.CompletionSection))
+		}
+		if cfg.CompletionState != "" {
+			b.WriteString(fmt.Sprintf("Done state:     %s\n", cfg.CompletionState))
+		}
+	}
+	b.WriteString(fmt.Sprintf("Plan first:     %v\n", cfg.PlanFirst))
+	b.WriteString(fmt.Sprintf("Fix CI:         %v\n", cfg.FixCI))
+	b.WriteString(fmt.Sprintf("Auto review:    %v\n", cfg.AutoReview))
+	if cfg.Reviewer != "" {
+		b.WriteString(fmt.Sprintf("Reviewer:       %s\n", cfg.Reviewer))
+	}
+	b.WriteString(fmt.Sprintf("Merge method:   %s\n", cfg.MergeMethod))
+	b.WriteString(fmt.Sprintf("Containerized:  %v\n", cfg.Containerized))
+	if cfg.NotifySlack {
+		b.WriteString(fmt.Sprintf("Slack webhook:  %s\n", cfg.SlackWebhook))
+	}
+	return b.String()
 }
 
-func printGitHubSetup(w io.Writer) {
-	fmt.Fprintln(w, "=== GitHub Issues Setup ===")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "GitHub Issues is the default issue tracker for erg.")
-	fmt.Fprintln(w, "It uses the gh CLI (which you already have installed).")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Before we configure your workflow:")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Authenticate with GitHub (if you haven't already):")
-	fmt.Fprintln(w, "       gh auth login")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  2. Label issues with your chosen label for erg to pick them up.")
-	fmt.Fprintln(w)
-}
-
-func printAsanaSetup(w io.Writer) {
-	fmt.Fprintln(w, "=== Asana Tasks Setup ===")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "To use Asana Tasks, you need a Personal Access Token (PAT).")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Steps to get your PAT:")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Go to the Asana Developer Console:")
-	fmt.Fprintln(w, "       https://app.asana.com/0/my-apps")
-	fmt.Fprintln(w, "  2. Click \"+ New access token\"")
-	fmt.Fprintln(w, "  3. Give it a description (e.g., \"erg\") and copy the token")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Add the token to your shell profile (~/.zshrc or ~/.bashrc):")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  export ASANA_PAT=\"your-token-here\"")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  # Reload your shell:")
-	fmt.Fprintln(w, "  source ~/.zshrc")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Find your project GID in the Asana project URL:")
-	fmt.Fprintln(w, "  https://app.asana.com/0/PROJECT_GID/list")
-	fmt.Fprintln(w)
-}
-
-func printLinearSetup(w io.Writer) {
-	fmt.Fprintln(w, "=== Linear Issues Setup ===")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "To use Linear Issues, you need an API key.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Steps to get your API key:")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  1. Log in at https://linear.app")
-	fmt.Fprintln(w, "  2. Go to Settings → API → Personal API Keys")
-	fmt.Fprintln(w, "  3. Click \"New API key\", give it a name (e.g., \"erg\"), and copy the key")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Add the key to your shell profile (~/.zshrc or ~/.bashrc):")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  export LINEAR_API_KEY=\"your-key-here\"")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  # Reload your shell:")
-	fmt.Fprintln(w, "  source ~/.zshrc")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Find your team ID in Linear: Settings → API → or in the team URL.")
-	fmt.Fprintln(w)
+// newForm creates a huh.Form configured with the given IO and accessible mode.
+func newForm(groups []*huh.Group, input io.Reader, output io.Writer, accessible bool) *huh.Form {
+	return huh.NewForm(groups...).
+		WithInput(input).
+		WithOutput(output).
+		WithAccessible(accessible)
 }
