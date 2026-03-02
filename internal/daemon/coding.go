@@ -926,7 +926,6 @@ INSTRUCTIONS:
 DO NOT push — the system handles pushing after you commit.`, round, fileList)
 }
 
-
 // getRebaseRounds extracts the rebase round counter from step data.
 func getRebaseRounds(stepData map[string]any) int {
 	v, ok := stepData["rebase_rounds"]
@@ -1025,18 +1024,16 @@ const AddressReviewRoundMarker = "<!-- erg:address_review_round -->"
 
 // countAddressReviewRoundsFromPR counts how many address-review rounds have been
 // started by counting PR comments that contain AddressReviewRoundMarker.
-// Returns 0 if the PR number cannot be resolved or comments cannot be listed,
-// so that a transient failure does not block progress.
-func (d *Daemon) countAddressReviewRoundsFromPR(ctx context.Context, repoPath, branch string) int {
+// Returns an error when the PR number or comments cannot be fetched, allowing
+// callers to fall back to StepData.
+func (d *Daemon) countAddressReviewRoundsFromPR(ctx context.Context, repoPath, branch string) (int, error) {
 	prNum, err := d.gitService.GetPRNumber(ctx, repoPath, branch)
 	if err != nil {
-		d.logger.Debug("countAddressReviewRoundsFromPR: could not get PR number, returning 0", "error", err)
-		return 0
+		return 0, fmt.Errorf("could not get PR number: %w", err)
 	}
 	comments, err := d.gitService.ListIssueComments(ctx, repoPath, prNum)
 	if err != nil {
-		d.logger.Debug("countAddressReviewRoundsFromPR: could not list comments, returning 0", "error", err)
-		return 0
+		return 0, fmt.Errorf("could not list comments: %w", err)
 	}
 	count := 0
 	for _, c := range comments {
@@ -1044,7 +1041,23 @@ func (d *Daemon) countAddressReviewRoundsFromPR(ctx context.Context, repoPath, b
 			count++
 		}
 	}
-	return count
+	return count, nil
+}
+
+// getAddressReviewRounds extracts the address review round counter from step data.
+func getAddressReviewRounds(stepData map[string]any) int {
+	v, ok := stepData["address_review_rounds"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // writePRDescription generates a rich PR description from the branch diff and updates the PR body.

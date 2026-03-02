@@ -8,6 +8,7 @@ import (
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
 func TestMergePR_RebasesOnFailure(t *testing.T) {
@@ -284,111 +285,140 @@ func TestMergePR_NonRebaseMethodNoRetry(t *testing.T) {
 	}
 }
 
-func TestParseReviewRequests(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantLogins []string
-		wantErr   bool
-	}{
-		{
-			name:       "empty list",
-			input:      `{"reviewRequests": []}`,
-			wantLogins: nil,
-		},
-		{
-			name:       "single reviewer",
-			input:      `{"reviewRequests": [{"login": "octocat"}]}`,
-			wantLogins: []string{"octocat"},
-		},
-		{
-			name:       "multiple reviewers",
-			input:      `{"reviewRequests": [{"login": "alice"}, {"login": "bob"}]}`,
-			wantLogins: []string{"alice", "bob"},
-		},
-		{
-			name:       "case-insensitive storage",
-			input:      `{"reviewRequests": [{"login": "OctoCat"}]}`,
-			wantLogins: []string{"octocat"},
-		},
-		{
-			name:    "invalid JSON",
-			input:   `not json`,
-			wantErr: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseReviewRequests([]byte(tc.input))
-			if tc.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			for _, login := range tc.wantLogins {
-				if !got[login] {
-					t.Errorf("expected reviewer %q in result set", login)
-				}
-			}
-			if len(got) != len(tc.wantLogins) {
-				t.Errorf("expected %d reviewers, got %d", len(tc.wantLogins), len(got))
-			}
-		})
-	}
-}
-
 // Silence unused import warning for config (used in testSession from daemon_test.go).
 var _ = config.Session{}
 
-func TestParseIssueState(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantState string
-		wantErr   bool
-	}{
-		{
-			name:      "open issue",
-			input:     `{"state": "OPEN"}`,
-			wantState: "OPEN",
-		},
-		{
-			name:      "closed issue",
-			input:     `{"state": "CLOSED"}`,
-			wantState: "CLOSED",
-		},
-		{
-			name:    "invalid JSON",
-			input:   `not json`,
-			wantErr: true,
-		},
-		{
-			name:      "empty state",
-			input:     `{"state": ""}`,
-			wantState: "",
-		},
+func TestCloseIssue_AlreadyClosed_SkipsClose(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetIssueState returns CLOSED
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte(`{"state":"CLOSED"}`),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseIssueState([]byte(tc.input))
-			if tc.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.wantState {
-				t.Errorf("state = %q, want %q", got, tc.wantState)
-			}
-		})
+	err := d.closeIssue(context.Background(), item)
+	if err != nil {
+		t.Fatalf("expected nil error for already-closed issue, got: %v", err)
+	}
+
+	// Verify gh issue close was NOT called
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "issue" && call.Args[1] == "close" {
+			t.Error("gh issue close should not be called when issue is already closed")
+		}
+	}
+}
+
+func TestCloseIssue_Open_ClosesIssue(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetIssueState returns OPEN
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte(`{"state":"OPEN"}`),
+	})
+	// CloseIssue succeeds
+	mockExec.AddExactMatch("gh", []string{"issue", "close", "42"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+	}
+
+	err := d.closeIssue(context.Background(), item)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	// Verify gh issue close WAS called
+	found := false
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "issue" && call.Args[1] == "close" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected gh issue close to be called for open issue")
+	}
+}
+
+func TestRequestReview_AlreadyRequested_Skips(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRReviewRequests returns octocat already requested
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviewRequests"}, exec.MockResponse{
+		Stdout: []byte(`{"reviewRequests":[{"login":"octocat"}]}`),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+	})
+	item, _ := d.state.GetWorkItem("item-1")
+
+	params := workflow.NewParamHelper(map[string]any{"reviewer": "octocat"})
+	err := d.requestReview(context.Background(), item, params)
+	if err != nil {
+		t.Fatalf("expected nil error for already-requested reviewer, got: %v", err)
+	}
+
+	// Verify gh pr edit --add-reviewer was NOT called
+	for _, call := range mockExec.GetCalls() {
+		if call.Name == "gh" && len(call.Args) >= 2 && call.Args[0] == "pr" && call.Args[1] == "edit" {
+			t.Error("gh pr edit should not be called when reviewer already requested")
+		}
+	}
+}
+
+func TestRequestReview_NotYetRequested_AddsReviewer(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// GetPRReviewRequests returns empty list
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviewRequests"}, exec.MockResponse{
+		Stdout: []byte(`{"reviewRequests":[]}`),
+	})
+	// RequestPRReview succeeds
+	mockExec.AddPrefixMatch("gh", []string{"pr", "edit", "feature-sess-1", "--add-reviewer"}, exec.MockResponse{})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+	})
+	item, _ := d.state.GetWorkItem("item-1")
+
+	params := workflow.NewParamHelper(map[string]any{"reviewer": "alice"})
+	err := d.requestReview(context.Background(), item, params)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
 	}
 }

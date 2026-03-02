@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	osexec "os/exec"
 	"strconv"
@@ -548,17 +547,6 @@ func (d *Daemon) moveToState(ctx context.Context, item daemonstate.WorkItem, par
 	return sm.MoveToSection(moveCtx, repoPath, item.IssueRef.ID, state)
 }
 
-// parseIssueState extracts the state string from `gh issue view --json state` output.
-func parseIssueState(data []byte) (string, error) {
-	var result struct {
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("parse issue state: %w", err)
-	}
-	return result.State, nil
-}
-
 // closeIssue closes the GitHub issue for a work item.
 // It is idempotent: if the issue is already closed, it returns nil.
 func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) error {
@@ -577,23 +565,15 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 	defer cancel()
 
 	// Check current state before closing to make this idempotent.
-	viewCmd := osexec.CommandContext(closeCtx, "gh", "issue", "view", item.IssueRef.ID, "--json", "state")
-	viewCmd.Dir = repoPath
-	if viewOutput, viewErr := viewCmd.Output(); viewErr == nil {
-		if state, parseErr := parseIssueState(viewOutput); parseErr == nil && strings.EqualFold(state, "CLOSED") {
+	if state, err := d.gitService.GetIssueState(closeCtx, repoPath, item.IssueRef.ID); err == nil {
+		if strings.EqualFold(state, "CLOSED") {
 			d.logger.Debug("github.close_issue skipped: issue already closed",
 				"workItem", item.ID, "issue", item.IssueRef.ID)
 			return nil
 		}
 	}
 
-	cmd := osexec.CommandContext(closeCtx, "gh", "issue", "close", item.IssueRef.ID)
-	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("gh issue close failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	return d.gitService.CloseIssue(closeCtx, repoPath, item.IssueRef.ID)
 }
 
 // unqueueIssue removes the queue label and leaves a comment explaining why,
@@ -671,24 +651,6 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 	}
 }
 
-// parseReviewRequests parses the JSON output of "gh pr view --json reviewRequests"
-// and returns a set of reviewer logins (lowercased for case-insensitive comparison).
-func parseReviewRequests(data []byte) (map[string]bool, error) {
-	var resp struct {
-		ReviewRequests []struct {
-			Login string `json:"login"`
-		} `json:"reviewRequests"`
-	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse reviewRequests JSON: %w", err)
-	}
-	reviewers := make(map[string]bool, len(resp.ReviewRequests))
-	for _, r := range resp.ReviewRequests {
-		reviewers[strings.ToLower(r.Login)] = true
-	}
-	return reviewers, nil
-}
-
 // requestReview requests a review on the PR for a work item.
 // It is idempotent: if the reviewer has already been requested, it returns nil
 // without sending a duplicate notification.
@@ -707,23 +669,13 @@ func (d *Daemon) requestReview(ctx context.Context, item daemonstate.WorkItem, p
 	defer cancel()
 
 	// Check existing review requests to avoid sending duplicate notifications.
-	viewCmd := osexec.CommandContext(reviewCtx, "gh", "pr", "view", item.Branch, "--json", "reviewRequests")
-	viewCmd.Dir = sess.RepoPath
-	if viewOutput, viewErr := viewCmd.Output(); viewErr == nil {
-		if existing, parseErr := parseReviewRequests(viewOutput); parseErr == nil {
-			if existing[strings.ToLower(reviewer)] {
-				return nil // already requested, skip to avoid duplicate notification
-			}
+	if existing, err := d.gitService.GetPRReviewRequests(reviewCtx, sess.RepoPath, item.Branch); err == nil {
+		if existing[strings.ToLower(reviewer)] {
+			return nil // already requested, skip to avoid duplicate notification
 		}
 	}
 
-	cmd := osexec.CommandContext(reviewCtx, "gh", "pr", "edit", item.Branch, "--add-reviewer", reviewer)
-	cmd.Dir = sess.RepoPath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("gh pr edit --add-reviewer failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	return d.gitService.RequestPRReview(reviewCtx, sess.RepoPath, item.Branch, reviewer)
 }
 
 // createRelease creates a GitHub release for a work item.
