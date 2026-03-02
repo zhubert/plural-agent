@@ -520,6 +520,13 @@ func (a *fixCIAction) Execute(ctx context.Context, ac *workflow.ActionContext) w
 		logs = "(CI failure logs unavailable)"
 	}
 
+	// Keep StepData in sync so the fallback path stays current if the git
+	// query fails on a subsequent invocation.
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["ci_fix_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
+
 	// Resume session — startFixCI records a marker commit before starting Claude,
 	// so the next invocation can derive the updated count from git.
 	if err := d.startFixCI(ctx, item, sess, rounds+1, logs); err != nil {
@@ -781,13 +788,25 @@ func (a *addressReviewAction) Execute(ctx context.Context, ac *workflow.ActionCo
 
 	// Derive round count from observable PR state rather than local StepData,
 	// so the counter is correct even after daemon restarts or step re-runs.
+	// Fall back to StepData when the PR query fails (e.g., GitHub API down).
 	countCtx, countCancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer countCancel()
 	maxRounds := ac.Params.Int("max_review_rounds", 3)
-	rounds := d.countAddressReviewRoundsFromPR(countCtx, sess.RepoPath, item.Branch)
+	rounds, countErr := d.countAddressReviewRoundsFromPR(countCtx, sess.RepoPath, item.Branch)
+	if countErr != nil {
+		d.logger.Warn("failed to count address review rounds from PR, falling back to StepData", "error", countErr)
+		rounds = getAddressReviewRounds(item.StepData)
+	}
 	if rounds >= maxRounds {
 		return workflow.ActionResult{Error: fmt.Errorf("max review rounds exceeded (%d/%d)", rounds, maxRounds)}
 	}
+
+	// Keep StepData in sync so the fallback path stays current if the PR
+	// query fails on a subsequent invocation.
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		it.StepData["address_review_rounds"] = rounds + 1
+		it.UpdatedAt = time.Now()
+	})
 
 	// Post a marker comment on the PR to record this round. The comment is
 	// intentionally not deduplicated: each invocation creates a new comment so

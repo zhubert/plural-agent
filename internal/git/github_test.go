@@ -2516,6 +2516,134 @@ func TestCreateRelease_ViewSuccess_InvalidJSON_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestIsGHNotFoundErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"release not found", fmt.Errorf("release not found"), true},
+		{"Not Found (capitalized)", fmt.Errorf("Not Found"), true},
+		{"HTTP 404", fmt.Errorf("HTTP 404: Not Found"), true},
+		{"http 404 lowercase", fmt.Errorf("http 404"), true},
+		{"GraphQL resolve error", fmt.Errorf("Could not resolve to a Release with the tag name 'v1.0.0'"), true},
+		{"internal server error", fmt.Errorf("HTTP 500: internal server error"), false},
+		{"generic error", fmt.Errorf("network timeout"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isGHNotFoundErr(tc.err)
+			if got != tc.want {
+				t.Errorf("isGHNotFoundErr(%q) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetIssueState(t *testing.T) {
+	t.Run("returns state", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, pexec.MockResponse{
+			Stdout: []byte(`{"state":"CLOSED"}`),
+		})
+		svc := NewGitServiceWithExecutor(mock)
+		state, err := svc.GetIssueState(context.Background(), "/repo", "42")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if state != "CLOSED" {
+			t.Errorf("expected CLOSED, got %s", state)
+		}
+	})
+
+	t.Run("returns error on failure", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, pexec.MockResponse{
+			Err: fmt.Errorf("not found"),
+		})
+		svc := NewGitServiceWithExecutor(mock)
+		_, err := svc.GetIssueState(context.Background(), "/repo", "42")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestGetPRReviewRequests(t *testing.T) {
+	t.Run("returns reviewers", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"pr", "view", "feature", "--json", "reviewRequests"}, pexec.MockResponse{
+			Stdout: []byte(`{"reviewRequests":[{"login":"alice"},{"login":"Bob"}]}`),
+		})
+		svc := NewGitServiceWithExecutor(mock)
+		reviewers, err := svc.GetPRReviewRequests(context.Background(), "/repo", "feature")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !reviewers["alice"] {
+			t.Error("expected alice in reviewers")
+		}
+		if !reviewers["bob"] {
+			t.Error("expected bob (lowercased) in reviewers")
+		}
+		if len(reviewers) != 2 {
+			t.Errorf("expected 2 reviewers, got %d", len(reviewers))
+		}
+	})
+
+	t.Run("empty reviewers", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"pr", "view", "feature", "--json", "reviewRequests"}, pexec.MockResponse{
+			Stdout: []byte(`{"reviewRequests":[]}`),
+		})
+		svc := NewGitServiceWithExecutor(mock)
+		reviewers, err := svc.GetPRReviewRequests(context.Background(), "/repo", "feature")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(reviewers) != 0 {
+			t.Errorf("expected 0 reviewers, got %d", len(reviewers))
+		}
+	})
+}
+
+func TestCloseIssue(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"issue", "close", "42"}, pexec.MockResponse{})
+		svc := NewGitServiceWithExecutor(mock)
+		err := svc.CloseIssue(context.Background(), "/repo", "42")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"issue", "close", "42"}, pexec.MockResponse{
+			Err: fmt.Errorf("already closed"),
+		})
+		svc := NewGitServiceWithExecutor(mock)
+		err := svc.CloseIssue(context.Background(), "/repo", "42")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestRequestPRReview(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mock := pexec.NewMockExecutor(nil)
+		mock.AddExactMatch("gh", []string{"pr", "edit", "feature", "--add-reviewer", "alice"}, pexec.MockResponse{})
+		svc := NewGitServiceWithExecutor(mock)
+		err := svc.RequestPRReview(context.Background(), "/repo", "feature", "alice")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestUpdatePRBody_Success(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	mock.AddPrefixMatch("gh", []string{"pr", "edit", "feature-branch", "--body"}, pexec.MockResponse{})

@@ -3807,12 +3807,12 @@ func (m *mockCommentProvider) Comment(_ context.Context, repoPath, issueID, body
 // mockIdempotentCommentProvider is a test double that also implements
 // ProviderGateChecker and ProviderCommentUpdater to support idempotent comments.
 type mockIdempotentCommentProvider struct {
-	src           issues.Source
-	commentErr    error
-	updateErr     error
+	src              issues.Source
+	commentErr       error
+	updateErr        error
 	existingComments []issues.IssueComment
-	comments      []mockCommentCall
-	updates       []mockUpdateCall
+	comments         []mockCommentCall
+	updates          []mockUpdateCall
 }
 
 type mockUpdateCall struct {
@@ -4047,7 +4047,7 @@ func TestCommentViaProvider_IdempotentCreatesNew(t *testing.T) {
 	d.repoFilter = "/test/repo"
 
 	provider := &mockIdempotentCommentProvider{
-		src:              issues.SourceAsana,
+		src: issues.SourceAsana,
 		existingComments: []issues.IssueComment{
 			{ID: "story-1", Body: "Unrelated comment"},
 		},
@@ -4822,7 +4822,6 @@ func TestResolveConflictsAction_ConflictsStartWorker(t *testing.T) {
 	}
 }
 
-
 func TestFormatConflictResolutionPrompt(t *testing.T) {
 	prompt := formatConflictResolutionPrompt(2, []string{"file1.go", "file2.go"})
 
@@ -5485,17 +5484,20 @@ func TestCountAddressReviewRoundsFromPR(t *testing.T) {
 		commentsJSON []byte
 		commentsErr  error
 		want         int
+		wantErr      bool
 	}{
 		{
 			name:      "PR number lookup fails",
 			prViewErr: fmt.Errorf("no PR"),
 			want:      0,
+			wantErr:   true,
 		},
 		{
 			name:         "comments listing fails",
 			prViewOutput: []byte(`{"number":42}`),
 			commentsErr:  fmt.Errorf("api error"),
 			want:         0,
+			wantErr:      true,
 		},
 		{
 			name:         "no marker comments",
@@ -5539,11 +5541,75 @@ func TestCountAddressReviewRoundsFromPR(t *testing.T) {
 
 			d := testDaemonWithExec(cfg, mockExec)
 
-			got := d.countAddressReviewRoundsFromPR(context.Background(), "/test/repo", branch)
+			got, err := d.countAddressReviewRoundsFromPR(context.Background(), "/test/repo", branch)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
 			if got != tc.want {
 				t.Errorf("countAddressReviewRoundsFromPR() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGetAddressReviewRounds(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepData map[string]any
+		want     int
+	}{
+		{"nil map", nil, 0},
+		{"empty map", map[string]any{}, 0},
+		{"int value", map[string]any{"address_review_rounds": 2}, 2},
+		{"float64 value (JSON)", map[string]any{"address_review_rounds": float64(3)}, 3},
+		{"string value (invalid)", map[string]any{"address_review_rounds": "2"}, 0},
+		{"zero value", map[string]any{"address_review_rounds": 0}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getAddressReviewRounds(tt.stepData)
+			if got != tt.want {
+				t.Errorf("getAddressReviewRounds() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddressReviewAction_FallsBackToStepDataOnPRError(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	// PR number lookup fails → forces StepData fallback
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "number"},
+		exec.MockResponse{Err: fmt.Errorf("API timeout")})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	// StepData has 3 rounds (at max), so fallback should trigger max exceeded
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42"},
+		SessionID: "sess-1",
+		Branch:    "feature-sess-1",
+		StepData:  map[string]any{"address_review_rounds": 3},
+	})
+
+	action := &addressReviewAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"max_review_rounds": 3})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if result.Success {
+		t.Error("expected failure: StepData fallback should have detected max rounds")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "max review rounds exceeded") {
+		t.Errorf("expected 'max review rounds exceeded', got: %v", result.Error)
 	}
 }
 

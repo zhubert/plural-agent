@@ -521,6 +521,61 @@ func (s *GitService) FetchGitHubIssuesWithLabel(ctx context.Context, repoPath, l
 	return issues, nil
 }
 
+// GetIssueState returns the state of a GitHub issue (e.g., "OPEN", "CLOSED") using the gh CLI.
+func (s *GitService) GetIssueState(ctx context.Context, repoPath, issueID string) (string, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "issue", "view", issueID, "--json", "state")
+	if err != nil {
+		return "", fmt.Errorf("gh issue view --json state failed: %w", err)
+	}
+	var result struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("failed to parse issue state: %w", err)
+	}
+	return result.State, nil
+}
+
+// GetPRReviewRequests returns the set of pending reviewer logins (lowercased)
+// for a PR identified by branch name.
+func (s *GitService) GetPRReviewRequests(ctx context.Context, repoPath, branch string) (map[string]bool, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "reviewRequests")
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view --json reviewRequests failed: %w", err)
+	}
+	var resp struct {
+		ReviewRequests []struct {
+			Login string `json:"login"`
+		} `json:"reviewRequests"`
+	}
+	if err := json.Unmarshal(output, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse reviewRequests JSON: %w", err)
+	}
+	reviewers := make(map[string]bool, len(resp.ReviewRequests))
+	for _, r := range resp.ReviewRequests {
+		reviewers[strings.ToLower(r.Login)] = true
+	}
+	return reviewers, nil
+}
+
+// CloseIssue closes a GitHub issue using the gh CLI.
+func (s *GitService) CloseIssue(ctx context.Context, repoPath, issueID string) error {
+	_, err := s.executor.CombinedOutput(ctx, repoPath, "gh", "issue", "close", issueID)
+	if err != nil {
+		return fmt.Errorf("gh issue close failed: %w", err)
+	}
+	return nil
+}
+
+// RequestPRReview adds a reviewer to a PR using the gh CLI.
+func (s *GitService) RequestPRReview(ctx context.Context, repoPath, branch, reviewer string) error {
+	_, err := s.executor.CombinedOutput(ctx, repoPath, "gh", "pr", "edit", branch, "--add-reviewer", reviewer)
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-reviewer failed: %w", err)
+	}
+	return nil
+}
+
 // AddIssueLabel adds a label to a GitHub issue using the gh CLI.
 func (s *GitService) AddIssueLabel(ctx context.Context, repoPath string, issueNumber int, label string) error {
 	_, _, err := s.executor.Run(ctx, repoPath, "gh", "issue", "edit",
@@ -1186,12 +1241,22 @@ Diff:
 
 // isGHNotFoundErr reports whether a gh CLI error indicates a resource was not found.
 // It checks both real exec.ExitError.Stderr and plain error messages (used by mocks).
+// Handles multiple gh CLI error formats:
+//   - "release not found", "not found" (standard messages)
+//   - "HTTP 404" (REST API errors)
+//   - "could not resolve to a ..." (GraphQL resolver errors)
 func isGHNotFoundErr(err error) bool {
+	check := func(s string) bool {
+		lower := strings.ToLower(s)
+		return strings.Contains(lower, "not found") ||
+			strings.Contains(lower, "http 404") ||
+			strings.Contains(lower, "could not resolve to a")
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return strings.Contains(strings.ToLower(string(exitErr.Stderr)), "not found")
+		return check(string(exitErr.Stderr))
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "not found")
+	return check(err.Error())
 }
 
 // CreateRelease creates a GitHub release using the gh CLI and returns the release URL.
