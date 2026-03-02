@@ -3341,3 +3341,127 @@ func TestCheckEvent_LinearInState_Dispatches(t *testing.T) {
 		t.Error("expected CheckEvent to dispatch to linear.in_state and fire")
 	}
 }
+
+// --- isErgSystemComment / guidance self-trigger prevention ---
+
+func TestIsErgSystemComment_AsanaMarker(t *testing.T) {
+	// Asana/Linear provider marker format
+	body := "The plan above is ready for your review.\n[erg:step=await_plan_feedback]"
+	if !isErgSystemComment(body) {
+		t.Error("expected Asana marker to be detected as system comment")
+	}
+}
+
+func TestIsErgSystemComment_GitHubMarker(t *testing.T) {
+	// GitHub HTML comment marker format
+	body := "Please review and approve the PR.\n<!-- erg:step=await_review -->"
+	if !isErgSystemComment(body) {
+		t.Error("expected GitHub marker to be detected as system comment")
+	}
+}
+
+func TestIsErgSystemComment_HumanComment(t *testing.T) {
+	humanComments := []string{
+		"LGTM",
+		"Looks good to me, approved",
+		"proceed",
+		"please make these changes",
+		"approved",
+	}
+	for _, body := range humanComments {
+		if isErgSystemComment(body) {
+			t.Errorf("human comment %q incorrectly flagged as system comment", body)
+		}
+	}
+}
+
+// TestCheckPlanUserReplied_GuidanceCommentNotSelfApproved is a regression test:
+// the guidance comment posted by the daemon must not trigger plan.user_replied.
+func TestCheckPlanUserReplied_GuidanceCommentNotSelfApproved(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+
+	// Simulate the guidance comment that postWaitGuidance would post.
+	// It contains words like "approved" and "proceed" which match typical patterns.
+	guidanceBody := `The plan above is ready for your review. Reply with your feedback to request changes, or reply with an approval (e.g. "LGTM", "looks good", "approved") to proceed.
+[erg:step=await_plan_feedback]`
+
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{Author: "erg-bot", Body: guidanceBody, CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-999"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_plan_feedback",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{
+		"approval_pattern": `(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)`,
+	})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, _, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("guidance comment must not trigger plan.user_replied (would auto-approve plan)")
+	}
+}
+
+// TestCheckGateApproved_GuidanceCommentNotSelfApproved is a regression test:
+// the guidance comment posted by the daemon must not trigger gate.approved.
+func TestCheckGateApproved_GuidanceCommentNotSelfApproved(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+
+	// A guidance comment for comment_match gate includes the pattern string.
+	guidanceBody := "Reply to this issue with a comment matching: `(?i)LGTM`\n[erg:step=await_gate]"
+
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{Author: "erg-bot", Body: guidanceBody, CreatedAt: now.Add(time.Minute)},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-888"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_gate",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{
+		"trigger":         "comment_match",
+		"comment_pattern": "(?i)LGTM",
+	})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("guidance comment must not trigger gate.approved (would auto-approve gate)")
+	}
+}

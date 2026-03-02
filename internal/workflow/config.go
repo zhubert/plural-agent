@@ -57,6 +57,10 @@ type State struct {
 	Data        map[string]any `yaml:"data,omitempty"`
 	Before      []HookConfig   `yaml:"before,omitempty"`
 	After       []HookConfig   `yaml:"after,omitempty"`
+	// Guidance is an optional message posted to the issue tracker when this wait
+	// state is entered, telling the human what action is required to proceed.
+	// nil = auto-generate from event type; "" = suppress guidance; non-empty = use as-is.
+	Guidance *string `yaml:"guidance,omitempty"`
 }
 
 // ChoiceRule defines a conditional branch in a choice state.
