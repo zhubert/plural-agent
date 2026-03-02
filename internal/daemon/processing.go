@@ -359,14 +359,26 @@ func (d *Daemon) executeSyncChain(ctx context.Context, itemID string, engine *wo
 			})
 		}
 
+		// Post guidance BEFORE AdvanceWorkItem so the comment's provider-side
+		// timestamp precedes StepEnteredAt. This prevents the guidance comment
+		// from being treated as a human reply by plan.user_replied / gate.approved
+		// event checkers, which only consider comments posted after StepEnteredAt.
+		if result.NewPhase != "async_pending" {
+			nextState := engine.GetState(result.NewStep)
+			if nextState != nil && nextState.Type == workflow.StateTypeWait {
+				if fresh, ok := d.state.GetWorkItem(itemID); ok {
+					d.postWaitGuidance(ctx, fresh, result.NewStep, nextState)
+				}
+			}
+		}
+
 		d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase)
 
 		// Stop if we hit an async pending state or a wait state
 		if result.NewPhase == "async_pending" {
 			return
 		}
-		nextState := engine.GetState(result.NewStep)
-		if nextState != nil && nextState.Type == workflow.StateTypeWait {
+		if nextState := engine.GetState(result.NewStep); nextState != nil && nextState.Type == workflow.StateTypeWait {
 			return
 		}
 	}
