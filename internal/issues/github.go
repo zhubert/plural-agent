@@ -87,6 +87,51 @@ func (p *GitHubProvider) Comment(ctx context.Context, repoPath string, issueID s
 	return p.gitService.CommentOnIssue(ctx, repoPath, issueNum, body)
 }
 
+// CheckIssueHasLabel returns true if the GitHub issue has the given label.
+// Implements ProviderGateChecker.
+func (p *GitHubProvider) CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error) {
+	issueNum, err := strconv.Atoi(issueID)
+	if err != nil {
+		return false, fmt.Errorf("invalid GitHub issue ID %q: %w", issueID, err)
+	}
+	return p.gitService.CheckIssueHasLabel(ctx, repoPath, issueNum, label)
+}
+
+// GetIssueComments returns all comments on a GitHub issue, ordered oldest first.
+// Uses both the gh CLI and REST API to return comments with IDs (needed for
+// ProviderCommentUpdater support).
+// Implements ProviderGateChecker.
+func (p *GitHubProvider) GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error) {
+	issueNum, err := strconv.Atoi(issueID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid GitHub issue ID %q: %w", issueID, err)
+	}
+	gitComments, err := p.gitService.GetIssueCommentsWithIDs(ctx, repoPath, issueNum)
+	if err != nil {
+		return nil, err
+	}
+	comments := make([]IssueComment, len(gitComments))
+	for i, gc := range gitComments {
+		comments[i] = IssueComment{
+			ID:        strconv.FormatInt(gc.ID, 10),
+			Author:    gc.Author,
+			Body:      gc.Body,
+			CreatedAt: gc.CreatedAt,
+		}
+	}
+	return comments, nil
+}
+
+// UpdateComment updates an existing GitHub issue comment by its ID.
+// Implements ProviderCommentUpdater.
+func (p *GitHubProvider) UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error {
+	id, err := strconv.ParseInt(commentID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid GitHub comment ID %q: %w", commentID, err)
+	}
+	return p.gitService.UpdateIssueComment(ctx, repoPath, id, body)
+}
+
 // GetIssueNumber returns the issue number as an int (for backwards compatibility).
 // Returns 0 if the ID is not a valid number.
 func GetIssueNumber(issue Issue) int {

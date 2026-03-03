@@ -613,41 +613,39 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 // explanatory comment. All operations are best-effort — failures are logged but
 // do not block the workflow from advancing.
 func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.WorkItem) {
-	if item.IssueRef.Source != "github" {
-		return
-	}
-
 	repoPath := d.resolveRepoPath(ctx, item)
 	if repoPath == "" {
 		return
 	}
 
-	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
-
-	issueNum, err := strconv.Atoi(item.IssueRef.ID)
-	if err != nil {
-		return
-	}
+	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
 	label := d.resolveQueueLabel(repoPath)
+	comment := "Closing this issue — no work was needed (the branch already has a merged PR or the coding session made no changes)."
 
 	opCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
-	// Remove queue label (best-effort)
-	if err := d.gitService.RemoveIssueLabel(opCtx, repoPath, issueNum, label); err != nil {
-		log.Debug("failed to remove queue label during graceful close", "error", err, "label", label)
+	// Try the provider registry first (works for GitHub, Asana, and Linear).
+	src := issues.Source(item.IssueRef.Source)
+	if d.issueRegistry != nil {
+		if p := d.issueRegistry.GetProvider(src); p != nil {
+			if pa, ok := p.(issues.ProviderActions); ok {
+				if err := pa.RemoveLabel(opCtx, repoPath, item.IssueRef.ID, label); err != nil {
+					log.Debug("failed to remove queue label during graceful close", "error", err, "label", label)
+				}
+				if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, comment); err != nil {
+					log.Debug("failed to comment during graceful close", "error", err)
+				}
+			}
+		}
 	}
 
-	// Comment explaining why we're closing
-	comment := "Closing this issue — no work was needed (the branch already has a merged PR or the coding session made no changes)."
-	if err := d.gitService.CommentOnIssue(opCtx, repoPath, issueNum, comment); err != nil {
-		log.Debug("failed to comment during graceful close", "error", err)
-	}
-
-	// Close the issue
-	if err := d.closeIssue(opCtx, item); err != nil {
-		log.Debug("failed to close issue during graceful close", "error", err)
+	// Close the issue (currently only supported for GitHub)
+	if src == issues.SourceGitHub {
+		if err := d.closeIssue(opCtx, item); err != nil {
+			log.Debug("failed to close issue during graceful close", "error", err)
+		}
 	}
 }
 

@@ -393,7 +393,10 @@ func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueI
 
 	// Remove the tag from the task.
 	removeURL := fmt.Sprintf("%s/tasks/%s/removeTag", p.apiBase, issueID)
-	tagJSON, _ := json.Marshal(tagGID)
+	tagJSON, err := json.Marshal(tagGID)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tag GID: %w", err)
+	}
 	removeBody := fmt.Sprintf(`{"data":{"tag":%s}}`, tagJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPost, removeURL, strings.NewReader(removeBody),
@@ -584,7 +587,10 @@ func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issu
 	}
 
 	addTaskURL := fmt.Sprintf("%s/sections/%s/addTask", p.apiBase, sectionGID)
-	taskJSON, _ := json.Marshal(issueID)
+	taskJSON, err := json.Marshal(issueID)
+	if err != nil {
+		return fmt.Errorf("failed to marshal task ID: %w", err)
+	}
 	reqBody := fmt.Sprintf(`{"data":{"task":%s}}`, taskJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPost, addTaskURL, strings.NewReader(reqBody),
@@ -600,7 +606,10 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 	}
 
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
-	textJSON, _ := json.Marshal(body)
+	textJSON, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal comment body: %w", err)
+	}
 	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPost, storiesURL, strings.NewReader(reqBody),
@@ -616,7 +625,10 @@ func (p *AsanaProvider) UpdateComment(ctx context.Context, repoPath string, issu
 	}
 
 	storyURL := fmt.Sprintf("%s/stories/%s", p.apiBase, commentID)
-	textJSON, _ := json.Marshal(body)
+	textJSON, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal comment body: %w", err)
+	}
 	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPut, storyURL, strings.NewReader(reqBody),

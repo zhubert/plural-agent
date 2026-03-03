@@ -446,6 +446,17 @@ func TestValidate(t *testing.T) {
 			wantFields: []string{"states.setup.next"},
 		},
 		{
+			name: "pass state next references non-existent state",
+			cfg: &Config{
+				Start:  "setup",
+				Source: SourceConfig{Provider: "github", Filter: FilterConfig{Label: "q"}},
+				States: map[string]*State{
+					"setup": {Type: StateTypePass, Next: "does_not_exist", Data: map[string]any{"key": "val"}},
+				},
+			},
+			wantFields: []string{"states.setup.next"},
+		},
+		{
 			name: "valid choice state",
 			cfg: &Config{
 				Start:  "check",

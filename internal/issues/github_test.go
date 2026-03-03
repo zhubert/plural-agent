@@ -143,6 +143,115 @@ func TestGitHubProvider_ImplementsProviderActions(t *testing.T) {
 	var _ ProviderActions = (*GitHubProvider)(nil)
 }
 
+func TestGitHubProvider_ImplementsProviderGateChecker(t *testing.T) {
+	var _ ProviderGateChecker = (*GitHubProvider)(nil)
+}
+
+func TestGitHubProvider_ImplementsProviderCommentUpdater(t *testing.T) {
+	var _ ProviderCommentUpdater = (*GitHubProvider)(nil)
+}
+
+func TestGitHubProvider_CheckIssueHasLabel(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"},
+		exec.MockResponse{Stdout: []byte(`{"labels":[{"name":"queued"},{"name":"bug"}]}`)})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	has, err := p.CheckIssueHasLabel(context.Background(), "/repo", "42", "queued")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Error("expected issue to have label 'queued'")
+	}
+}
+
+func TestGitHubProvider_CheckIssueHasLabel_NotFound(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "labels"},
+		exec.MockResponse{Stdout: []byte(`{"labels":[{"name":"bug"}]}`)})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	has, err := p.CheckIssueHasLabel(context.Background(), "/repo", "42", "queued")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if has {
+		t.Error("expected issue to NOT have label 'queued'")
+	}
+}
+
+func TestGitHubProvider_CheckIssueHasLabel_InvalidID(t *testing.T) {
+	p := NewGitHubProvider(nil)
+
+	_, err := p.CheckIssueHasLabel(context.Background(), "/repo", "not-a-number", "queued")
+	if err == nil {
+		t.Error("expected error for invalid issue ID")
+	}
+}
+
+func TestGitHubProvider_GetIssueComments(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"},
+		exec.MockResponse{Stdout: []byte(`[{"id":100,"body":"hello","user":{"login":"alice"},"created_at":"2024-01-01T00:00:00Z"},{"id":101,"body":"world","user":{"login":"bob"},"created_at":"2024-01-02T00:00:00Z"}]`)})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].ID != "100" {
+		t.Errorf("expected comment ID '100', got '%s'", comments[0].ID)
+	}
+	if comments[0].Author != "alice" {
+		t.Errorf("expected author 'alice', got '%s'", comments[0].Author)
+	}
+	if comments[0].Body != "hello" {
+		t.Errorf("expected body 'hello', got '%s'", comments[0].Body)
+	}
+}
+
+func TestGitHubProvider_GetIssueComments_InvalidID(t *testing.T) {
+	p := NewGitHubProvider(nil)
+
+	_, err := p.GetIssueComments(context.Background(), "/repo", "not-a-number")
+	if err == nil {
+		t.Error("expected error for invalid issue ID")
+	}
+}
+
+func TestGitHubProvider_UpdateComment(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "--method", "PATCH", "repos/:owner/:repo/issues/comments/100", "-f", "body=updated"},
+		exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	err := p.UpdateComment(context.Background(), "/repo", "42", "100", "updated")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGitHubProvider_UpdateComment_InvalidCommentID(t *testing.T) {
+	p := NewGitHubProvider(nil)
+
+	err := p.UpdateComment(context.Background(), "/repo", "42", "not-a-number", "body")
+	if err == nil {
+		t.Error("expected error for invalid comment ID")
+	}
+}
+
 func TestGetIssueNumber(t *testing.T) {
 	tests := []struct {
 		name     string

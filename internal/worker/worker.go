@@ -31,7 +31,7 @@ type SessionWorker struct {
 	once   sync.Once
 
 	exitErr          atomic.Pointer[error] // written from run() goroutine; read externally — use atomics
-	apiErrorInStream bool                  // Set when an API error is detected in streamed content
+	apiErrorInStream atomic.Bool           // Set when an API error is detected in streamed content
 
 	// Per-session limit overrides (zero = use host defaults)
 	overrideMaxTurns    int
@@ -185,7 +185,7 @@ func (w *SessionWorker) run() {
 
 		// Check if the response contained an API error (e.g., 500 errors
 		// emitted as streamed text rather than as chunk.Error)
-		if w.apiErrorInStream {
+		if w.apiErrorInStream.Load() {
 			apiErr := fmt.Errorf("API error detected in response stream")
 			w.exitErr.Store(&apiErr)
 			log.Warn("worker stopping due to API error in stream")
@@ -367,7 +367,7 @@ func (w *SessionWorker) handleStreaming(chunk claude.ResponseChunk) {
 		// the Anthropic API that the runner surfaces as text rather than
 		// as chunk.Error).
 		if isAPIErrorContent(chunk.Content) || isSessionNotFoundContent(chunk.Content) {
-			w.apiErrorInStream = true
+			w.apiErrorInStream.Store(true)
 		}
 
 		// Log first 100 chars of content for debugging
@@ -421,7 +421,7 @@ func isSessionNotFoundContent(content string) bool {
 
 // handleDone handles completion of a streaming response.
 func (w *SessionWorker) handleDone() {
-	log := w.host.Logger().With("sessionID", w.sessionID, "turn", w.turns)
+	log := w.host.Logger().With("sessionID", w.sessionID, "turn", w.turns.Load())
 	log.Debug("response completed")
 
 	// Mark session as started if needed

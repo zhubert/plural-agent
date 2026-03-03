@@ -92,9 +92,9 @@ reviewed your earlier plan and provided feedback. In that case:
 - Acknowledge the feedback and explain what changed
 
 POSTING THE PLAN:
-Use the comment_issue MCP tool to post the plan to the issue. Do NOT use "gh issue comment" or
-any other CLI command. The comment_issue tool routes through the daemon and handles authentication
-automatically.
+Use the comment_issue MCP tool to post the plan to the issue. Do NOT use CLI commands like
+"gh issue comment" or any other direct API calls. The comment_issue tool routes through the
+daemon and handles authentication automatically for all issue trackers (GitHub, Asana, Linear).
 
 CRITICAL: You MUST call comment_issue exactly once before finishing, in ALL cases — even if you
 believe the issue is already resolved by existing code or a prior commit. In that case, post a

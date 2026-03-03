@@ -246,6 +246,11 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 				Field:   prefix + ".next",
 				Message: "next is required for pass states",
 			})
+		} else if _, ok := allStates[state.Next]; !ok {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".next",
+				Message: fmt.Sprintf("references non-existent state %q", state.Next),
+			})
 		}
 
 	case StateTypeSucceed, StateTypeFail:

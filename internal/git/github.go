@@ -472,6 +472,52 @@ func (s *GitService) GetIssueComments(ctx context.Context, repoPath string, issu
 	return comments, nil
 }
 
+// IssueCommentWithID extends IssueComment with the GitHub database ID,
+// enabling comment updates via the REST API.
+type IssueCommentWithID struct {
+	ID        int64
+	Author    string
+	Body      string
+	CreatedAt time.Time
+}
+
+// GetIssueCommentsWithIDs fetches all comments on a GitHub issue using the REST API,
+// returning comments with their database IDs (needed for update operations).
+func (s *GitService) GetIssueCommentsWithIDs(ctx context.Context, repoPath string, issueNumber int) ([]IssueCommentWithID, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "api",
+		fmt.Sprintf("repos/:owner/:repo/issues/%d/comments", issueNumber),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gh api list issue comments failed: %w", err)
+	}
+
+	var raw []struct {
+		ID   int64  `json:"id"`
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse issue comments: %w", err)
+	}
+
+	comments := make([]IssueCommentWithID, 0, len(raw))
+	for _, c := range raw {
+		if c.Body == "" {
+			continue
+		}
+		comments = append(comments, IssueCommentWithID{
+			ID:        c.ID,
+			Author:    c.User.Login,
+			Body:      c.Body,
+			CreatedAt: c.CreatedAt,
+		})
+	}
+	return comments, nil
+}
+
 // GitHubIssue represents a GitHub issue fetched via the gh CLI
 type GitHubIssue struct {
 	Number int    `json:"number"`

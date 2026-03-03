@@ -393,6 +393,9 @@ func (p *LinearProvider) RemoveLabel(ctx context.Context, repoPath string, issue
 	}, "", &updateResp); err != nil {
 		return fmt.Errorf("failed to update issue labels: %w", err)
 	}
+	if !updateResp.Data.IssueUpdate.Success {
+		return fmt.Errorf("Linear API returned success=false for label update on issue %q", issueID)
+	}
 
 	return nil
 }
@@ -431,6 +434,9 @@ func (p *LinearProvider) Comment(ctx context.Context, repoPath string, issueID s
 	}, "", &commentResp); err != nil {
 		return fmt.Errorf("failed to create comment: %w", err)
 	}
+	if !commentResp.Data.CommentCreate.Success {
+		return fmt.Errorf("Linear API returned success=false for comment on issue %q", issueID)
+	}
 
 	return nil
 }
@@ -450,6 +456,9 @@ func (p *LinearProvider) UpdateComment(ctx context.Context, repoPath string, iss
 		"body": body,
 	}, "", &updateResp); err != nil {
 		return fmt.Errorf("failed to update comment: %w", err)
+	}
+	if !updateResp.Data.CommentUpdate.Success {
+		return fmt.Errorf("Linear API returned success=false for comment update %q", commentID)
 	}
 	return nil
 }
@@ -582,6 +591,9 @@ func (p *LinearProvider) MoveToSection(ctx context.Context, repoPath string, iss
 		"stateId": targetStateID,
 	}, "", &updateResp); err != nil {
 		return fmt.Errorf("failed to update issue state: %w", err)
+	}
+	if !updateResp.Data.IssueUpdate.Success {
+		return fmt.Errorf("Linear API returned success=false for state update on issue %q", issueID)
 	}
 
 	return nil
