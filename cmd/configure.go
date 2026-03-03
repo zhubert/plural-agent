@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/cli"
 	"github.com/zhubert/erg/internal/workflow"
@@ -47,6 +48,9 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	if !checkPrereqs(output, checker) {
 		return nil
 	}
+
+	// Clear prereq output so the form starts on a clean screen.
+	fmt.Fprint(output, "\033[2J\033[H")
 
 	// Phase 2: Tracker selection
 	var provider string
@@ -92,6 +96,7 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 				Description(buildSummaryText(cfg)),
 			huh.NewConfirm().
 				Title("Write configuration?").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&confirmed),
 		),
 	}, input, output, accessible)
@@ -324,13 +329,36 @@ func runBehaviorForm(input io.Reader, output io.Writer, accessible bool, cfg *wo
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Should Claude plan the approach before coding?").
+				DescriptionFunc(func() string {
+					if cfg.PlanFirst {
+						return "Erg adds a planning step where Claude outlines its approach before writing code."
+					}
+					return ""
+				}, &cfg.PlanFirst).
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.PlanFirst),
 			huh.NewConfirm().
 				Title("Should Claude try to fix failing CI?").
+				DescriptionFunc(func() string {
+					if cfg.FixCI {
+						return "Erg will re-run Claude to fix code when CI checks fail."
+					}
+					return ""
+				}, &cfg.FixCI).
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.FixCI),
 			huh.NewConfirm().
 				Title("Should Claude auto-address PR review comments?").
+				DescriptionFunc(func() string {
+					if cfg.AutoReview {
+						return "Erg will re-run Claude to address reviewer feedback with follow-up commits."
+					}
+					return ""
+				}, &cfg.AutoReview).
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.AutoReview),
+		).Title("Claude Behavior"),
+		huh.NewGroup(
 			huh.NewInput().
 				Title("GitHub username to request as reviewer (press Enter to skip)").
 				Value(&cfg.Reviewer),
@@ -342,13 +370,29 @@ func runBehaviorForm(input io.Reader, output io.Writer, accessible bool, cfg *wo
 					huh.NewOption("Merge", "merge"),
 				).
 				Value(&cfg.MergeMethod),
+		).Title("Pull Requests"),
+		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Run sessions in Docker containers?").
+				DescriptionFunc(func() string {
+					if cfg.Containerized {
+						return "Erg will run each Claude session in an isolated Docker container."
+					}
+					return ""
+				}, &cfg.Containerized).
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Containerized),
 			huh.NewConfirm().
 				Title("Send Slack notifications on failure?").
+				DescriptionFunc(func() string {
+					if cfg.NotifySlack {
+						return "Erg will send a Slack message when a session fails or needs attention."
+					}
+					return ""
+				}, &cfg.NotifySlack).
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.NotifySlack),
-		),
+		).Title("Infrastructure"),
 	}, input, output, accessible)
 	if err := f.Run(); err != nil {
 		return err
