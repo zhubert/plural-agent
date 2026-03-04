@@ -646,12 +646,12 @@ func (d *Daemon) resumeDockerPendingItems() {
 // checkDockerHealth probes Docker availability. Returns true if Docker is OK.
 // When Docker is down, it logs a warning once and returns false. When Docker
 // recovers after being down, it logs recovery and returns true.
-func (d *Daemon) checkDockerHealth() bool {
+func (d *Daemon) checkDockerHealth(ctx context.Context) bool {
 	var err error
 	if d.dockerHealthCheck != nil {
-		err = d.dockerHealthCheck()
+		err = d.dockerHealthCheck(ctx)
 	} else {
-		err = defaultDockerHealthCheck()
+		err = defaultDockerHealthCheck(ctx)
 	}
 
 	if err != nil {
@@ -673,8 +673,9 @@ func (d *Daemon) checkDockerHealth() bool {
 }
 
 // defaultDockerHealthCheck runs "docker version" with a 5-second timeout.
-func defaultDockerHealthCheck() error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutDockerHealth)
+// Uses the parent context so the check is cancelled promptly on daemon shutdown.
+func defaultDockerHealthCheck(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, timeoutDockerHealth)
 	defer cancel()
 	return osexec.CommandContext(ctx, "docker", "version").Run()
 }

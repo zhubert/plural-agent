@@ -36,6 +36,11 @@ func NewLinearProvider(cfg LinearConfigProvider) *LinearProvider {
 		config: cfg,
 		httpClient: &http.Client{
 			Timeout: linearHTTPTimeout,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 		apiBase: linearAPIBase,
 	}

@@ -55,7 +55,7 @@ func testDaemon(cfg *config.Config) *Daemon {
 	d := New(cfg, gitSvc, sessSvc, registry, logger)
 	d.sessionMgr.SetSkipMessageLoad(true)
 	d.state = daemonstate.NewDaemonState("/test/repo")
-	d.dockerHealthCheck = func() error { return nil } // tests assume Docker is available
+	d.dockerHealthCheck = func(context.Context) error { return nil } // tests assume Docker is available
 	return d
 }
 
@@ -69,7 +69,7 @@ func testDaemonWithExec(cfg *config.Config, mockExec *exec.MockExecutor) *Daemon
 	d := New(cfg, gitSvc, sessSvc, registry, logger)
 	d.sessionMgr.SetSkipMessageLoad(true)
 	d.state = daemonstate.NewDaemonState("/test/repo")
-	d.dockerHealthCheck = func() error { return nil } // tests assume Docker is available
+	d.dockerHealthCheck = func(context.Context) error { return nil } // tests assume Docker is available
 	return d
 }
 
@@ -2092,7 +2092,7 @@ func TestTick_SkipsDispatchWhenDockerDown(t *testing.T) {
 	d.repoFilter = "/test/repo"
 
 	// Inject a health check that reports Docker as down
-	d.dockerHealthCheck = func() error {
+	d.dockerHealthCheck = func(context.Context) error {
 		return errors.New("docker not available")
 	}
 
@@ -2140,7 +2140,7 @@ func TestTick_ResumesWhenDockerRecovers(t *testing.T) {
 	d.repoFilter = "/test/repo"
 
 	// Start with Docker down
-	d.dockerHealthCheck = func() error {
+	d.dockerHealthCheck = func(context.Context) error {
 		return errors.New("docker not available")
 	}
 
@@ -2160,7 +2160,7 @@ func TestTick_ResumesWhenDockerRecovers(t *testing.T) {
 	}
 
 	// Now Docker recovers
-	d.dockerHealthCheck = func() error { return nil }
+	d.dockerHealthCheck = func(context.Context) error { return nil }
 
 	// Second tick: Docker is back
 	d.tick(context.Background())
@@ -2182,12 +2182,12 @@ func TestCheckDockerHealth_LogsOnceWhenDown(t *testing.T) {
 	cfg := testConfig()
 	d := testDaemon(cfg)
 
-	d.dockerHealthCheck = func() error {
+	d.dockerHealthCheck = func(context.Context) error {
 		return errors.New("docker daemon not running")
 	}
 
 	// First check — should set both flags
-	ok := d.checkDockerHealth()
+	ok := d.checkDockerHealth(context.Background())
 	if ok {
 		t.Error("expected checkDockerHealth to return false when Docker is down")
 	}
@@ -2199,7 +2199,7 @@ func TestCheckDockerHealth_LogsOnceWhenDown(t *testing.T) {
 	}
 
 	// Second check — flags should remain, no additional logging
-	ok = d.checkDockerHealth()
+	ok = d.checkDockerHealth(context.Background())
 	if ok {
 		t.Error("expected checkDockerHealth to still return false")
 	}
@@ -2220,9 +2220,9 @@ func TestCheckDockerHealth_ClearsFlagsOnRecovery(t *testing.T) {
 	// Simulate Docker down
 	d.dockerDown = true
 	d.dockerDownLogged = true
-	d.dockerHealthCheck = func() error { return nil }
+	d.dockerHealthCheck = func(context.Context) error { return nil }
 
-	ok := d.checkDockerHealth()
+	ok := d.checkDockerHealth(context.Background())
 	if !ok {
 		t.Error("expected checkDockerHealth to return true when Docker recovers")
 	}
@@ -2411,9 +2411,9 @@ func TestDockerRecovery_ResumesDockerPendingItems(t *testing.T) {
 	d.dockerDownLogged = true
 
 	// Docker recovers
-	d.dockerHealthCheck = func() error { return nil }
+	d.dockerHealthCheck = func(context.Context) error { return nil }
 
-	ok := d.checkDockerHealth()
+	ok := d.checkDockerHealth(context.Background())
 	if !ok {
 		t.Fatal("expected checkDockerHealth to return true when Docker recovers")
 	}
@@ -2449,7 +2449,7 @@ func TestDockerDownAndRecovery_FullCycle(t *testing.T) {
 	d.loadWorkflowConfigs()
 
 	dockerUp := true
-	d.dockerHealthCheck = func() error {
+	d.dockerHealthCheck = func(context.Context) error {
 		if dockerUp {
 			return nil
 		}

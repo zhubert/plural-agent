@@ -94,12 +94,23 @@ func (d *Daemon) saveConfig(where string) {
 	}
 }
 
+// terminalWorkItemMaxAge is how long completed/failed work items are retained
+// before being pruned from the state. 7 days provides ample time for debugging
+// while preventing unbounded state growth in long-running daemons.
+const terminalWorkItemMaxAge = 7 * 24 * time.Hour
+
 // saveState persists the daemon state to disk.
 func (d *Daemon) saveState() {
 	if d.state == nil {
 		return
 	}
 	d.state.SetLastPollAt(time.Now())
+
+	// Prune old terminal work items to prevent unbounded state growth.
+	if pruned := d.state.PruneTerminalItems(terminalWorkItemMaxAge); pruned > 0 {
+		d.logger.Info("pruned old terminal work items", "count", pruned)
+	}
+
 	if err := d.state.Save(); err != nil {
 		d.logger.Error("failed to save daemon state", "error", err)
 	}

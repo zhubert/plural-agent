@@ -416,6 +416,32 @@ func StateExists() bool {
 	return len(matches) > 0
 }
 
+// PruneTerminalItems removes completed and failed work items that finished
+// more than maxAge ago. This prevents unbounded growth of the WorkItems map
+// in long-running daemons. Returns the number of items pruned.
+func (s *DaemonState) PruneTerminalItems(maxAge time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	pruned := 0
+	for id, item := range s.WorkItems {
+		if !item.IsTerminal() {
+			continue
+		}
+		completedAt := item.CompletedAt
+		if completedAt == nil {
+			// Terminal item without CompletedAt — use UpdatedAt as fallback.
+			completedAt = &item.UpdatedAt
+		}
+		if now.Sub(*completedAt) > maxAge {
+			delete(s.WorkItems, id)
+			pruned++
+		}
+	}
+	return pruned
+}
+
 // ClearState removes all daemon state files from disk.
 // Returns nil if no files exist.
 func ClearState() error {

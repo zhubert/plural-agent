@@ -889,3 +889,82 @@ func TestDaemonLock_DoubleAcquireFails(t *testing.T) {
 
 	os.Remove(lockPath)
 }
+
+func TestPruneTerminalItems(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+
+	now := time.Now()
+	old := now.Add(-8 * 24 * time.Hour) // 8 days ago
+	recent := now.Add(-1 * time.Hour)   // 1 hour ago
+
+	// Add items in various states
+	state.AddWorkItem(&WorkItem{ID: "active-1", StepData: map[string]any{}})
+	state.AddWorkItem(&WorkItem{ID: "completed-old", StepData: map[string]any{}})
+	state.AddWorkItem(&WorkItem{ID: "completed-recent", StepData: map[string]any{}})
+	state.AddWorkItem(&WorkItem{ID: "failed-old", StepData: map[string]any{}})
+	state.AddWorkItem(&WorkItem{ID: "failed-recent", StepData: map[string]any{}})
+
+	// Mark terminal items
+	state.MarkWorkItemTerminal("completed-old", true)
+	state.MarkWorkItemTerminal("completed-recent", true)
+	state.MarkWorkItemTerminal("failed-old", false)
+	state.MarkWorkItemTerminal("failed-recent", false)
+
+	// Override CompletedAt timestamps
+	state.mu.Lock()
+	state.WorkItems["completed-old"].CompletedAt = &old
+	state.WorkItems["completed-recent"].CompletedAt = &recent
+	state.WorkItems["failed-old"].CompletedAt = &old
+	state.WorkItems["failed-recent"].CompletedAt = &recent
+	state.mu.Unlock()
+
+	pruned := state.PruneTerminalItems(7 * 24 * time.Hour)
+	if pruned != 2 {
+		t.Errorf("expected 2 items pruned, got %d", pruned)
+	}
+
+	// Check that the right items remain
+	if _, ok := state.GetWorkItem("active-1"); !ok {
+		t.Error("active item should not be pruned")
+	}
+	if _, ok := state.GetWorkItem("completed-old"); ok {
+		t.Error("old completed item should be pruned")
+	}
+	if _, ok := state.GetWorkItem("completed-recent"); !ok {
+		t.Error("recent completed item should not be pruned")
+	}
+	if _, ok := state.GetWorkItem("failed-old"); ok {
+		t.Error("old failed item should be pruned")
+	}
+	if _, ok := state.GetWorkItem("failed-recent"); !ok {
+		t.Error("recent failed item should not be pruned")
+	}
+}
+
+func TestPruneTerminalItems_NoCompletedAt(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+
+	old := time.Now().Add(-8 * 24 * time.Hour)
+
+	state.AddWorkItem(&WorkItem{ID: "no-completed-at", StepData: map[string]any{}})
+	state.MarkWorkItemTerminal("no-completed-at", true)
+
+	// Clear CompletedAt and set old UpdatedAt to simulate legacy data
+	state.mu.Lock()
+	state.WorkItems["no-completed-at"].CompletedAt = nil
+	state.WorkItems["no-completed-at"].UpdatedAt = old
+	state.mu.Unlock()
+
+	pruned := state.PruneTerminalItems(7 * 24 * time.Hour)
+	if pruned != 1 {
+		t.Errorf("expected 1 item pruned (using UpdatedAt fallback), got %d", pruned)
+	}
+}
+
+func TestPruneTerminalItems_EmptyState(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+	pruned := state.PruneTerminalItems(7 * 24 * time.Hour)
+	if pruned != 0 {
+		t.Errorf("expected 0 items pruned from empty state, got %d", pruned)
+	}
+}

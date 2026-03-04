@@ -1308,7 +1308,13 @@ func (d *Daemon) postWebhook(ctx context.Context, item daemonstate.WorkItem, par
 	if err != nil {
 		return 0, fmt.Errorf("webhook POST failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain any remaining body so the underlying TCP connection can be reused
+		// by the connection pool. Without this, partially-read responses cause
+		// the transport to discard the connection.
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != expectedStatus {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))

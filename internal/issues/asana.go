@@ -36,6 +36,11 @@ func NewAsanaProvider(cfg AsanaConfigProvider) *AsanaProvider {
 		config: cfg,
 		httpClient: &http.Client{
 			Timeout: asanaHTTPTimeout,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 		apiBase: asanaAPIBase,
 	}

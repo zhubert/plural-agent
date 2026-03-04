@@ -61,7 +61,7 @@ type Daemon struct {
 	// Docker health tracking
 	dockerDown        bool
 	dockerDownLogged  bool
-	dockerHealthCheck func() error // injectable for testing; nil means use default
+	dockerHealthCheck func(context.Context) error // injectable for testing; nil means use default
 
 	// Workflow
 	workflowFile string // optional explicit workflow config file path
@@ -243,7 +243,7 @@ func (d *Daemon) notifyWorkerDone() {
 // tick performs one iteration of the daemon event loop.
 func (d *Daemon) tick(ctx context.Context) {
 	d.collectCompletedWorkers(ctx) // Always: detect finished sessions
-	dockerOK := d.checkDockerHealth()
+	dockerOK := d.checkDockerHealth(ctx)
 	if dockerOK {
 		d.processRetryItems(ctx)    // Re-execute items whose retry delay has elapsed
 		d.processIdleSyncItems(ctx) // Execute items idle on sync task steps (e.g. after recovery)

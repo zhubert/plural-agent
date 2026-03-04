@@ -40,7 +40,11 @@ func apiRequest(ctx context.Context, client *http.Client, method, url string, bo
 	if err != nil {
 		return fmt.Errorf("%s API request failed: %w", providerName, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain remaining body so the underlying TCP connection can be reused.
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if forbiddenMsg != "" && resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("%s", forbiddenMsg)
