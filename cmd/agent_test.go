@@ -252,12 +252,12 @@ func TestBuildDaemonArgs_HiddenFlagAppended(t *testing.T) {
 
 func TestBuildDaemonArgs_WithWorkflowFile(t *testing.T) {
 	args := buildDaemonArgs("owner/repo", false, "/custom/workflow.yaml")
-	if !slices.Contains(args, "--_workflow") {
-		t.Errorf("expected '--_workflow' in args: %v", args)
+	if !slices.Contains(args, "--workflow") {
+		t.Errorf("expected '--workflow' in args: %v", args)
 	}
-	idx := slices.Index(args, "--_workflow")
+	idx := slices.Index(args, "--workflow")
 	if idx < 0 || idx+1 >= len(args) {
-		t.Fatalf("--_workflow flag has no value in args: %v", args)
+		t.Fatalf("--workflow flag has no value in args: %v", args)
 	}
 	if args[idx+1] != "/custom/workflow.yaml" {
 		t.Errorf("expected '/custom/workflow.yaml', got %q", args[idx+1])
@@ -265,10 +265,10 @@ func TestBuildDaemonArgs_WithWorkflowFile(t *testing.T) {
 }
 
 func TestBuildDaemonArgs_NoWorkflowFile(t *testing.T) {
-	// When workflowFile is empty, --_workflow should not appear in args.
+	// When workflowFile is empty, --workflow should not appear in args.
 	args := buildDaemonArgs("owner/repo", false, "")
-	if slices.Contains(args, "--_workflow") {
-		t.Errorf("expected no '--_workflow' in args when empty: %v", args)
+	if slices.Contains(args, "--workflow") {
+		t.Errorf("expected no '--workflow' in args when empty: %v", args)
 	}
 }
 
@@ -281,6 +281,16 @@ func TestDaemonFlagIsHidden(t *testing.T) {
 	}
 	if !flag.Hidden {
 		t.Error("expected --_daemon flag to be hidden")
+	}
+}
+
+func TestWorkflowFlagIsVisible(t *testing.T) {
+	flag := rootCmd.Flags().Lookup("workflow")
+	if flag == nil {
+		t.Fatal("expected --workflow flag to exist on root command")
+	}
+	if flag.Hidden {
+		t.Error("expected --workflow flag to be visible")
 	}
 }
 

@@ -42,18 +42,21 @@ func init() {
 	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
-	rootCmd.Flags().StringVar(&agentWorkflowFile, "_workflow", "", "Internal: workflow file path passed to daemon child")
-	rootCmd.Flags().MarkHidden("_daemon")   //nolint:errcheck
-	rootCmd.Flags().MarkHidden("_workflow") //nolint:errcheck
-	rootCmd.Flags().MarkHidden("once")      //nolint:errcheck
-	rootCmd.Flags().MarkHidden("repo")      //nolint:errcheck
+	rootCmd.Flags().StringVar(&agentWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
+	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
+	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
+	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
 	if agentDaemonMode {
 		return runDaemonChild(cmd, args)
 	}
-	// When called as root command without --_daemon, show help
+	// If --workflow was provided, act like `erg start`
+	if agentWorkflowFile != "" {
+		return daemonize(cmd, args)
+	}
+	// When called as root command without actionable flags, show help
 	return cmd.Help()
 }
 
@@ -217,7 +220,7 @@ func buildDaemonArgs(repo string, once bool, workflowFile string) []string {
 		args = append(args, "--once")
 	}
 	if workflowFile != "" {
-		args = append(args, "--_workflow", workflowFile)
+		args = append(args, "--workflow", workflowFile)
 	}
 	return args
 }
