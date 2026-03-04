@@ -56,6 +56,16 @@ func TestStartOnceImpliesForeground(t *testing.T) {
 	}
 }
 
+func TestStartCmdWorkflowFlagExists(t *testing.T) {
+	flag := startCmd.Flags().Lookup("workflow")
+	if flag == nil {
+		t.Fatal("expected --workflow flag on start command")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("expected default value to be empty, got %q", flag.DefValue)
+	}
+}
+
 func TestStartCmdRegisteredOnRoot(t *testing.T) {
 	found := false
 	for _, sub := range rootCmd.Commands() {

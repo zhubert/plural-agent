@@ -26,10 +26,11 @@ import (
 )
 
 var (
-	agentOnce       bool
-	agentRepo       string
-	agentForeground bool
-	agentDaemonMode bool // hidden --_daemon flag for re-exec child
+	agentOnce         bool
+	agentRepo         string
+	agentForeground   bool
+	agentDaemonMode   bool   // hidden --_daemon flag for re-exec child
+	agentWorkflowFile string // optional explicit workflow config file path
 )
 
 // osExecutable is the function used to resolve the current binary path.
@@ -41,9 +42,11 @@ func init() {
 	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
-	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
-	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
-	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
+	rootCmd.Flags().StringVar(&agentWorkflowFile, "_workflow", "", "Internal: workflow file path passed to daemon child")
+	rootCmd.Flags().MarkHidden("_daemon")   //nolint:errcheck
+	rootCmd.Flags().MarkHidden("_workflow") //nolint:errcheck
+	rootCmd.Flags().MarkHidden("once")      //nolint:errcheck
+	rootCmd.Flags().MarkHidden("repo")      //nolint:errcheck
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -123,7 +126,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	buildLogger := logger.Get()
 
 	// Load workflow config + build image
-	wfCfg, err := workflow.LoadAndMerge(agentRepo)
+	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
@@ -152,7 +155,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build args for re-exec
-	childArgs := buildDaemonArgs(agentRepo, agentOnce)
+	childArgs := buildDaemonArgs(agentRepo, agentOnce, agentWorkflowFile)
 
 	// Re-exec self with --_daemon
 	self, err := osExecutable()
@@ -208,10 +211,13 @@ func daemonize(cmd *cobra.Command, args []string) error {
 }
 
 // buildDaemonArgs constructs the args slice for the re-exec'd child process.
-func buildDaemonArgs(repo string, once bool) []string {
+func buildDaemonArgs(repo string, once bool, workflowFile string) []string {
 	args := []string{"--_daemon", "--repo", repo}
 	if once {
 		args = append(args, "--once")
+	}
+	if workflowFile != "" {
+		args = append(args, "--_workflow", workflowFile)
 	}
 	return args
 }
@@ -334,7 +340,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 	}()
 
 	// Load workflow config + build image
-	wfCfg, err := workflow.LoadAndMerge(agentRepo)
+	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
@@ -402,7 +408,7 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	gitSvc := git.NewGitService()
 	sessSvc := session.NewSessionService()
 
-	wfCfg, err := workflow.LoadAndMerge(agentRepo)
+	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
@@ -471,6 +477,9 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	}
 	if len(preacquiredLock) > 0 && preacquiredLock[0] != nil {
 		opts = append(opts, daemon.WithPreacquiredLock(preacquiredLock[0]))
+	}
+	if agentWorkflowFile != "" {
+		opts = append(opts, daemon.WithWorkflowFile(agentWorkflowFile))
 	}
 
 	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, daemonLogger, opts...)

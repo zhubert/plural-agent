@@ -62,6 +62,9 @@ type Daemon struct {
 	dockerDown        bool
 	dockerDownLogged  bool
 	dockerHealthCheck func() error // injectable for testing; nil means use default
+
+	// Workflow
+	workflowFile string // optional explicit workflow config file path
 }
 
 // Option configures the daemon.
@@ -116,6 +119,12 @@ func WithMergeMethod(method string) Option {
 // by the parent process. The daemon will adopt it instead of acquiring a new one.
 func WithPreacquiredLock(lock *daemonstate.DaemonLock) Option {
 	return func(d *Daemon) { d.lock = lock }
+}
+
+// WithWorkflowFile sets an explicit workflow config file path, overriding the
+// default <repo>/.erg/workflow.yaml discovery.
+func WithWorkflowFile(file string) Option {
+	return func(d *Daemon) { d.workflowFile = file }
 }
 
 // New creates a new daemon.
@@ -288,7 +297,7 @@ func (d *Daemon) loadWorkflowConfigs() {
 	d.engines = make(map[string]*workflow.Engine)
 
 	for _, repoPath := range d.config.GetRepos() {
-		cfg, err := workflow.LoadAndMerge(repoPath)
+		cfg, err := workflow.LoadAndMergeWithFile(repoPath, d.workflowFile)
 		if err != nil {
 			d.logger.Warn("failed to load workflow config", "repo", repoPath, "error", err)
 			continue

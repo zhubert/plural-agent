@@ -219,7 +219,7 @@ func TestRuntimeStartHint_ColimaNotInstalled(t *testing.T) {
 // ---- buildDaemonArgs ----
 
 func TestBuildDaemonArgs_Basic(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", false)
+	args := buildDaemonArgs("owner/repo", false, "")
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
@@ -232,7 +232,7 @@ func TestBuildDaemonArgs_Basic(t *testing.T) {
 }
 
 func TestBuildDaemonArgs_WithOnce(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", true)
+	args := buildDaemonArgs("owner/repo", true, "")
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
 	}
@@ -244,9 +244,31 @@ func TestBuildDaemonArgs_WithOnce(t *testing.T) {
 
 func TestBuildDaemonArgs_HiddenFlagAppended(t *testing.T) {
 	// Verify --_daemon is always the first arg
-	args := buildDaemonArgs("/path/to/repo", false)
+	args := buildDaemonArgs("/path/to/repo", false, "")
 	if args[0] != "--_daemon" {
 		t.Errorf("expected '--_daemon' as first arg, got %q", args[0])
+	}
+}
+
+func TestBuildDaemonArgs_WithWorkflowFile(t *testing.T) {
+	args := buildDaemonArgs("owner/repo", false, "/custom/workflow.yaml")
+	if !slices.Contains(args, "--_workflow") {
+		t.Errorf("expected '--_workflow' in args: %v", args)
+	}
+	idx := slices.Index(args, "--_workflow")
+	if idx < 0 || idx+1 >= len(args) {
+		t.Fatalf("--_workflow flag has no value in args: %v", args)
+	}
+	if args[idx+1] != "/custom/workflow.yaml" {
+		t.Errorf("expected '/custom/workflow.yaml', got %q", args[idx+1])
+	}
+}
+
+func TestBuildDaemonArgs_NoWorkflowFile(t *testing.T) {
+	// When workflowFile is empty, --_workflow should not appear in args.
+	args := buildDaemonArgs("owner/repo", false, "")
+	if slices.Contains(args, "--_workflow") {
+		t.Errorf("expected no '--_workflow' in args when empty: %v", args)
 	}
 }
 

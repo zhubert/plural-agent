@@ -249,6 +249,133 @@ states:
 	}
 }
 
+func TestLoadFile_NotExists(t *testing.T) {
+	cfg, err := LoadFile("/nonexistent/path/workflow.yaml")
+	if err != nil {
+		t.Fatalf("expected nil error for missing file, got: %v", err)
+	}
+	if cfg != nil {
+		t.Error("expected nil config for missing file")
+	}
+}
+
+func TestLoadFile_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+workflow: test-flow
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: "ready"
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    next: done
+    error: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	fp := filepath.Join(dir, "my-workflow.yaml")
+	if err := os.WriteFile(fp, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(fp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.Source.Provider != "github" {
+		t.Errorf("provider: got %q, want github", cfg.Source.Provider)
+	}
+	if cfg.Source.Filter.Label != "ready" {
+		t.Errorf("label: got %q, want ready", cfg.Source.Filter.Label)
+	}
+}
+
+func TestLoadFile_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(fp, []byte("{{invalid yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFile(fp)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadAndMergeWithFile_UsesExplicitPath(t *testing.T) {
+	// Write a workflow file to a non-default location.
+	dir := t.TempDir()
+	yamlContent := `
+workflow: custom-flow
+start: coding
+
+source:
+  provider: linear
+  filter:
+    team: "custom-team"
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    next: done
+    error: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	customFile := filepath.Join(dir, "custom-workflow.yaml")
+	if err := os.WriteFile(customFile, []byte(yamlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// repoPath points to an empty dir (no .erg/workflow.yaml) — proves the
+	// explicit file path is used rather than the default location.
+	emptyRepo := t.TempDir()
+	cfg, err := LoadAndMergeWithFile(emptyRepo, customFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.Source.Provider != "linear" {
+		t.Errorf("provider: got %q, want linear", cfg.Source.Provider)
+	}
+	if cfg.Source.Filter.Team != "custom-team" {
+		t.Errorf("team: got %q, want custom-team", cfg.Source.Filter.Team)
+	}
+}
+
+func TestLoadAndMergeWithFile_EmptyPathFallsBackToDefault(t *testing.T) {
+	// With an empty workflowFile, LoadAndMergeWithFile behaves like LoadAndMerge.
+	dir := t.TempDir()
+	cfg, err := LoadAndMergeWithFile(dir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected default config")
+	}
+	// Should return the default provider (github)
+	if cfg.Source.Provider != "github" {
+		t.Errorf("expected default provider github, got %q", cfg.Source.Provider)
+	}
+}
+
 func TestLoadAndMerge_PartialFile(t *testing.T) {
 	dir := t.TempDir()
 	ergDir := filepath.Join(dir, ".erg")

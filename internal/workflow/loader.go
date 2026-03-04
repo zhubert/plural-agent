@@ -68,10 +68,53 @@ func isOldFormat(data []byte) bool {
 	return false
 }
 
+// LoadFile reads and parses a workflow config from an explicit file path.
+// Returns nil, nil if the file does not exist.
+func LoadFile(filePath string) (*Config, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read workflow config: %w", err)
+	}
+
+	if isOldFormat(data) {
+		return nil, fmt.Errorf(
+			"workflow config uses the old flat format which is no longer supported. " +
+				"Please migrate to the new step-functions format. " +
+				"Run `erg workflow init` to see the new format, " +
+				"or see https://github.com/zhubert/erg for migration docs",
+		)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
 // LoadAndMerge loads the workflow config and merges with defaults.
 // If no workflow file exists, returns the default config.
 func LoadAndMerge(repoPath string) (*Config, error) {
-	cfg, err := Load(repoPath)
+	return LoadAndMergeWithFile(repoPath, "")
+}
+
+// LoadAndMergeWithFile loads the workflow config and merges with defaults.
+// If workflowFile is non-empty, it is used as the explicit path to the config
+// file instead of the default <repoPath>/.erg/workflow.yaml.
+func LoadAndMergeWithFile(repoPath, workflowFile string) (*Config, error) {
+	var (
+		cfg *Config
+		err error
+	)
+	if workflowFile != "" {
+		cfg, err = LoadFile(workflowFile)
+	} else {
+		cfg, err = Load(repoPath)
+	}
 	if err != nil {
 		return nil, err
 	}

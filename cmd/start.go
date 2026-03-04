@@ -5,9 +5,10 @@ import (
 )
 
 var (
-	startRepo       string
-	startForeground bool
-	startOnce       bool
+	startRepo         string
+	startForeground   bool
+	startOnce         bool
+	startWorkflowFile string
 )
 
 var startCmd = &cobra.Command{
@@ -31,6 +32,7 @@ func init() {
 	startCmd.Flags().StringVar(&startRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	startCmd.Flags().BoolVarP(&startForeground, "foreground", "f", false, "Stay in foreground with live status display")
 	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
+	startCmd.Flags().StringVar(&startWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
 	rootCmd.AddCommand(startCmd)
 }
 
@@ -39,6 +41,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	agentRepo = startRepo
 	agentForeground = startForeground
 	agentOnce = startOnce
+	agentWorkflowFile = startWorkflowFile
 
 	// --once implies foreground
 	if agentOnce {
