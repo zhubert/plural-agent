@@ -16,7 +16,6 @@ type RunnerConfig interface {
 	SetForkFromSession(parentSessionID string)
 	SetContainerized(containerized bool, image string)
 	SetOnContainerReady(callback func())
-	SetDisableStreamingChunks(disable bool)
 	SetSystemPrompt(prompt string)
 	SetHostTools(hostTools bool)
 }

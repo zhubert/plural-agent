@@ -1,13 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/cli"
 	"github.com/zhubert/erg/internal/workflow"
@@ -43,32 +42,20 @@ type prereqCheckerFn func([]cli.Prerequisite) []cli.CheckResult
 // workflowWriterFn is a function that writes a workflow config based on wizard answers.
 type workflowWriterFn func(repoPath string, cfg workflow.WizardConfig) (string, error)
 
-func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn, accessible bool) error {
-	// Phase 1: Prerequisites (fmt-based output with ✓/✗/○)
+func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqCheckerFn, repoPath string, writer workflowWriterFn, _ bool) error {
+	scanner := bufio.NewScanner(input)
+
+	// Phase 1: Prerequisites
 	if !checkPrereqs(output, checker) {
 		return nil
 	}
 
-	// Clear prereq output so the form starts on a clean screen.
-	fmt.Fprint(output, "\033[2J\033[H")
-
 	// Phase 2: Tracker selection
-	var provider string
-	trackerForm := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Which issue tracker would you like to use?").
-				Options(
-					huh.NewOption("GitHub Issues  (uses gh CLI — no extra credentials needed)", "github"),
-					huh.NewOption("Asana Tasks    (requires ASANA_PAT environment variable)", "asana"),
-					huh.NewOption("Linear Issues  (requires LINEAR_API_KEY environment variable)", "linear"),
-				).
-				Value(&provider),
-		),
-	}, input, output, accessible)
-	if err := trackerForm.Run(); err != nil {
-		return err
-	}
+	fmt.Fprintln(output, "Which issue tracker would you like to use?")
+	fmt.Fprintln(output, "  1) GitHub Issues  (uses gh CLI)")
+	fmt.Fprintln(output, "  2) Asana Tasks    (requires ASANA_PAT)")
+	fmt.Fprintln(output, "  3) Linear Issues  (requires LINEAR_API_KEY)")
+	provider := promptSelect(scanner, output, "Choice [1-3]: ", []string{"github", "asana", "linear"})
 
 	// Phase 3: Provider setup + source config
 	cfg := workflow.WizardConfig{
@@ -78,32 +65,50 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 		AutoReview:  true,
 		MergeMethod: "rebase",
 	}
-	if err := runProviderForm(input, output, accessible, provider, &cfg); err != nil {
-		return err
+
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, providerSetupTitle(provider))
+	fmt.Fprintln(output, buildProviderSetupText(provider))
+	fmt.Fprintln(output)
+
+	switch provider {
+	case "github":
+		cfg.Label = promptStringDefault(scanner, output, "Label to watch for new issues", cfg.Label)
+	case "asana":
+		collectAsanaConfig(scanner, output, &cfg)
+	case "linear":
+		collectLinearConfig(scanner, output, &cfg)
 	}
 
 	// Phase 4: Workflow behavior
-	if err := runBehaviorForm(input, output, accessible, &cfg); err != nil {
-		return err
+	fmt.Fprintln(output)
+	cfg.PlanFirst = promptYN(scanner, output, "Should Claude plan the approach before coding?", false)
+	cfg.FixCI = promptYN(scanner, output, "Should Claude try to fix failing CI?", true)
+	cfg.AutoReview = promptYN(scanner, output, "Should Claude auto-address PR review comments?", true)
+	cfg.Reviewer = promptString(scanner, output, "GitHub username to request as reviewer (Enter to skip)")
+
+	fmt.Fprintln(output, "Merge method:")
+	fmt.Fprintln(output, "  1) Rebase")
+	fmt.Fprintln(output, "  2) Squash")
+	fmt.Fprintln(output, "  3) Merge")
+	cfg.MergeMethod = promptSelect(scanner, output, "Choice [1-3]: ", []string{"rebase", "squash", "merge"})
+
+	cfg.Containerized = promptYN(scanner, output, "Run sessions in Docker containers?", false)
+
+	cfg.NotifySlack = promptYN(scanner, output, "Send Slack notifications on failure?", false)
+	if cfg.NotifySlack {
+		cfg.SlackWebhook = promptString(scanner, output, "Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL)")
+		if cfg.SlackWebhook == "" {
+			cfg.NotifySlack = false
+		}
 	}
 
 	// Phase 5: Summary + confirm
-	var confirmed bool
-	summaryForm := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewNote().
-				Title("Configuration Summary").
-				Description(buildSummaryText(cfg)),
-			huh.NewConfirm().
-				Title("Write configuration?").
-				WithButtonAlignment(lipgloss.Left).
-				Value(&confirmed),
-		),
-	}, input, output, accessible)
-	if err := summaryForm.Run(); err != nil {
-		return err
-	}
-	if !confirmed {
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Configuration Summary")
+	fmt.Fprintln(output, buildSummaryText(cfg))
+
+	if !promptYN(scanner, output, "Write configuration?", true) {
 		fmt.Fprintln(output, "Configuration cancelled.")
 		return nil
 	}
@@ -182,240 +187,42 @@ func checkPrereqs(output io.Writer, checker prereqCheckerFn) bool {
 	return true
 }
 
-// runProviderForm handles phase 3: provider setup instructions + source config.
-func runProviderForm(input io.Reader, output io.Writer, accessible bool, provider string, cfg *workflow.WizardConfig) error {
-	// Show setup instructions via Note
-	setupForm := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewNote().
-				Title(providerSetupTitle(provider)).
-				Description(buildProviderSetupText(provider)),
-		),
-	}, input, output, accessible)
-	if err := setupForm.Run(); err != nil {
-		return err
-	}
+func collectAsanaConfig(scanner *bufio.Scanner, output io.Writer, cfg *workflow.WizardConfig) {
+	cfg.Project = promptString(scanner, output, "Asana project GID (from URL: https://app.asana.com/0/GID/list)")
 
-	switch provider {
-	case "github":
-		f := newForm([]*huh.Group{
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Label to watch for new issues?").
-					Value(&cfg.Label),
-			),
-		}, input, output, accessible)
-		return f.Run()
-
-	case "asana":
-		return runAsanaForm(input, output, accessible, cfg)
-
-	case "linear":
-		return runLinearForm(input, output, accessible, cfg)
-	}
-	return nil
-}
-
-// runAsanaForm collects Asana-specific configuration.
-func runAsanaForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
-	var orgChoice string = "tags"
-	f := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Asana project GID (from URL: https://app.asana.com/0/GID/list)").
-				Value(&cfg.Project),
-			huh.NewSelect[string]().
-				Title("How do you organize work in Asana?").
-				Options(
-					huh.NewOption("By tags (label tasks with a tag like \"queued\")", "tags"),
-					huh.NewOption("By board sections (Kanban)", "kanban"),
-				).
-				Value(&orgChoice),
-		),
-	}, input, output, accessible)
-	if err := f.Run(); err != nil {
-		return err
-	}
+	fmt.Fprintln(output, "How do you organize work in Asana?")
+	fmt.Fprintln(output, "  1) By tags")
+	fmt.Fprintln(output, "  2) By board sections (Kanban)")
+	orgChoice := promptSelect(scanner, output, "Choice [1-2]: ", []string{"tags", "kanban"})
 
 	if orgChoice == "kanban" {
 		cfg.Kanban = true
 		cfg.Label = ""
-		cfg.Section = "To do"
-		cfg.CompletionSection = "Done"
-		kf := newForm([]*huh.Group{
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Which section has new tasks?").
-					Value(&cfg.Section),
-				huh.NewInput().
-					Title("Completion section?").
-					Value(&cfg.CompletionSection),
-			),
-		}, input, output, accessible)
-		return kf.Run()
+		cfg.Section = promptStringDefault(scanner, output, "Which section has new tasks?", "To do")
+		cfg.CompletionSection = promptStringDefault(scanner, output, "Completion section?", "Done")
+	} else {
+		cfg.Label = promptStringDefault(scanner, output, "Asana tag to watch for new tasks?", cfg.Label)
+		cfg.Section = promptString(scanner, output, "Filter to section? (Enter to skip)")
+		cfg.CompletionSection = promptString(scanner, output, "Move completed tasks to which section? (Enter to skip)")
 	}
-
-	// Tags mode
-	tf := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Asana tag to watch for new tasks?").
-				Value(&cfg.Label),
-			huh.NewInput().
-				Title("Filter to section? (press Enter to skip)").
-				Value(&cfg.Section),
-			huh.NewInput().
-				Title("Move completed tasks to which section? (press Enter to skip)").
-				Value(&cfg.CompletionSection),
-		),
-	}, input, output, accessible)
-	return tf.Run()
 }
 
-// runLinearForm collects Linear-specific configuration.
-func runLinearForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
-	var orgChoice string = "labels"
-	f := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Linear team ID (from Settings → API)").
-				Value(&cfg.Team),
-			huh.NewSelect[string]().
-				Title("How do you organize work in Linear?").
-				Options(
-					huh.NewOption("By labels (label issues with \"queued\")", "labels"),
-					huh.NewOption("By workflow states (Kanban)", "kanban"),
-				).
-				Value(&orgChoice),
-		),
-	}, input, output, accessible)
-	if err := f.Run(); err != nil {
-		return err
-	}
+func collectLinearConfig(scanner *bufio.Scanner, output io.Writer, cfg *workflow.WizardConfig) {
+	cfg.Team = promptString(scanner, output, "Linear team ID (from Settings → API)")
+
+	fmt.Fprintln(output, "How do you organize work in Linear?")
+	fmt.Fprintln(output, "  1) By labels")
+	fmt.Fprintln(output, "  2) By workflow states (Kanban)")
+	orgChoice := promptSelect(scanner, output, "Choice [1-2]: ", []string{"labels", "kanban"})
 
 	if orgChoice == "kanban" {
 		cfg.Kanban = true
-		cfg.CompletionState = "Done"
-		kf := newForm([]*huh.Group{
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Label to identify erg-managed issues?").
-					Value(&cfg.Label),
-				huh.NewInput().
-					Title("Completion state?").
-					Value(&cfg.CompletionState),
-			),
-		}, input, output, accessible)
-		return kf.Run()
+		cfg.Label = promptStringDefault(scanner, output, "Label to identify erg-managed issues?", cfg.Label)
+		cfg.CompletionState = promptStringDefault(scanner, output, "Completion state?", "Done")
+	} else {
+		cfg.Label = promptStringDefault(scanner, output, "Linear label to watch for new issues?", cfg.Label)
+		cfg.CompletionState = promptString(scanner, output, "Move completed issues to which state? (Enter to skip)")
 	}
-
-	// Labels mode
-	lf := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Linear label to watch for new issues?").
-				Value(&cfg.Label),
-			huh.NewInput().
-				Title("Move completed issues to which state? (press Enter to skip)").
-				Value(&cfg.CompletionState),
-		),
-	}, input, output, accessible)
-	return lf.Run()
-}
-
-// runBehaviorForm handles phase 4: workflow behavior options.
-func runBehaviorForm(input io.Reader, output io.Writer, accessible bool, cfg *workflow.WizardConfig) error {
-	f := newForm([]*huh.Group{
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Should Claude plan the approach before coding?").
-				DescriptionFunc(func() string {
-					if cfg.PlanFirst {
-						return "Erg adds a planning step where Claude outlines its approach before writing code."
-					}
-					return ""
-				}, &cfg.PlanFirst).
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.PlanFirst),
-			huh.NewConfirm().
-				Title("Should Claude try to fix failing CI?").
-				DescriptionFunc(func() string {
-					if cfg.FixCI {
-						return "Erg will re-run Claude to fix code when CI checks fail."
-					}
-					return ""
-				}, &cfg.FixCI).
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.FixCI),
-			huh.NewConfirm().
-				Title("Should Claude auto-address PR review comments?").
-				DescriptionFunc(func() string {
-					if cfg.AutoReview {
-						return "Erg will re-run Claude to address reviewer feedback with follow-up commits."
-					}
-					return ""
-				}, &cfg.AutoReview).
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.AutoReview),
-		).Title("Claude Behavior"),
-		huh.NewGroup(
-			huh.NewInput().
-				Title("GitHub username to request as reviewer (press Enter to skip)").
-				Value(&cfg.Reviewer),
-			huh.NewSelect[string]().
-				Title("Merge method").
-				Options(
-					huh.NewOption("Rebase", "rebase"),
-					huh.NewOption("Squash", "squash"),
-					huh.NewOption("Merge", "merge"),
-				).
-				Value(&cfg.MergeMethod),
-		).Title("Pull Requests"),
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Run sessions in Docker containers?").
-				DescriptionFunc(func() string {
-					if cfg.Containerized {
-						return "Erg will run each Claude session in an isolated Docker container."
-					}
-					return ""
-				}, &cfg.Containerized).
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.Containerized),
-			huh.NewConfirm().
-				Title("Send Slack notifications on failure?").
-				DescriptionFunc(func() string {
-					if cfg.NotifySlack {
-						return "Erg will send a Slack message when a session fails or needs attention."
-					}
-					return ""
-				}, &cfg.NotifySlack).
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.NotifySlack),
-		).Title("Infrastructure"),
-	}, input, output, accessible)
-	if err := f.Run(); err != nil {
-		return err
-	}
-
-	// Conditionally ask for Slack webhook
-	if cfg.NotifySlack {
-		sf := newForm([]*huh.Group{
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL)").
-					Value(&cfg.SlackWebhook),
-			),
-		}, input, output, accessible)
-		if err := sf.Run(); err != nil {
-			return err
-		}
-		if cfg.SlackWebhook == "" {
-			cfg.NotifySlack = false
-		}
-	}
-
-	return nil
 }
 
 func providerSetupTitle(provider string) string {
@@ -507,10 +314,70 @@ func buildSummaryText(cfg workflow.WizardConfig) string {
 	return b.String()
 }
 
-// newForm creates a huh.Form configured with the given IO and accessible mode.
-func newForm(groups []*huh.Group, input io.Reader, output io.Writer, accessible bool) *huh.Form {
-	return huh.NewForm(groups...).
-		WithInput(input).
-		WithOutput(output).
-		WithAccessible(accessible)
+// promptString shows a prompt and reads a line of input. Returns empty string on empty input.
+func promptString(scanner *bufio.Scanner, output io.Writer, prompt string) string {
+	fmt.Fprintf(output, "%s: ", prompt)
+	if scanner.Scan() {
+		return strings.TrimSpace(scanner.Text())
+	}
+	return ""
+}
+
+// promptStringDefault shows a prompt with a default value. Returns the default if input is empty.
+func promptStringDefault(scanner *bufio.Scanner, output io.Writer, prompt, defaultVal string) string {
+	fmt.Fprintf(output, "%s [%s]: ", prompt, defaultVal)
+	if scanner.Scan() {
+		val := strings.TrimSpace(scanner.Text())
+		if val != "" {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+// promptYN asks a yes/no question. Returns the default on empty input.
+func promptYN(scanner *bufio.Scanner, output io.Writer, prompt string, defaultYes bool) bool {
+	hint := "y/N"
+	if defaultYes {
+		hint = "Y/n"
+	}
+	fmt.Fprintf(output, "%s [%s]: ", prompt, hint)
+	if scanner.Scan() {
+		val := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if val == "y" || val == "yes" {
+			return true
+		}
+		if val == "n" || val == "no" {
+			return false
+		}
+	}
+	return defaultYes
+}
+
+// promptSelect shows numbered options and returns the value at the chosen index.
+// Input "1" returns options[0], "2" returns options[1], etc.
+// Returns options[0] on empty/invalid input.
+func promptSelect(scanner *bufio.Scanner, output io.Writer, prompt string, options []string) string {
+	fmt.Fprint(output, prompt)
+	if scanner.Scan() {
+		val := strings.TrimSpace(scanner.Text())
+		switch val {
+		case "1":
+			if len(options) > 0 {
+				return options[0]
+			}
+		case "2":
+			if len(options) > 1 {
+				return options[1]
+			}
+		case "3":
+			if len(options) > 2 {
+				return options[2]
+			}
+		}
+	}
+	if len(options) > 0 {
+		return options[0]
+	}
+	return ""
 }

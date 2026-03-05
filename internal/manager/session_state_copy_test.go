@@ -300,7 +300,7 @@ func TestConcurrentAccessSafety(t *testing.T) {
 
 	// Simulate goroutine 2: modifies the state
 	state.AddToolUse("Edit", "another.go", "tool-2")
-	state.MarkToolUseComplete("tool-1", nil)
+	state.MarkToolUseComplete("tool-1")
 
 	// Goroutine 1's copy should be unchanged
 	if len(rollup.Items) != 1 {

@@ -196,10 +196,6 @@ type Runner struct {
 	// Only used for autonomous sessions running inside containers
 	hostTools bool
 
-	// Disable streaming chunks: when true, omits --include-partial-messages for less verbose output
-	// Useful for agent mode where real-time streaming is not needed
-	disableStreamingChunks bool
-
 	// System prompt: passed to Claude CLI via --append-system-prompt
 	systemPrompt string
 
@@ -307,16 +303,6 @@ func (r *Runner) SetOnContainerReady(callback func()) {
 	r.onContainerReady = callback
 }
 
-// SetDisableStreamingChunks configures the runner to disable streaming chunks.
-// When disabled, Claude CLI will send complete messages instead of partial streaming deltas.
-// This reduces logging verbosity and is useful for agent mode where real-time streaming is not needed.
-func (r *Runner) SetDisableStreamingChunks(disable bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.disableStreamingChunks = disable
-	r.log.Debug("set disable streaming chunks", "disabled", disable)
-}
-
 // SetSystemPrompt sets the system prompt passed to Claude CLI via --append-system-prompt.
 func (r *Runner) SetSystemPrompt(prompt string) {
 	r.mu.Lock()
@@ -354,13 +340,9 @@ func (r *Runner) GetResponseChan() <-chan ResponseChunk {
 type ChunkType string
 
 const (
-	ChunkTypeText              ChunkType = "text"               // Regular text content
-	ChunkTypeToolUse           ChunkType = "tool_use"           // Claude is calling a tool
-	ChunkTypeToolResult        ChunkType = "tool_result"        // Tool execution result
-	ChunkTypeTodoUpdate        ChunkType = "todo_update"        // TodoWrite tool call with todo list
-	ChunkTypeStreamStats       ChunkType = "stream_stats"       // Streaming statistics from result message
-	ChunkTypeSubagentStatus    ChunkType = "subagent_status"    // Subagent activity started or ended
-	ChunkTypePermissionDenials ChunkType = "permission_denials" // Permission denials from result message
+	ChunkTypeText        ChunkType = "text"         // Regular text content
+	ChunkTypeToolUse     ChunkType = "tool_use"     // Claude is calling a tool
+	ChunkTypeStreamStats ChunkType = "stream_stats" // Streaming statistics from result message
 )
 
 // StreamUsage represents token usage data from Claude's result message
@@ -391,18 +373,14 @@ type StreamStats struct {
 
 // ResponseChunk represents a chunk of streaming response
 type ResponseChunk struct {
-	Type              ChunkType          // Type of this chunk
-	Content           string             // Text content (for text chunks and status)
-	ToolName          string             // Tool being used (for tool_use chunks)
-	ToolInput         string             // Brief description of tool input
-	ToolUseID         string             // Unique ID for tool use (for matching tool_use to tool_result)
-	ResultInfo        *ToolResultInfo    // Details about tool result (for tool_result chunks)
-	TodoList          *TodoList          // Todo list (for ChunkTypeTodoUpdate)
-	Stats             *StreamStats       // Streaming statistics (for ChunkTypeStreamStats)
-	SubagentModel     string             // Model name when this is from a subagent (e.g., "claude-haiku-4-5-20251001")
-	PermissionDenials []PermissionDenial // Permission denials (for ChunkTypePermissionDenials)
-	Done              bool
-	Error             error
+	Type      ChunkType    // Type of this chunk
+	Content   string       // Text content (for text chunks)
+	ToolName  string       // Tool being used (for tool_use chunks)
+	ToolInput string       // Brief description of tool input
+	ToolUseID string       // Unique ID for tool use
+	Stats     *StreamStats // Streaming statistics (for ChunkTypeStreamStats)
+	Done      bool
+	Error     error
 }
 
 // ModelUsageEntry represents usage statistics for a specific model in the result message.
@@ -445,7 +423,6 @@ func (r *Runner) ensureProcessRunning() error {
 		Containerized:          r.containerized,
 		ContainerImage:         r.containerImage,
 		ContainerMCPPort:       containerMCPPort,
-		DisableStreamingChunks: r.disableStreamingChunks,
 		SystemPrompt:           r.systemPrompt,
 	}
 	copy(config.AllowedTools, r.allowedTools)

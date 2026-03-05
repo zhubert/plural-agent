@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -12,11 +11,8 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/mcp"
-	"github.com/zhubert/erg/internal/testutil"
 )
 
-// testLogger creates a discard logger for tests
-func testLogger() *slog.Logger { return testutil.DiscardLogger() }
 
 func TestNew(t *testing.T) {
 	tests := []struct {
@@ -358,12 +354,12 @@ func TestRunner_Stop_Idempotent(t *testing.T) {
 
 func TestParseStreamMessage_Empty(t *testing.T) {
 	log := testLogger()
-	chunks := parseStreamMessage("", false, log)
+	chunks := parseStreamMessage("", log)
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for empty line, got %d", len(chunks))
 	}
 
-	chunks = parseStreamMessage("   ", false, log)
+	chunks = parseStreamMessage("   ", log)
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for whitespace line, got %d", len(chunks))
 	}
@@ -372,7 +368,7 @@ func TestParseStreamMessage_Empty(t *testing.T) {
 func TestParseStreamMessage_NonJSONLine(t *testing.T) {
 	log := testLogger()
 	// Non-JSON lines (not starting with '{') are silently skipped
-	chunks := parseStreamMessage("not valid json", false, log)
+	chunks := parseStreamMessage("not valid json", log)
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for non-JSON line, got %d", len(chunks))
 	}
@@ -381,45 +377,16 @@ func TestParseStreamMessage_NonJSONLine(t *testing.T) {
 func TestParseStreamMessage_InvalidJSON(t *testing.T) {
 	log := testLogger()
 	// Malformed JSON (starts with '{' but invalid) is silently skipped
-	chunks := parseStreamMessage("{not valid json}", false, log)
+	chunks := parseStreamMessage("{not valid json}", log)
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for invalid JSON, got %d", len(chunks))
-	}
-}
-
-func TestParseStreamMessage_SystemInit(t *testing.T) {
-	log := testLogger()
-	msg := `{"type":"system","subtype":"init","session_id":"abc123"}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	// System init messages are logged but don't produce chunks
-	if len(chunks) != 0 {
-		t.Errorf("Expected 0 chunks for system init, got %d", len(chunks))
-	}
-}
-
-func TestParseStreamMessage_AssistantText(t *testing.T) {
-	log := testLogger()
-	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello, world!"}]}}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-
-	if chunks[0].Type != ChunkTypeText {
-		t.Errorf("Expected ChunkTypeText, got %v", chunks[0].Type)
-	}
-
-	if chunks[0].Content != "Hello, world!" {
-		t.Errorf("Expected 'Hello, world!', got %q", chunks[0].Content)
 	}
 }
 
 func TestParseStreamMessage_AssistantToolUse(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/path/to/file.go"}}]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 1 {
 		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
@@ -441,7 +408,7 @@ func TestParseStreamMessage_AssistantToolUse(t *testing.T) {
 func TestParseStreamMessage_MultipleContent(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":"Here's the file:"},{"type":"tool_use","name":"Read","input":{"file_path":"main.go"}}]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 2 {
 		t.Fatalf("Expected 2 chunks, got %d", len(chunks))
@@ -456,377 +423,10 @@ func TestParseStreamMessage_MultipleContent(t *testing.T) {
 	}
 }
 
-func TestParseStreamMessage_UserToolResult(t *testing.T) {
-	log := testLogger()
-	// User messages with tool results should emit ChunkTypeToolResult
-	// so the UI can mark the tool use as complete
-	msg := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"123","content":"file contents"}]}}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Errorf("Expected 1 chunk for tool result, got %d", len(chunks))
-	}
-	if len(chunks) > 0 && chunks[0].Type != ChunkTypeToolResult {
-		t.Errorf("Expected ChunkTypeToolResult, got %s", chunks[0].Type)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultCamelCase(t *testing.T) {
-	log := testLogger()
-	// Handle both snake_case and camelCase variants
-	msg := `{"type":"user","message":{"content":[{"toolUseId":"123","content":"file contents"}]}}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Errorf("Expected 1 chunk for tool result (camelCase), got %d", len(chunks))
-	}
-	if len(chunks) > 0 && chunks[0].Type != ChunkTypeToolResult {
-		t.Errorf("Expected ChunkTypeToolResult, got %s", chunks[0].Type)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithResultInfo_Read(t *testing.T) {
-	log := testLogger()
-	// Test Read tool result with file info
-	msg := `{
-		"type": "user",
-		"tool_use_result": {
-			"type": "text",
-			"file": {
-				"filePath": "/path/to/file.go",
-				"numLines": 45,
-				"startLine": 1,
-				"totalLines": 138
-			}
-		},
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "..."}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].ResultInfo == nil {
-		t.Fatal("Expected ResultInfo to be populated")
-	}
-	if chunks[0].ResultInfo.FilePath != "/path/to/file.go" {
-		t.Errorf("Expected FilePath '/path/to/file.go', got %q", chunks[0].ResultInfo.FilePath)
-	}
-	if chunks[0].ResultInfo.NumLines != 45 {
-		t.Errorf("Expected NumLines 45, got %d", chunks[0].ResultInfo.NumLines)
-	}
-	if chunks[0].ResultInfo.StartLine != 1 {
-		t.Errorf("Expected StartLine 1, got %d", chunks[0].ResultInfo.StartLine)
-	}
-	if chunks[0].ResultInfo.TotalLines != 138 {
-		t.Errorf("Expected TotalLines 138, got %d", chunks[0].ResultInfo.TotalLines)
-	}
-
-	// Test Summary()
-	summary := chunks[0].ResultInfo.Summary()
-	if summary != "lines 1-45 of 138" {
-		t.Errorf("Expected summary 'lines 1-45 of 138', got %q", summary)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithResultInfo_Edit(t *testing.T) {
-	log := testLogger()
-	// Test Edit tool result
-	msg := `{
-		"type": "user",
-		"tool_use_result": {
-			"filePath": "/path/to/file.go",
-			"oldString": "foo",
-			"newString": "bar",
-			"structuredPatch": {"some": "data"}
-		},
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "..."}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].ResultInfo == nil {
-		t.Fatal("Expected ResultInfo to be populated")
-	}
-	if !chunks[0].ResultInfo.Edited {
-		t.Error("Expected Edited to be true")
-	}
-	if chunks[0].ResultInfo.FilePath != "/path/to/file.go" {
-		t.Errorf("Expected FilePath '/path/to/file.go', got %q", chunks[0].ResultInfo.FilePath)
-	}
-
-	// Test Summary()
-	summary := chunks[0].ResultInfo.Summary()
-	if summary != "applied" {
-		t.Errorf("Expected summary 'applied', got %q", summary)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithResultInfo_Glob(t *testing.T) {
-	log := testLogger()
-	// Test Glob tool result with numFiles
-	msg := `{
-		"type": "user",
-		"tool_use_result": {
-			"numFiles": 15,
-			"filenames": ["a.go", "b.go"]
-		},
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "..."}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].ResultInfo == nil {
-		t.Fatal("Expected ResultInfo to be populated")
-	}
-	if chunks[0].ResultInfo.NumFiles != 15 {
-		t.Errorf("Expected NumFiles 15, got %d", chunks[0].ResultInfo.NumFiles)
-	}
-
-	// Test Summary()
-	summary := chunks[0].ResultInfo.Summary()
-	if summary != "15 files" {
-		t.Errorf("Expected summary '15 files', got %q", summary)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithResultInfo_Bash(t *testing.T) {
-	log := testLogger()
-	// Test Bash tool result with exit code
-	exitCode := 0
-	msg := `{
-		"type": "user",
-		"tool_use_result": {
-			"exitCode": 0,
-			"stdout": "output"
-		},
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "..."}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].ResultInfo == nil {
-		t.Fatal("Expected ResultInfo to be populated")
-	}
-	if chunks[0].ResultInfo.ExitCode == nil {
-		t.Fatal("Expected ExitCode to be populated")
-	}
-	if *chunks[0].ResultInfo.ExitCode != exitCode {
-		t.Errorf("Expected ExitCode %d, got %d", exitCode, *chunks[0].ResultInfo.ExitCode)
-	}
-
-	// Test Summary()
-	summary := chunks[0].ResultInfo.Summary()
-	if summary != "success" {
-		t.Errorf("Expected summary 'success', got %q", summary)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithResultInfo_BashError(t *testing.T) {
-	log := testLogger()
-	// Test Bash tool result with non-zero exit code
-	msg := `{
-		"type": "user",
-		"tool_use_result": {
-			"exitCode": 1,
-			"stderr": "error output"
-		},
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "..."}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].ResultInfo == nil {
-		t.Fatal("Expected ResultInfo to be populated")
-	}
-	if chunks[0].ResultInfo.ExitCode == nil {
-		t.Fatal("Expected ExitCode to be populated")
-	}
-	if *chunks[0].ResultInfo.ExitCode != 1 {
-		t.Errorf("Expected ExitCode 1, got %d", *chunks[0].ResultInfo.ExitCode)
-	}
-
-	// Test Summary()
-	summary := chunks[0].ResultInfo.Summary()
-	if summary != "exit 1" {
-		t.Errorf("Expected summary 'exit 1', got %q", summary)
-	}
-}
-
-func TestToolResultInfo_Summary_FullFile(t *testing.T) {
-	// Test when all lines are shown
-	info := &ToolResultInfo{
-		FilePath:   "/path/to/file.go",
-		NumLines:   50,
-		StartLine:  1,
-		TotalLines: 50,
-	}
-	summary := info.Summary()
-	if summary != "50 lines" {
-		t.Errorf("Expected summary '50 lines', got %q", summary)
-	}
-}
-
-func TestToolResultInfo_Summary_SingleFile(t *testing.T) {
-	// Test when only 1 file matched
-	info := &ToolResultInfo{
-		NumFiles: 1,
-	}
-	summary := info.Summary()
-	if summary != "1 file" {
-		t.Errorf("Expected summary '1 file', got %q", summary)
-	}
-}
-
-func TestToolResultInfo_Summary_Nil(t *testing.T) {
-	var info *ToolResultInfo = nil
-	summary := info.Summary()
-	if summary != "" {
-		t.Errorf("Expected empty summary for nil, got %q", summary)
-	}
-}
-
-func TestToolResultInfo_Summary_Empty(t *testing.T) {
-	info := &ToolResultInfo{}
-	summary := info.Summary()
-	if summary != "" {
-		t.Errorf("Expected empty summary for empty struct, got %q", summary)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithStringResult(t *testing.T) {
-	log := testLogger()
-	// Test tool_use_result as a plain string (error messages, simple results)
-	// This occurs when tools fail or return simple text results
-	msg := `{
-		"type": "user",
-		"tool_use_result": "Error: EISDIR: illegal operation on a directory, read",
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "123", "content": "Error: EISDIR", "is_error": true}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].Type != ChunkTypeToolResult {
-		t.Errorf("Expected ChunkTypeToolResult, got %s", chunks[0].Type)
-	}
-	// When tool_use_result is a string, ResultInfo should be nil (no rich data)
-	if chunks[0].ResultInfo != nil {
-		t.Errorf("Expected ResultInfo to be nil for string tool_use_result, got %+v", chunks[0].ResultInfo)
-	}
-}
-
-func TestParseStreamMessage_UserToolResultWithStringSiblingError(t *testing.T) {
-	log := testLogger()
-	// Test the "Sibling tool call errored" case
-	msg := `{
-		"type": "user",
-		"tool_use_result": "Sibling tool call errored",
-		"message": {"content": [{"type": "tool_result", "tool_use_id": "456", "content": "<tool_use_error>Sibling tool call errored</tool_use_error>", "is_error": true}]}
-	}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-	if chunks[0].Type != ChunkTypeToolResult {
-		t.Errorf("Expected ChunkTypeToolResult, got %s", chunks[0].Type)
-	}
-	// String tool_use_result should not produce ResultInfo
-	if chunks[0].ResultInfo != nil {
-		t.Errorf("Expected ResultInfo to be nil for string tool_use_result")
-	}
-}
-
-func TestToolUseResultField_UnmarshalJSON_String(t *testing.T) {
-	// Test unmarshaling a string value
-	jsonStr := `"Error: something went wrong"`
-	var field toolUseResultField
-	if err := json.Unmarshal([]byte(jsonStr), &field); err != nil {
-		t.Fatalf("Failed to unmarshal string: %v", err)
-	}
-	if field.StringValue != "Error: something went wrong" {
-		t.Errorf("Expected StringValue 'Error: something went wrong', got %q", field.StringValue)
-	}
-	if field.Data != nil {
-		t.Errorf("Expected Data to be nil for string value, got %+v", field.Data)
-	}
-}
-
-func TestToolUseResultField_UnmarshalJSON_Object(t *testing.T) {
-	// Test unmarshaling a structured object
-	jsonStr := `{"type": "text", "exitCode": 0, "stdout": "success"}`
-	var field toolUseResultField
-	if err := json.Unmarshal([]byte(jsonStr), &field); err != nil {
-		t.Fatalf("Failed to unmarshal object: %v", err)
-	}
-	if field.StringValue != "" {
-		t.Errorf("Expected StringValue to be empty, got %q", field.StringValue)
-	}
-	if field.Data == nil {
-		t.Fatal("Expected Data to be populated")
-	}
-	if field.Data.Type != "text" {
-		t.Errorf("Expected Data.Type 'text', got %q", field.Data.Type)
-	}
-	if field.Data.ExitCode == nil || *field.Data.ExitCode != 0 {
-		t.Errorf("Expected Data.ExitCode 0, got %v", field.Data.ExitCode)
-	}
-}
-
-func TestToolUseResultField_UnmarshalJSON_ObjectWithFile(t *testing.T) {
-	// Test unmarshaling a Read tool result
-	jsonStr := `{
-		"type": "text",
-		"file": {
-			"filePath": "/path/to/file.go",
-			"numLines": 50,
-			"startLine": 1,
-			"totalLines": 100
-		}
-	}`
-	var field toolUseResultField
-	if err := json.Unmarshal([]byte(jsonStr), &field); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-	if field.Data == nil {
-		t.Fatal("Expected Data to be populated")
-	}
-	if field.Data.File == nil {
-		t.Fatal("Expected Data.File to be populated")
-	}
-	if field.Data.File.FilePath != "/path/to/file.go" {
-		t.Errorf("Expected FilePath '/path/to/file.go', got %q", field.Data.File.FilePath)
-	}
-	if field.Data.File.NumLines != 50 {
-		t.Errorf("Expected NumLines 50, got %d", field.Data.File.NumLines)
-	}
-}
-
-func TestParseStreamMessage_Result(t *testing.T) {
-	log := testLogger()
-	msg := `{"type":"result","subtype":"success","result":"Operation completed"}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	// Result messages are logged but don't produce user-visible chunks
-	if len(chunks) != 0 {
-		t.Errorf("Expected 0 chunks for result, got %d", len(chunks))
-	}
-}
-
 func TestParseStreamMessage_ErrorResult(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"result","subtype":"error_during_execution","result":"Claude ran out of context window"}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	// Error result messages are logged but don't produce user-visible chunks in parseStreamMessage
 	// (the error display is handled in handleResponse instead)
@@ -1363,32 +963,6 @@ func TestTruncateForLog(t *testing.T) {
 	}
 }
 
-func TestFormatToolIcon(t *testing.T) {
-	tests := []struct {
-		toolName string
-		expected string
-	}{
-		{"Read", "Reading"},
-		{"Edit", "Editing"},
-		{"Write", "Writing"},
-		{"Glob", "Searching"},
-		{"Grep", "Searching"},
-		{"Bash", "Running"},
-		{"Task", "Delegating"},
-		{"WebFetch", "Fetching"},
-		{"WebSearch", "Searching"},
-		{"TodoWrite", "Updating todos"},
-		{"UnknownTool", "Using UnknownTool"},
-	}
-
-	for _, tt := range tests {
-		result := FormatToolIcon(tt.toolName)
-		if result != tt.expected {
-			t.Errorf("FormatToolIcon(%q) = %q, want %q", tt.toolName, result, tt.expected)
-		}
-	}
-}
-
 func TestDefaultAllowedTools(t *testing.T) {
 	expected := []string{
 		"Read", "Glob", "Grep", "Edit", "Write", "ExitPlanMode",
@@ -1415,16 +989,13 @@ func TestChunkTypes(t *testing.T) {
 	if ChunkTypeToolUse != "tool_use" {
 		t.Errorf("ChunkTypeToolUse = %q, want 'tool_use'", ChunkTypeToolUse)
 	}
-	if ChunkTypeToolResult != "tool_result" {
-		t.Errorf("ChunkTypeToolResult = %q, want 'tool_result'", ChunkTypeToolResult)
-	}
 }
 
 func TestParseStreamMessage_EmptyText(t *testing.T) {
 	log := testLogger()
 	// Empty text content should not produce a chunk
 	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":""}]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for empty text, got %d", len(chunks))
@@ -1435,7 +1006,7 @@ func TestParseStreamMessage_UnrecognizedJSON(t *testing.T) {
 	log := testLogger()
 	// JSON that parses but has no recognized type should be silently skipped
 	msg := `{"something":"else"}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for unrecognized JSON type, got %d", len(chunks))
@@ -1586,7 +1157,7 @@ func TestParseStreamMessage_NestedToolInput(t *testing.T) {
 	log := testLogger()
 	// Test tool use with nested input object
 	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/path/to/file.go","old_string":"foo","new_string":"bar"}}]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 1 {
 		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
@@ -1604,7 +1175,7 @@ func TestParseStreamMessage_NestedToolInput(t *testing.T) {
 func TestParseStreamMessage_EmptyContent(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"assistant","message":{"content":[]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for empty content array, got %d", len(chunks))
@@ -1614,7 +1185,7 @@ func TestParseStreamMessage_EmptyContent(t *testing.T) {
 func TestParseStreamMessage_NullContent(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"assistant","message":{"content":null}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 0 {
 		t.Errorf("Expected 0 chunks for null content, got %d", len(chunks))
@@ -1629,7 +1200,7 @@ func TestParseStreamMessage_MixedContentTypes(t *testing.T) {
 		{"type":"text","text":"Second text"},
 		{"type":"tool_use","name":"Bash","input":{"command":"ls"}}
 	]}}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 4 {
 		t.Fatalf("Expected 4 chunks, got %d", len(chunks))
@@ -1774,7 +1345,7 @@ func TestParseStreamMessage_WhitespaceOnly(t *testing.T) {
 	}
 
 	for _, line := range tests {
-		chunks := parseStreamMessage(line, false, log)
+		chunks := parseStreamMessage(line, log)
 		if len(chunks) != 0 {
 			t.Errorf("parseStreamMessage(%q) should return 0 chunks, got %d", line, len(chunks))
 		}
@@ -1784,7 +1355,7 @@ func TestParseStreamMessage_WhitespaceOnly(t *testing.T) {
 func TestParseStreamMessage_LeadingTrailingWhitespace(t *testing.T) {
 	log := testLogger()
 	msg := `  {"type":"assistant","message":{"content":[{"type":"text","text":"test"}]}}  `
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	if len(chunks) != 1 {
 		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
@@ -2593,74 +2164,6 @@ func TestShortenPath_WindowsStyle(t *testing.T) {
 	}
 }
 
-func TestParseStreamMessage_TodoWrite(t *testing.T) {
-	log := testLogger()
-	// Test that TodoWrite tool_use produces ChunkTypeTodoUpdate
-	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Task 1","status":"pending","activeForm":"Working on task 1"},{"content":"Task 2","status":"in_progress","activeForm":"Doing task 2"},{"content":"Task 3","status":"completed","activeForm":"Done"}]}}]}}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-
-	if chunks[0].Type != ChunkTypeTodoUpdate {
-		t.Errorf("Expected ChunkTypeTodoUpdate, got %v", chunks[0].Type)
-	}
-
-	if chunks[0].TodoList == nil {
-		t.Fatal("Expected non-nil TodoList")
-	}
-
-	if len(chunks[0].TodoList.Items) != 3 {
-		t.Errorf("Expected 3 todo items, got %d", len(chunks[0].TodoList.Items))
-	}
-
-	// Verify first item
-	if chunks[0].TodoList.Items[0].Content != "Task 1" {
-		t.Errorf("First item Content = %q, want %q", chunks[0].TodoList.Items[0].Content, "Task 1")
-	}
-	if chunks[0].TodoList.Items[0].Status != TodoStatusPending {
-		t.Errorf("First item Status = %q, want %q", chunks[0].TodoList.Items[0].Status, TodoStatusPending)
-	}
-
-	// Verify second item
-	if chunks[0].TodoList.Items[1].Status != TodoStatusInProgress {
-		t.Errorf("Second item Status = %q, want %q", chunks[0].TodoList.Items[1].Status, TodoStatusInProgress)
-	}
-
-	// Verify third item
-	if chunks[0].TodoList.Items[2].Status != TodoStatusCompleted {
-		t.Errorf("Third item Status = %q, want %q", chunks[0].TodoList.Items[2].Status, TodoStatusCompleted)
-	}
-}
-
-func TestParseStreamMessage_TodoWrite_InvalidInput(t *testing.T) {
-	log := testLogger()
-	// Test that TodoWrite with invalid input falls back to regular tool use
-	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"invalid":"data"}}]}}`
-	chunks := parseStreamMessage(msg, false, log)
-
-	if len(chunks) != 1 {
-		t.Fatalf("Expected 1 chunk, got %d", len(chunks))
-	}
-
-	// Should fall back to ChunkTypeToolUse since parsing failed
-	if chunks[0].Type != ChunkTypeToolUse {
-		t.Errorf("Expected ChunkTypeToolUse for invalid TodoWrite, got %v", chunks[0].Type)
-	}
-
-	if chunks[0].ToolName != "TodoWrite" {
-		t.Errorf("Expected tool name 'TodoWrite', got %q", chunks[0].ToolName)
-	}
-}
-
-func TestChunkTypeTodoUpdate(t *testing.T) {
-	// Verify the constant value
-	if ChunkTypeTodoUpdate != "todo_update" {
-		t.Errorf("ChunkTypeTodoUpdate = %q, want %q", ChunkTypeTodoUpdate, "todo_update")
-	}
-}
-
 func TestChunkTypeStreamStats(t *testing.T) {
 	// Verify the constant value
 	if ChunkTypeStreamStats != "stream_stats" {
@@ -2829,7 +2332,7 @@ func TestParseStreamMessage_AssistantWithUsage(t *testing.T) {
 			}
 		}
 	}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	// Should only have text chunk - stats are emitted separately by handleProcessLine
 	if len(chunks) != 1 {
@@ -2869,7 +2372,7 @@ func TestParseStreamMessage_AssistantWithoutUsage(t *testing.T) {
 			"content": [{"type": "text", "text": "Hello!"}]
 		}
 	}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	// Should only have text chunk, no stats
 	if len(chunks) != 1 {
@@ -2894,7 +2397,7 @@ func TestParseStreamMessage_AssistantWithZeroOutputTokens(t *testing.T) {
 			"output_tokens": 0
 		}
 	}`
-	chunks := parseStreamMessage(msg, false, log)
+	chunks := parseStreamMessage(msg, log)
 
 	// Should only have text chunk, no stats (0 output tokens)
 	if len(chunks) != 1 {
@@ -2999,151 +2502,6 @@ func TestTokenAccumulationAcrossAPICalls(t *testing.T) {
 		if chunk.Stats.OutputTokens != expectedCounts[i] {
 			t.Errorf("Stats chunk %d: expected %d tokens, got %d", i, expectedCounts[i], chunk.Stats.OutputTokens)
 		}
-	}
-}
-
-func TestSubagentDetection_EnterAndExit(t *testing.T) {
-	runner := New("test-subagent", "/tmp/test-subagent", "", false, nil)
-	defer runner.Stop()
-
-	// Create response channel
-	responseChan := make(chan ResponseChunk, 100)
-	runner.mu.Lock()
-	runner.responseChan.Setup(responseChan)
-	runner.streaming.Active = true
-	runner.mu.Unlock()
-
-	// Simulate a parent message (no subagent)
-	parentMsg := `{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-5-20251101","content":[{"type":"text","text":"I'll delegate to haiku."}]},"parent_tool_use_id":null}`
-	runner.handleProcessLine(parentMsg)
-
-	// Simulate entering subagent (Haiku working via Task)
-	subagentMsg := `{"type":"assistant","message":{"id":"msg_2","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","id":"tool_1","name":"Glob","input":{"pattern":"**/*.go"}}]},"parent_tool_use_id":"parent_tool_123"}`
-	runner.handleProcessLine(subagentMsg)
-
-	// Simulate exiting subagent (back to parent)
-	backToParentMsg := `{"type":"assistant","message":{"id":"msg_3","model":"claude-opus-4-5-20251101","content":[{"type":"text","text":"Done!"}]},"parent_tool_use_id":null}`
-	runner.handleProcessLine(backToParentMsg)
-
-	// Close channel and collect all chunks
-	close(responseChan)
-	var subagentChunks []ResponseChunk
-	for chunk := range responseChan {
-		if chunk.Type == ChunkTypeSubagentStatus {
-			subagentChunks = append(subagentChunks, chunk)
-		}
-	}
-
-	// Should have 2 subagent status chunks: one for enter, one for exit
-	if len(subagentChunks) != 2 {
-		t.Fatalf("Expected 2 subagent status chunks, got %d", len(subagentChunks))
-	}
-
-	// First chunk should be entering subagent (with model name)
-	if subagentChunks[0].SubagentModel == "" {
-		t.Error("First subagent chunk should have non-empty model (entering subagent)")
-	}
-	if subagentChunks[0].SubagentModel != "claude-haiku-4-5-20251001" {
-		t.Errorf("Expected haiku model, got %q", subagentChunks[0].SubagentModel)
-	}
-
-	// Second chunk should be exiting subagent (empty model)
-	if subagentChunks[1].SubagentModel != "" {
-		t.Errorf("Second subagent chunk should have empty model (exiting subagent), got %q", subagentChunks[1].SubagentModel)
-	}
-}
-
-func TestSubagentDetection_NoChunkWhenNotChanging(t *testing.T) {
-	runner := New("test-subagent-noop", "/tmp/test-subagent-noop", "", false, nil)
-	defer runner.Stop()
-
-	// Create response channel
-	responseChan := make(chan ResponseChunk, 100)
-	runner.mu.Lock()
-	runner.responseChan.Setup(responseChan)
-	runner.streaming.Active = true
-	runner.mu.Unlock()
-
-	// Simulate two consecutive parent messages (no state change)
-	parentMsg1 := `{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-5-20251101","content":[{"type":"text","text":"Hello"}]},"parent_tool_use_id":null}`
-	parentMsg2 := `{"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-5-20251101","content":[{"type":"text","text":"World"}]},"parent_tool_use_id":null}`
-	runner.handleProcessLine(parentMsg1)
-	runner.handleProcessLine(parentMsg2)
-
-	// Close channel and check for subagent chunks
-	close(responseChan)
-	var subagentChunks []ResponseChunk
-	for chunk := range responseChan {
-		if chunk.Type == ChunkTypeSubagentStatus {
-			subagentChunks = append(subagentChunks, chunk)
-		}
-	}
-
-	// Should have no subagent status chunks (no state change)
-	if len(subagentChunks) != 0 {
-		t.Errorf("Expected 0 subagent status chunks when state doesn't change, got %d", len(subagentChunks))
-	}
-}
-
-func TestSubagentDetection_UserMessagesTracked(t *testing.T) {
-	runner := New("test-subagent-user", "/tmp/test-subagent-user", "", false, nil)
-	defer runner.Stop()
-
-	// Create response channel
-	responseChan := make(chan ResponseChunk, 100)
-	runner.mu.Lock()
-	runner.responseChan.Setup(responseChan)
-	runner.streaming.Active = true
-	runner.mu.Unlock()
-
-	// Simulate entering subagent via assistant message
-	subagentMsg := `{"type":"assistant","message":{"id":"msg_1","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","id":"tool_1","name":"Glob","input":{"pattern":"**/*.go"}}]},"parent_tool_use_id":"parent_tool_123"}`
-	runner.handleProcessLine(subagentMsg)
-
-	// Simulate user message (tool result) while still in subagent
-	userMsg := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_1","content":"found files"}]},"parent_tool_use_id":"parent_tool_123"}`
-	runner.handleProcessLine(userMsg)
-
-	// Simulate exiting subagent via user message with no parent
-	exitUserMsg := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_2","content":"done"}]},"parent_tool_use_id":null}`
-	runner.handleProcessLine(exitUserMsg)
-
-	// Close channel and collect all chunks
-	close(responseChan)
-	var subagentChunks []ResponseChunk
-	for chunk := range responseChan {
-		if chunk.Type == ChunkTypeSubagentStatus {
-			subagentChunks = append(subagentChunks, chunk)
-		}
-	}
-
-	// Should have 2 subagent status chunks: enter and exit
-	if len(subagentChunks) != 2 {
-		t.Fatalf("Expected 2 subagent status chunks, got %d", len(subagentChunks))
-	}
-
-	// First chunk should be entering subagent
-	if subagentChunks[0].SubagentModel == "" {
-		t.Error("First subagent chunk should have non-empty model")
-	}
-
-	// Second chunk should be exiting subagent
-	if subagentChunks[1].SubagentModel != "" {
-		t.Error("Second subagent chunk should have empty model")
-	}
-}
-
-func TestStreamingState_SubagentModelReset(t *testing.T) {
-	state := NewStreamingState()
-
-	// Set a subagent model
-	state.CurrentSubagentModel = "claude-haiku-4-5-20251001"
-
-	// Reset should clear it
-	state.Reset()
-
-	if state.CurrentSubagentModel != "" {
-		t.Errorf("Expected empty subagent model after reset, got %q", state.CurrentSubagentModel)
 	}
 }
 

@@ -98,20 +98,15 @@ type ToolUseItemState struct {
 	ToolInput  string
 	ToolUseID  string
 	Complete   bool
-	ResultInfo *claude.ToolResultInfo // Rich details about the result (populated on completion)
 }
 
 // Copy creates a deep copy of the ToolUseItemState.
 func (t ToolUseItemState) Copy() ToolUseItemState {
-	// ResultInfo is copied by reference since it's immutable after creation
-	// and only set on completion. If this assumption changes, we'd need a
-	// deep copy method for ToolResultInfo as well.
 	return ToolUseItemState{
-		ToolName:   t.ToolName,
-		ToolInput:  t.ToolInput,
-		ToolUseID:  t.ToolUseID,
-		Complete:   t.Complete,
-		ResultInfo: t.ResultInfo,
+		ToolName:  t.ToolName,
+		ToolInput: t.ToolInput,
+		ToolUseID: t.ToolUseID,
+		Complete:  t.Complete,
 	}
 }
 
@@ -271,21 +266,18 @@ func (s *SessionState) AddToolUse(toolName, toolInput, toolUseID string) {
 
 // MarkToolUseComplete marks the tool use with the given ID as complete.
 // If the ID is empty or not found, falls back to marking the first incomplete tool use.
-// The optional resultInfo provides rich details about the tool execution result.
 // Thread-safe.
-func (s *SessionState) MarkToolUseComplete(toolUseID string, resultInfo *claude.ToolResultInfo) {
+func (s *SessionState) MarkToolUseComplete(toolUseID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ToolUseRollup == nil || len(s.ToolUseRollup.Items) == 0 {
 		return
 	}
 
-	// If we have a tool use ID, find and mark the matching item
 	if toolUseID != "" {
 		for i := range s.ToolUseRollup.Items {
 			if s.ToolUseRollup.Items[i].ToolUseID == toolUseID {
 				s.ToolUseRollup.Items[i].Complete = true
-				s.ToolUseRollup.Items[i].ResultInfo = resultInfo
 				return
 			}
 		}
@@ -295,7 +287,6 @@ func (s *SessionState) MarkToolUseComplete(toolUseID string, resultInfo *claude.
 	for i := range s.ToolUseRollup.Items {
 		if !s.ToolUseRollup.Items[i].Complete {
 			s.ToolUseRollup.Items[i].Complete = true
-			s.ToolUseRollup.Items[i].ResultInfo = resultInfo
 			return
 		}
 	}
@@ -327,14 +318,6 @@ func (s *SessionState) FlushToolUseRollup(getToolIcon func(string) string, inPro
 			line += ": " + item.ToolInput
 		}
 		line += ")"
-
-		// Add result info for completed tool uses
-		if item.Complete && item.ResultInfo != nil {
-			summary := item.ResultInfo.Summary()
-			if summary != "" {
-				line += " → " + summary
-			}
-		}
 
 		line += "\n"
 		s.StreamingContent += line

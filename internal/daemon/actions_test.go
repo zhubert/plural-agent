@@ -33,7 +33,6 @@ type trackingRunner struct {
 	containerized      bool
 	containerImage     string
 	hostToolsEnabled   bool
-	streamingChunksOff bool
 	systemPrompt       string
 }
 
@@ -51,10 +50,6 @@ func (r *trackingRunner) SetContainerized(containerized bool, image string) {
 func (r *trackingRunner) SetHostTools(hostTools bool) {
 	r.hostToolsEnabled = hostTools
 	r.MockRunner.SetHostTools(hostTools)
-}
-
-func (r *trackingRunner) SetDisableStreamingChunks(disable bool) {
-	r.streamingChunksOff = disable
 }
 
 func (r *trackingRunner) SetSystemPrompt(prompt string) {
@@ -574,27 +569,6 @@ func TestConfigureRunner_StreamingDisabled(t *testing.T) {
 	}
 
 	d.configureRunner(runner, sess, "", nil)
-
-	if !runner.streamingChunksOff {
-		t.Error("expected streaming chunks disabled for autonomous sessions")
-	}
-}
-
-func TestConfigureRunner_StreamingNotDisabled_NonAutonomous(t *testing.T) {
-	cfg := testConfig()
-	d := testDaemon(cfg)
-
-	runner := newTrackingRunner("test-session")
-	sess := &config.Session{
-		ID:         "test-session",
-		Autonomous: false,
-	}
-
-	d.configureRunner(runner, sess, "", nil)
-
-	if runner.streamingChunksOff {
-		t.Error("streaming chunks should not be disabled for non-autonomous sessions")
-	}
 }
 
 func TestConfigureRunner_SystemPrompt(t *testing.T) {
