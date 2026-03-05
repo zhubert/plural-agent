@@ -3353,13 +3353,12 @@ func TestIsErgSystemComment_AsanaMarker(t *testing.T) {
 }
 
 func TestIsErgSystemComment_AsanaHTMLMarker(t *testing.T) {
-	// Asana HTML comment marker: invisible in plain text, present in HTMLBody
+	// Asana marker in plain text body
 	c := issues.IssueComment{
-		Body:     "The plan above is ready for your review.",
-		HTMLBody: "<body>The plan above is ready for your review.</body><!-- erg:step=await_plan_feedback -->",
+		Body: "The plan above is ready for your review.\n<!-- erg:step=await_plan_feedback -->",
 	}
 	if !isErgSystemComment(c) {
-		t.Error("expected Asana HTML marker to be detected as system comment")
+		t.Error("expected Asana marker to be detected as system comment")
 	}
 }
 
@@ -3394,16 +3393,14 @@ func TestCheckPlanUserReplied_GuidanceCommentNotSelfApproved(t *testing.T) {
 
 	// Simulate the guidance comment that postWaitGuidance would post.
 	// It contains words like "approved" and "proceed" which match typical patterns.
-	// For Asana, the marker is in HTMLBody (invisible in rendered comment).
 	guidanceText := `The plan above is ready for your review. Reply with your feedback to request changes, or reply with an approval (e.g. "LGTM", "looks good", "approved") to proceed.`
 
 	provider := &mockGateProvider{
 		src: issues.SourceAsana,
 		comments: []issues.IssueComment{
 			{
-				Author:   "erg-bot",
-				Body:     guidanceText,
-				HTMLBody: "<body>" + guidanceText + "</body><!-- erg:step=await_plan_feedback -->",
+				Author:    "erg-bot",
+				Body:      guidanceText + "\n<!-- erg:step=await_plan_feedback -->",
 				CreatedAt: now.Add(time.Minute),
 			},
 		},
@@ -3444,16 +3441,14 @@ func TestCheckGateApproved_GuidanceCommentNotSelfApproved(t *testing.T) {
 	now := time.Now()
 
 	// A guidance comment for comment_match gate includes the pattern string.
-	// For Asana, the marker is in HTMLBody (invisible in rendered comment).
 	guidanceText := "Reply to this issue with a comment matching: `(?i)LGTM`"
 
 	provider := &mockGateProvider{
 		src: issues.SourceAsana,
 		comments: []issues.IssueComment{
 			{
-				Author:   "erg-bot",
-				Body:     guidanceText,
-				HTMLBody: "<body>" + guidanceText + "</body><!-- erg:step=await_gate -->",
+				Author:    "erg-bot",
+				Body:      guidanceText + "\n<!-- erg:step=await_gate -->",
 				CreatedAt: now.Add(time.Minute),
 			},
 		},

@@ -17,13 +17,8 @@ import (
 // itself (e.g. guidance, idempotency-marked actions). Such comments must be
 // excluded from human-reply checks so they never accidentally trigger approvals.
 func isErgSystemComment(c issues.IssueComment) bool {
-	// Check plain text body for legacy [erg:step=…] markers (Linear)
-	// and GitHub HTML comments (<!-- erg:step=… -->).
+	// Check plain text body for [erg:step=…] markers and <!-- erg:step=… --> markers.
 	if strings.Contains(c.Body, "[erg:step=") || strings.Contains(c.Body, "<!-- erg:step=") {
-		return true
-	}
-	// Check HTMLBody for Asana HTML comment markers that are stripped from plain text.
-	if c.HTMLBody != "" && strings.Contains(c.HTMLBody, "<!-- erg:step=") {
 		return true
 	}
 	return false

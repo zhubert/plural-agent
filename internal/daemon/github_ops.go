@@ -237,16 +237,14 @@ func ergGitHubMarker(step string) string {
 
 // ergProviderMarker returns the idempotency marker for Asana/Linear comments.
 // Uses HTML comment format (<!-- erg:step=… -->) which is hidden in rendered
-// output. For Asana, the marker is preserved in the html_text field. For
-// Linear, it is invisible in rendered markdown.
+// output for Linear (markdown). For Asana, the marker is visible in plain text.
 func ergProviderMarker(step string) string {
 	return fmt.Sprintf("<!-- erg:step=%s -->", step)
 }
 
-// containsMarker checks if a comment contains the given marker string in either
-// its plain text body or its HTML body.
+// containsMarker checks if a comment contains the given marker string.
 func containsMarker(c issues.IssueComment, marker string) bool {
-	return strings.Contains(c.Body, marker) || (c.HTMLBody != "" && strings.Contains(c.HTMLBody, marker))
+	return strings.Contains(c.Body, marker)
 }
 
 // commentOnIssue posts a comment on the GitHub issue for a work item.

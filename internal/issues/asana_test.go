@@ -13,44 +13,6 @@ import (
 	"github.com/zhubert/erg/internal/config"
 )
 
-func TestPlainTextToAsanaHTML_Basic(t *testing.T) {
-	result := plainTextToAsanaHTML("Hello world")
-	if result != "<body>Hello world</body>" {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestPlainTextToAsanaHTML_Newlines(t *testing.T) {
-	result := plainTextToAsanaHTML("Line 1\nLine 2")
-	if result != "<body>Line 1<br>Line 2</body>" {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestPlainTextToAsanaHTML_HTMLEscaping(t *testing.T) {
-	result := plainTextToAsanaHTML("a < b & c > d")
-	if result != "<body>a &lt; b &amp; c &gt; d</body>" {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestPlainTextToAsanaHTML_PreservesHTMLComments(t *testing.T) {
-	input := "Plan looks good\n<!-- erg:step=await_plan_feedback -->"
-	result := plainTextToAsanaHTML(input)
-	if !strings.Contains(result, "<!-- erg:step=await_plan_feedback -->") {
-		t.Errorf("HTML comment marker should be preserved, got: %q", result)
-	}
-	if strings.Contains(result, "&lt;!--") {
-		t.Errorf("HTML comment should not be escaped, got: %q", result)
-	}
-	// The visible text should not contain the marker
-	if strings.Contains(result, "<body>") && strings.Contains(result, "Plan looks good") {
-		// good
-	} else {
-		t.Errorf("expected body with visible text, got: %q", result)
-	}
-}
-
 func TestAsanaProvider_Name(t *testing.T) {
 	p := NewAsanaProvider(nil)
 	if p.Name() != "Asana Tasks" {
@@ -1477,8 +1439,7 @@ func TestAsanaProvider_GetIssueComments_IncludesGID(t *testing.T) {
 				{
 					"gid":        "story-gid-1",
 					"type":       "comment",
-					"text":       "First comment",
-					"html_text":  "<body>First comment</body><!-- erg:step=notify -->",
+					"text":       "First comment\n<!-- erg:step=notify -->",
 					"created_at": "2024-01-01T10:00:00Z",
 					"created_by": map[string]any{"name": "Bot"},
 				},
@@ -1509,12 +1470,8 @@ func TestAsanaProvider_GetIssueComments_IncludesGID(t *testing.T) {
 	if comments[0].ID != "story-gid-1" {
 		t.Errorf("expected ID 'story-gid-1', got %q", comments[0].ID)
 	}
-	// Marker should be in HTMLBody, not in plain text Body
-	if strings.Contains(comments[0].Body, "erg:step=") {
-		t.Errorf("marker should not be in plain text body, got %q", comments[0].Body)
-	}
-	if !strings.Contains(comments[0].HTMLBody, "<!-- erg:step=notify -->") {
-		t.Errorf("expected HTML marker in HTMLBody, got %q", comments[0].HTMLBody)
+	if !strings.Contains(comments[0].Body, "<!-- erg:step=notify -->") {
+		t.Errorf("expected marker in Body, got %q", comments[0].Body)
 	}
 	if comments[1].ID != "story-gid-2" {
 		t.Errorf("expected ID 'story-gid-2', got %q", comments[1].ID)
@@ -1547,8 +1504,8 @@ func TestAsanaProvider_UpdateComment_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(capturedBody, "html_text") {
-		t.Errorf("expected html_text in request body, got: %s", capturedBody)
+	if !strings.Contains(capturedBody, `"text"`) {
+		t.Errorf("expected text field in request body, got: %s", capturedBody)
 	}
 	if !strings.Contains(capturedBody, "Updated body") {
 		t.Errorf("expected updated body in request, got: %s", capturedBody)
