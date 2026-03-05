@@ -211,6 +211,24 @@ func WorktreesDir() (string, error) {
 	return filepath.Join(dir, "worktrees"), nil
 }
 
+// ManifestPath returns the default path for the daemon manifest config file.
+func ManifestPath() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon.yaml"), nil
+}
+
+// LaunchAgentsDir returns the path to ~/Library/LaunchAgents.
+func LaunchAgentsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Library", "LaunchAgents"), nil
+}
+
 // IsLegacyLayout returns true if using the ~/.erg/ flat layout.
 func IsLegacyLayout() bool {
 	r, err := resolve()

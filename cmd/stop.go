@@ -42,10 +42,15 @@ func runStop(cmd *cobra.Command, args []string) error {
 	repo := stopRepo
 	if repo == "" {
 		sessSvc := session.NewSessionService()
-		var err error
-		repo, err = resolveAgentRepo(context.Background(), "", sessSvc)
+		resolved, err := resolveAgentRepo(context.Background(), "", sessSvc)
 		if err != nil {
-			return err
+			// Not in a git repo and no --repo flag — try to find any running daemon
+			repo, err = findSingleRunningDaemon()
+			if err != nil {
+				return err
+			}
+		} else {
+			repo = resolved
 		}
 	}
 

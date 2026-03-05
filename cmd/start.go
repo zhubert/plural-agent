@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 var (
@@ -24,8 +26,13 @@ By default, forks into the background and detaches from the terminal.
 Use -f/--foreground to stay attached with a live status display.
 Use --config to watch multiple repos with a config file.
 
+If no --repo or --config is provided, looks for a default config at
+~/.erg/daemon.yaml and uses it automatically.
+
+For persistent service management, see 'erg services install'.
+
 Examples:
-  erg start                           # Start daemon for current repo
+  erg start                           # Start using default config or current repo
   erg start --repo owner/repo         # Start daemon for specific repo
   erg start -f --repo owner/repo      # Foreground with live status display
   erg start --once --repo owner/repo  # Run one tick, then exit
@@ -45,6 +52,16 @@ func init() {
 func runStart(cmd *cobra.Command, args []string) error {
 	if startConfigFile != "" && (startRepo != "" || startWorkflowFile != "") {
 		return fmt.Errorf("--config cannot be used with --repo or --workflow")
+	}
+
+	// Auto-discover default manifest when no flags are provided
+	if startConfigFile == "" && startRepo == "" && startWorkflowFile == "" {
+		if p, err := paths.ManifestPath(); err == nil {
+			if _, err := os.Stat(p); err == nil {
+				startConfigFile = p
+				fmt.Printf("Using default config: %s\n", p)
+			}
+		}
 	}
 
 	// Set package-level vars used by daemonize/runForeground/runDaemonWithLogger
