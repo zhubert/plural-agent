@@ -1906,6 +1906,100 @@ func TestCheckGateApproved_UnknownTrigger(t *testing.T) {
 	}
 }
 
+func TestCheckGateApproved_CommentMatch_NonCollaboratorIgnored(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Matching comment from a non-collaborator.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"outsider"},"body":"/approve please","createdAt":"2020-01-01T10:05:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+	// Collaborator check for "outsider" returns 404 (not a collaborator).
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/outsider"}, exec.MockResponse{
+		Err: fmt.Errorf("HTTP 404: Not Found"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, _, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fired {
+		t.Error("expected fired=false when matching comment is from a non-collaborator")
+	}
+}
+
+func TestCheckGateApproved_CommentMatch_CollaboratorApproves(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Matching comment from a collaborator.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"contributor"},"body":"/approve looks good","createdAt":"2020-01-01T10:05:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+	// Collaborator check for "contributor" succeeds (HTTP 204 → no error).
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/contributor"}, exec.MockResponse{
+		Stdout: []byte(``),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_approval",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"trigger": "comment_match", "comment_pattern": `^/approve`})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when matching comment is from a collaborator")
+	}
+	if data == nil || data["gate_approved"] != true {
+		t.Error("expected gate_approved=true in data")
+	}
+	if data["gate_comment_author"] != "contributor" {
+		t.Errorf("expected gate_comment_author=contributor, got %v", data["gate_comment_author"])
+	}
+}
+
 func TestCheckGateApproved_DefaultTrigger_IsLabelAdded(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
@@ -2299,6 +2393,107 @@ func TestCheckPlanUserReplied_ApprovalPatternNoMatch(t *testing.T) {
 	}
 	if data["plan_approved"] != false {
 		t.Errorf("expected plan_approved=false when comment does not match approval_pattern, got %v", data["plan_approved"])
+	}
+}
+
+func TestCheckPlanUserReplied_NonCollaboratorCannotApprovePlan(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Matching comment from a non-collaborator.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"outsider"},"body":"LGTM, ship it","createdAt":"2020-01-01T10:05:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+	// Collaborator check for "outsider" returns 404 (not a collaborator).
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/outsider"}, exec.MockResponse{
+		Err: fmt.Errorf("HTTP 404: Not Found"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"approval_pattern": "^LGTM"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Event still fires (comment was posted), but plan_approved must be false.
+	if !fired {
+		t.Error("expected fired=true since a comment was posted")
+	}
+	if data["plan_approved"] != false {
+		t.Errorf("expected plan_approved=false for non-collaborator approval attempt, got %v", data["plan_approved"])
+	}
+	if data["user_feedback_author"] != "outsider" {
+		t.Errorf("expected user_feedback_author=outsider, got %v", data["user_feedback_author"])
+	}
+}
+
+func TestCheckPlanUserReplied_CollaboratorCanApprovePlan(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Matching comment from a collaborator.
+	commentsJSON := []byte(`{"comments":[{"author":{"login":"contributor"},"body":"LGTM, proceed","createdAt":"2020-01-01T10:05:00Z"}]}`)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+	// Collaborator check for "contributor" succeeds (HTTP 204 → no error).
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/contributor"}, exec.MockResponse{
+		Stdout: []byte(``),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"approval_pattern": "^LGTM"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when collaborator posts matching comment")
+	}
+	if data["plan_approved"] != true {
+		t.Errorf("expected plan_approved=true for collaborator approval, got %v", data["plan_approved"])
+	}
+	if data["user_feedback_author"] != "contributor" {
+		t.Errorf("expected user_feedback_author=contributor, got %v", data["user_feedback_author"])
 	}
 }
 

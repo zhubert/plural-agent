@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -827,6 +828,33 @@ func TestSessionWorker_HandleCommentIssue_Success(t *testing.T) {
 	}
 	if call.Body != "Here is the plan" {
 		t.Errorf("expected body 'Here is the plan', got %q", call.Body)
+	}
+}
+
+func TestSessionWorker_HandleCommentIssue_PlanningModeAppendsPlanMarker(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+	h := newMockHost(mockExec)
+
+	sess := &config.Session{ID: "s1", RepoPath: "/repo", Branch: "feat-1"}
+	h.cfg.AddSession(*sess)
+
+	runner := claude.NewMockRunner("s1", false, nil)
+	runner.SetHostTools(true)
+	w := NewSessionWorker(h, sess, runner, "test")
+	w.ctx = context.Background()
+	w.SetPlanningMode(true)
+
+	w.handleCommentIssue(mcp.CommentIssueRequest{ID: 1, Body: "## Plan\n1. Do stuff"})
+
+	if len(h.commentOnIssueCalls) != 1 {
+		t.Fatalf("expected 1 CommentOnIssue call, got %d", len(h.commentOnIssueCalls))
+	}
+	call := h.commentOnIssueCalls[0]
+	if !strings.Contains(call.Body, PlanMarker) {
+		t.Errorf("expected plan marker in body, got %q", call.Body)
+	}
+	if !strings.Contains(call.Body, "## Plan\n1. Do stuff") {
+		t.Errorf("expected original plan content in body, got %q", call.Body)
 	}
 }
 

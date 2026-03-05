@@ -6,6 +6,7 @@ import (
 
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 )
 
 func TestTrimURL(t *testing.T) {
@@ -256,4 +257,60 @@ func TestFormatInitialMessage_BodyPlacement(t *testing.T) {
 			t.Errorf("expected %q, got %q", expected, result)
 		}
 	})
+}
+
+func TestFindPlanComment(t *testing.T) {
+	tests := []struct {
+		name     string
+		comments []issues.IssueComment
+		want     string
+	}{
+		{
+			name:     "no comments",
+			comments: nil,
+			want:     "",
+		},
+		{
+			name: "no plan marker",
+			comments: []issues.IssueComment{
+				{Body: "some random comment"},
+				{Body: "another comment"},
+			},
+			want: "",
+		},
+		{
+			name: "single plan comment",
+			comments: []issues.IssueComment{
+				{Body: "## Plan\n1. Do stuff\n<!-- erg:plan -->"},
+			},
+			want: "## Plan\n1. Do stuff",
+		},
+		{
+			name: "returns most recent plan when multiple exist",
+			comments: []issues.IssueComment{
+				{Body: "Old plan\n<!-- erg:plan -->"},
+				{Body: "user feedback"},
+				{Body: "Revised plan\n<!-- erg:plan -->"},
+			},
+			want: "Revised plan",
+		},
+		{
+			name: "ignores non-plan comments interspersed",
+			comments: []issues.IssueComment{
+				{Body: "The plan\n<!-- erg:plan -->"},
+				{Body: "LGTM"},
+				{Body: "<!-- erg:step=await_plan_feedback -->"},
+			},
+			want: "The plan",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FindPlanComment(tt.comments)
+			if got != tt.want {
+				t.Errorf("FindPlanComment() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

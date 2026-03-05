@@ -434,6 +434,18 @@ func (s *GitService) CheckIssueHasLabel(ctx context.Context, repoPath string, is
 	return false, nil
 }
 
+// CheckUserIsCollaborator returns true if the given GitHub username is a
+// collaborator (has explicit repository access) on the repo at repoPath.
+// Uses `gh api repos/:owner/:repo/collaborators/{username}` which returns
+// HTTP 204 if the user is a collaborator or HTTP 404 if not.
+// Any error (including 404) is treated as "not a collaborator".
+func (s *GitService) CheckUserIsCollaborator(ctx context.Context, repoPath, username string) (bool, error) {
+	_, err := s.executor.Output(ctx, repoPath, "gh", "api",
+		fmt.Sprintf("repos/:owner/:repo/collaborators/%s", username),
+	)
+	return err == nil, nil
+}
+
 // GetIssueComments fetches all comments on a GitHub issue using the gh CLI.
 // Uses `gh issue view --json comments` to retrieve the full comment list.
 func (s *GitService) GetIssueComments(ctx context.Context, repoPath string, issueNumber int) ([]IssueComment, error) {

@@ -8485,6 +8485,131 @@ func TestStartPlanning_UsesDefaultPromptWhenNoCustom(t *testing.T) {
 	}
 }
 
+func TestStartCoding_IncludesPlanFromIssueComments(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// BranchExists returns false — no pre-existing branch
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	// Mock gh issue view --json comments to return a plan comment with the marker
+	commentsJSON, _ := json.Marshal(struct {
+		Comments []struct {
+			Author    struct{ Login string } `json:"author"`
+			Body      string                 `json:"body"`
+			CreatedAt string                 `json:"createdAt"`
+		} `json:"comments"`
+	}{
+		Comments: []struct {
+			Author    struct{ Login string } `json:"author"`
+			Body      string                 `json:"body"`
+			CreatedAt string                 `json:"createdAt"`
+		}{
+			{Author: struct{ Login string }{"bot"}, Body: "## Plan\n1. Refactor the widget\n2. Add tests\n" + worker.PlanMarker, CreatedAt: "2026-03-05T10:00:00Z"},
+			{Author: struct{ Login string }{"zhubert"}, Body: "approved", CreatedAt: "2026-03-05T11:00:00Z"},
+		},
+	})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-plan",
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Refactor widget"},
+		StepData: map[string]any{"issue_body": "Please refactor the widget"},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(t.Context(), *item)
+	if err != nil {
+		t.Fatalf("startCoding failed: %v", err)
+	}
+
+	// Verify the worker's initial message includes the plan
+	d.mu.Lock()
+	w := d.workers["work-plan"]
+	d.mu.Unlock()
+	if w == nil {
+		t.Fatal("expected worker to be registered")
+	}
+
+	msg := w.InitialMsg()
+	if !strings.Contains(msg, "Approved implementation plan:") {
+		t.Errorf("initial message should contain plan header, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Refactor the widget") {
+		t.Errorf("initial message should contain plan content, got:\n%s", msg)
+	}
+	// The marker itself should be stripped from the plan body
+	if strings.Contains(msg, worker.PlanMarker) {
+		t.Errorf("initial message should not contain raw plan marker, got:\n%s", msg)
+	}
+}
+
+func TestStartCoding_NoPlanGracefullyDegraded(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+
+	// BranchExists returns false
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
+	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
+
+	// Mock gh issue view to fail (simulates no comments or API error)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("network error"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-no-plan",
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Fix bug"},
+		StepData: map[string]any{"issue_body": "Fix the bug"},
+	}
+	d.state.AddWorkItem(item)
+
+	// Should succeed even when comments can't be fetched
+	err := d.startCoding(t.Context(), *item)
+	if err != nil {
+		t.Fatalf("startCoding should succeed without plan, got: %v", err)
+	}
+
+	d.mu.Lock()
+	w := d.workers["work-no-plan"]
+	d.mu.Unlock()
+	if w == nil {
+		t.Fatal("expected worker to be registered")
+	}
+
+	msg := w.InitialMsg()
+	if strings.Contains(msg, "Approved implementation plan:") {
+		t.Errorf("initial message should NOT contain plan header when no plan exists, got:\n%s", msg)
+	}
+	// But should still have the issue content
+	if !strings.Contains(msg, "Fix bug") {
+		t.Errorf("initial message should contain issue title, got:\n%s", msg)
+	}
+}
+
 // --- cherryPickAction tests ---
 
 func TestCherryPickAction_Execute_WorkItemNotFound(t *testing.T) {

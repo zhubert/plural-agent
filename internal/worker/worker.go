@@ -588,7 +588,12 @@ func (w *SessionWorker) handleCommentIssue(req mcp.CommentIssueRequest) {
 	log := w.host.Logger().With("sessionID", w.sessionID)
 	log.Info("posting issue comment via MCP tool")
 
-	if err := w.host.CommentOnIssue(w.ctx, w.sessionID, req.Body); err != nil {
+	body := req.Body
+	if w.planningMode {
+		body += "\n<!-- erg:plan -->"
+	}
+
+	if err := w.host.CommentOnIssue(w.ctx, w.sessionID, body); err != nil {
 		w.runner.SendCommentIssueResponse(mcp.CommentIssueResponse{
 			ID:    req.ID,
 			Error: fmt.Sprintf("Failed to post comment: %v", err),
