@@ -553,11 +553,6 @@ func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Sessio
 	// The worker rejects create_pr and push_branch with helpful error messages.
 	runner.SetHostTools(true)
 
-	// Headless: no streaming chunks needed for autonomous sessions
-	if sess.Autonomous {
-		runner.SetDisableStreamingChunks(true)
-	}
-
 	// System prompt
 	if customPrompt != "" {
 		runner.SetSystemPrompt(customPrompt)

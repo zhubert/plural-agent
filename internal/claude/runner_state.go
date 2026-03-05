@@ -11,7 +11,7 @@ import (
 
 // MCPChannels groups all MCP communication channels for interactive prompts.
 // Each prompt type (permission, question, plan approval) has a request/response pair.
-// Request channels are populated by the MCP server, response channels by the TUI.
+// Request channels are populated by the MCP server, response channels by the worker.
 type MCPChannels struct {
 	Permission   *mcp.ChannelPair[mcp.PermissionRequest, mcp.PermissionResponse]
 	Question     *mcp.ChannelPair[mcp.QuestionRequest, mcp.QuestionResponse]
@@ -64,16 +64,10 @@ type StreamingState struct {
 	Cancel    context.CancelFunc // Cancel function for interruption
 	StartTime time.Time          // When streaming started
 	Complete  bool               // Whether result message was received
+	FirstChunk bool             // Track if this is first chunk
 
-	// Response building
-	Response         strings.Builder // Accumulates response content
-	LastWasToolUse   bool            // Track if last chunk was tool use
-	EndsWithNewline  bool            // Track if response ends with \n
-	EndsWithDoubleNL bool            // Track if response ends with \n\n
-	FirstChunk       bool            // Track if this is first chunk
-
-	// Subagent tracking
-	CurrentSubagentModel string // Model of active subagent (empty when no subagent)
+	// Response accumulates the assistant's response text for message history.
+	Response strings.Builder
 }
 
 // NewStreamingState creates a new StreamingState ready for use.
@@ -92,13 +86,9 @@ func (s *StreamingState) Reset() {
 	s.Cancel = nil
 	s.StartTime = time.Time{}
 	s.Complete = false
+	s.FirstChunk = true
 	s.Response.Reset()
 	s.Response.Grow(8192)
-	s.LastWasToolUse = false
-	s.EndsWithNewline = false
-	s.EndsWithDoubleNL = false
-	s.FirstChunk = true
-	s.CurrentSubagentModel = ""
 }
 
 // TokenTracking accumulates token usage across API calls within a request.

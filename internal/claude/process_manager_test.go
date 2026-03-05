@@ -2476,78 +2476,26 @@ func TestBuildCommandArgs_Containerized_SystemPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_DisableStreamingChunks(t *testing.T) {
-	t.Run("with streaming chunks disabled", func(t *testing.T) {
-		config := ProcessConfig{
-			SessionID:              "agent-session",
-			WorkingDir:             "/tmp",
-			SessionStarted:         false,
-			MCPConfigPath:          "/tmp/mcp.json",
-			AllowedTools:           []string{"Read"},
-			DisableStreamingChunks: true,
+func TestBuildCommandArgs_NoPartialMessages(t *testing.T) {
+	config := ProcessConfig{
+		SessionID:      "agent-session",
+		WorkingDir:     "/tmp",
+		SessionStarted: false,
+		MCPConfigPath:  "/tmp/mcp.json",
+		AllowedTools:   []string{"Read"},
+	}
+
+	args := BuildCommandArgs(config)
+
+	for _, arg := range args {
+		if arg == "--include-partial-messages" {
+			t.Error("args should never contain --include-partial-messages (removed)")
 		}
+	}
 
-		args := BuildCommandArgs(config)
-
-		// Should NOT include --include-partial-messages
-		for _, arg := range args {
-			if arg == "--include-partial-messages" {
-				t.Error("args should not contain --include-partial-messages when DisableStreamingChunks is true")
-			}
-		}
-
-		// Should still have other required flags
-		if !containsArg(args, "--output-format") {
-			t.Error("args should contain --output-format")
-		}
-		if !containsArg(args, "--input-format") {
-			t.Error("args should contain --input-format")
-		}
-	})
-
-	t.Run("with streaming chunks enabled (default)", func(t *testing.T) {
-		config := ProcessConfig{
-			SessionID:              "normal-session",
-			WorkingDir:             "/tmp",
-			SessionStarted:         false,
-			MCPConfigPath:          "/tmp/mcp.json",
-			AllowedTools:           []string{"Read"},
-			DisableStreamingChunks: false,
-		}
-
-		args := BuildCommandArgs(config)
-
-		// SHOULD include --include-partial-messages
-		if !containsArg(args, "--include-partial-messages") {
-			t.Error("args should contain --include-partial-messages when DisableStreamingChunks is false")
-		}
-	})
-
-	t.Run("resumed session with streaming chunks disabled", func(t *testing.T) {
-		config := ProcessConfig{
-			SessionID:              "resumed-agent-session",
-			WorkingDir:             "/tmp",
-			SessionStarted:         true,
-			MCPConfigPath:          "/tmp/mcp.json",
-			AllowedTools:           []string{"Read"},
-			DisableStreamingChunks: true,
-			Containerized:          false,
-		}
-
-		args := BuildCommandArgs(config)
-
-		// Should NOT include --include-partial-messages even when resuming
-		for _, arg := range args {
-			if arg == "--include-partial-messages" {
-				t.Error("resumed session should not contain --include-partial-messages when DisableStreamingChunks is true")
-			}
-		}
-
-		// Should have --resume
-		if !containsArg(args, "--resume") {
-			t.Error("args should contain --resume for resumed session")
-		}
-	})
+	if !containsArg(args, "--output-format") {
+		t.Error("args should contain --output-format")
+	}
 }
 
 func TestCredentialsFileExists_WithFile(t *testing.T) {

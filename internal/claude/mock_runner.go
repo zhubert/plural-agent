@@ -377,12 +377,6 @@ func (m *MockRunner) SetOnContainerReady(callback func()) {
 	// No-op for mock
 }
 
-// SetDisableStreamingChunks implements RunnerConfig.
-// In mock, this is a no-op since we don't use real streaming.
-func (m *MockRunner) SetDisableStreamingChunks(disable bool) {
-	// No-op for mock
-}
-
 // SetSystemPrompt implements RunnerConfig.
 func (m *MockRunner) SetSystemPrompt(prompt string) {
 	m.mu.Lock()

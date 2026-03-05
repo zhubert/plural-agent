@@ -32,7 +32,6 @@ func TestFormatToolIcon_KnownTools(t *testing.T) {
 		{"Task", "Delegating"},
 		{"WebFetch", "Fetching"},
 		{"WebSearch", "Searching"},
-		{"TodoWrite", "Updating todos"},
 	}
 	for _, c := range cases {
 		got := claude.FormatToolIcon(c.tool)

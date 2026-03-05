@@ -71,7 +71,6 @@ type ProcessConfig struct {
 	Containerized           bool          // When true, wraps Claude CLI in a container
 	ContainerImage          string        // Container image name (e.g., "ghcr.io/zhubert/erg")
 	ContainerMCPPort        int           // Port the MCP subprocess listens on inside the container (published via -p 0:port)
-	DisableStreamingChunks  bool          // When true, omits --include-partial-messages for less verbose output (useful for agent mode)
 	SystemPrompt            string        // When set, passed to Claude CLI via --append-system-prompt
 	ContainerStartupTimeout time.Duration // Override container startup watchdog timeout (0 = use default)
 }
@@ -222,10 +221,6 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			"--verbose",
 			"--resume", config.SessionID,
 		}
-		// Add streaming chunks flag unless disabled (e.g., for agent mode)
-		if !config.DisableStreamingChunks {
-			args = append(args, "--include-partial-messages")
-		}
 	} else if config.ForkFromSessionID != "" && !config.Containerized {
 		// Forked session - resume parent and fork to inherit conversation history
 		// We must pass --session-id to ensure Claude uses our UUID for the forked session,
@@ -241,10 +236,6 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			"--fork-session",
 			"--session-id", config.SessionID,
 		}
-		// Add streaming chunks flag unless disabled (e.g., for agent mode)
-		if !config.DisableStreamingChunks {
-			args = append(args, "--include-partial-messages")
-		}
 	} else {
 		// New session
 		args = []string{
@@ -253,10 +244,6 @@ func BuildCommandArgs(config ProcessConfig) []string {
 			"--input-format", "stream-json",
 			"--verbose",
 			"--session-id", config.SessionID,
-		}
-		// Add streaming chunks flag unless disabled (e.g., for agent mode)
-		if !config.DisableStreamingChunks {
-			args = append(args, "--include-partial-messages")
 		}
 	}
 
