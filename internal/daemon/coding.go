@@ -7,6 +7,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,11 +16,46 @@ import (
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/paths"
 	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/worker"
 	"github.com/zhubert/erg/internal/workflow"
 )
+
+// fetchIssueComments retrieves comments for a work item's issue from the appropriate provider.
+func (d *Daemon) fetchIssueComments(ctx context.Context, repoPath string, item daemonstate.WorkItem) ([]issues.IssueComment, error) {
+	source := item.IssueRef.Source
+
+	if source == "github" {
+		issueNumber, err := strconv.Atoi(item.IssueRef.ID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid github issue number %q: %w", item.IssueRef.ID, err)
+		}
+		gitComments, err := d.gitService.GetIssueComments(ctx, repoPath, issueNumber)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]issues.IssueComment, len(gitComments))
+		for i, gc := range gitComments {
+			result[i] = issues.IssueComment{Author: gc.Author, Body: gc.Body, CreatedAt: gc.CreatedAt}
+		}
+		return result, nil
+	}
+
+	if d.issueRegistry == nil {
+		return nil, fmt.Errorf("no issue registry configured for source %q", source)
+	}
+	p := d.issueRegistry.GetProvider(issues.Source(source))
+	if p == nil {
+		return nil, fmt.Errorf("no provider found for source %q", source)
+	}
+	gc, ok := p.(issues.ProviderGateChecker)
+	if !ok {
+		return nil, fmt.Errorf("provider for source %q does not support fetching comments", source)
+	}
+	return gc.GetIssueComments(ctx, repoPath, item.IssueRef.ID)
+}
 
 // startPlanning creates a read-only planning session and starts a Claude worker to analyze
 // the issue and codebase, then post a structured implementation plan as an issue comment.
@@ -251,6 +287,17 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 	// Build initial message using provider-aware formatting
 	issueBody, _ := item.StepData["issue_body"].(string)
 	initialMsg := worker.FormatInitialMessage(item.IssueRef, issueBody)
+
+	// If a planning phase produced an approved plan, fetch it from the issue
+	// comments and include it so the coding session knows what to implement.
+	planCtx, planCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+	comments, planErr := d.fetchIssueComments(planCtx, repoPath, item)
+	planCancel()
+	if planErr != nil {
+		log.Debug("could not fetch issue comments for plan context", "error", planErr)
+	} else if plan := worker.FindPlanComment(comments); plan != "" {
+		initialMsg += "\n\n---\nApproved implementation plan:\n" + plan
+	}
 
 	// Resolve coding system prompt from workflow config
 	systemPrompt := params.String("system_prompt", "")

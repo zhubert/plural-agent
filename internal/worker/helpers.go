@@ -62,6 +62,24 @@ func FilterTranscriptComments(comments []git.PRReviewComment) []git.PRReviewComm
 	return filtered
 }
 
+// PlanMarker is the HTML comment marker appended to plan comments posted during
+// planning sessions. It allows the coding session to identify and include the
+// approved plan in its initial context.
+const PlanMarker = "<!-- erg:plan -->"
+
+// FindPlanComment returns the body of the most recent plan comment (identified
+// by PlanMarker) from a slice of issue comments. Returns "" if no plan is found.
+// The marker is stripped from the returned body.
+func FindPlanComment(comments []issues.IssueComment) string {
+	// Walk backwards to find the most recent plan.
+	for i := len(comments) - 1; i >= 0; i-- {
+		if strings.Contains(comments[i].Body, PlanMarker) {
+			return strings.TrimSpace(strings.ReplaceAll(comments[i].Body, PlanMarker, ""))
+		}
+	}
+	return ""
+}
+
 // FormatInitialMessage formats the initial message for a coding session based on the issue provider.
 // The optional body parameter contains the issue description/body text.
 func FormatInitialMessage(ref config.IssueRef, body string) string {
