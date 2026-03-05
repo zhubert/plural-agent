@@ -1105,3 +1105,65 @@ func TestConfigureRunnerDefaults_NonDaemonManaged_GetsHostTools(t *testing.T) {
 		t.Error("non-daemon-managed autonomous session SHOULD have host tools enabled")
 	}
 }
+
+func TestConfigureRunnerDefaults_ContainerSystemPrompt(t *testing.T) {
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:            "container-session",
+				RepoPath:      "/test/repo",
+				WorkTree:      "/test/worktree",
+				Branch:        "erg-test",
+				Name:          "repo/session1",
+				Containerized: true,
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: make(map[string][]string),
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	runner := claude.NewMockRunner("container-session", false, nil)
+	sess := sm.GetSession("container-session")
+	sm.ConfigureRunnerDefaults(runner, sess)
+
+	prompt := runner.GetSystemPrompt()
+	if prompt == "" {
+		t.Error("expected system prompt to be set for containerized session")
+	}
+	if !strings.Contains(prompt, "container") {
+		t.Error("expected system prompt to mention container")
+	}
+	if !strings.Contains(prompt, "Do NOT run the full test suite") {
+		t.Error("expected system prompt to warn against running full test suite")
+	}
+}
+
+func TestConfigureRunnerDefaults_NonContainerNoSystemPrompt(t *testing.T) {
+	cfg := &config.Config{
+		Repos: []string{"/test/repo"},
+		Sessions: []config.Session{
+			{
+				ID:            "normal-session",
+				RepoPath:      "/test/repo",
+				WorkTree:      "/test/worktree",
+				Branch:        "erg-test",
+				Name:          "repo/session1",
+				Containerized: false,
+			},
+		},
+		AllowedTools:     []string{},
+		RepoAllowedTools: make(map[string][]string),
+	}
+	sm := NewSessionManager(cfg, git.NewGitService())
+
+	runner := claude.NewMockRunner("normal-session", false, nil)
+	sess := sm.GetSession("normal-session")
+	sm.ConfigureRunnerDefaults(runner, sess)
+
+	prompt := runner.GetSystemPrompt()
+	if prompt != "" {
+		t.Errorf("expected no system prompt for non-containerized session, got %q", prompt)
+	}
+}

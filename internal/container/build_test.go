@@ -34,8 +34,8 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 	if !strings.Contains(df, expected) {
 		t.Errorf("expected %s in Dockerfile", expected)
 	}
-	if !strings.Contains(df, "ruby-install --system ruby 3.3") {
-		t.Error("expected Ruby 3.3 install in Dockerfile")
+	if !strings.Contains(df, "mise install ruby@3.3") {
+		t.Error("expected mise install ruby 3.3 in Dockerfile")
 	}
 	if !strings.Contains(df, "node:20-alpine") {
 		t.Error("expected Node 20 alpine base image")
@@ -117,11 +117,11 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 	df := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
 	}, "0.2.11", "")
-	if !strings.Contains(df, "pyenv install 3.11") {
-		t.Error("expected pyenv install 3.11 in Dockerfile")
+	if !strings.Contains(df, "mise install python@3.11") {
+		t.Error("expected mise install python@3.11 in Dockerfile")
 	}
-	if !strings.Contains(df, "pyenv global 3.11") {
-		t.Error("expected pyenv global 3.11 in Dockerfile")
+	if !strings.Contains(df, "mise use -g python@3.11") {
+		t.Error("expected mise use -g python@3.11 in Dockerfile")
 	}
 }
 
@@ -551,5 +551,65 @@ func TestEnsureImage_ReleaseBuildSkipsCrossCompile(t *testing.T) {
 	_, _, err := EnsureImage(context.Background(), nil, "0.2.11", logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMiseInstallBlock_RubyAndPython(t *testing.T) {
+	block := miseInstallBlock([]DetectedLang{
+		{Lang: LangRuby, Version: "3.3"},
+		{Lang: LangPython, Version: "3.12"},
+	})
+	if !strings.Contains(block, "mise install ruby@3.3") {
+		t.Error("expected mise install ruby@3.3")
+	}
+	if !strings.Contains(block, "mise use -g ruby@3.3") {
+		t.Error("expected mise use -g ruby@3.3")
+	}
+	if !strings.Contains(block, "mise install python@3.12") {
+		t.Error("expected mise install python@3.12")
+	}
+	if !strings.Contains(block, "mise use -g python@3.12") {
+		t.Error("expected mise use -g python@3.12")
+	}
+	if !strings.Contains(block, "mise.jdx.dev/install.sh") {
+		t.Error("expected mise installer URL")
+	}
+}
+
+func TestMiseInstallBlock_NoMiseLanguages(t *testing.T) {
+	block := miseInstallBlock([]DetectedLang{
+		{Lang: LangGo, Version: "1.23"},
+		{Lang: LangNode, Version: "20"},
+	})
+	if block != "" {
+		t.Errorf("expected empty block for non-mise languages, got: %s", block)
+	}
+}
+
+func TestMiseInstallBlock_DefaultVersion(t *testing.T) {
+	block := miseInstallBlock([]DetectedLang{
+		{Lang: LangRuby, Version: ""},
+	})
+	if !strings.Contains(block, "mise install ruby@3.3") {
+		t.Errorf("expected default Ruby version 3.3, got: %s", block)
+	}
+}
+
+func TestMiseInstallBlock_Empty(t *testing.T) {
+	block := miseInstallBlock(nil)
+	if block != "" {
+		t.Errorf("expected empty block for nil langs, got: %s", block)
+	}
+}
+
+func TestGenerateDockerfile_MiseShimsInPath(t *testing.T) {
+	df := GenerateDockerfile([]DetectedLang{
+		{Lang: LangRuby, Version: "3.3"},
+	}, "0.2.11", "")
+	if !strings.Contains(df, "/root/.local/share/mise/shims") {
+		t.Error("expected mise shims in PATH")
+	}
+	if !strings.Contains(df, "/root/.local/bin") {
+		t.Error("expected mise bin dir in PATH")
 	}
 }

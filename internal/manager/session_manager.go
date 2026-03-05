@@ -22,6 +22,11 @@ import (
 // Compile-time interface satisfaction check.
 var _ SessionManagerConfig = (*config.Config)(nil)
 
+// containerSystemPrompt is prepended to Claude's system prompt when running
+// inside a container. It tells Claude not to run the test suite directly
+// because containers lack the full CI environment (databases, services, etc.).
+const containerSystemPrompt = `You are running inside a container. Do NOT run the full test suite (e.g. "go test ./...", "pytest", "rspec", "npm test") because this container does not have the full CI environment (databases, queues, external services). You may run individual focused tests for files you changed.`
+
 // diffStats holds file change statistics for the header display
 type diffStats struct {
 	FilesChanged int
@@ -378,6 +383,7 @@ func (sm *SessionManager) ConfigureRunnerDefaults(runner claude.RunnerConfig, se
 	// Configure container mode if enabled for this session
 	if sess.Containerized {
 		runner.SetContainerized(true, sm.config.GetContainerImage())
+		runner.SetSystemPrompt(containerSystemPrompt)
 		// Set callback to clear container init state when container is ready
 		sessionID := sess.ID
 		runner.SetOnContainerReady(func() {

@@ -53,7 +53,8 @@ type MockRunner struct {
 	// Simulated streaming content for GetMessagesWithStreaming
 	streamingContent string
 
-	stopped bool
+	stopped      bool
+	systemPrompt string
 }
 
 // NewMockRunner creates a mock runner for testing.
@@ -384,7 +385,16 @@ func (m *MockRunner) SetDisableStreamingChunks(disable bool) {
 
 // SetSystemPrompt implements RunnerConfig.
 func (m *MockRunner) SetSystemPrompt(prompt string) {
-	// No-op for mock
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systemPrompt = prompt
+}
+
+// GetSystemPrompt returns the current system prompt (for test assertions).
+func (m *MockRunner) GetSystemPrompt() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.systemPrompt
 }
 
 // PermissionRequestChan implements RunnerSession.

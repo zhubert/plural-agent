@@ -77,6 +77,11 @@ func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) str
 		}
 	}
 
+	// Install Ruby/Python via mise (if detected)
+	if block := miseInstallBlock(langs); block != "" {
+		b.WriteString(block)
+	}
+
 	// Install the erg binary.
 	if devBinaryHash != "" {
 		// Dev mode: COPY the cross-compiled binary from the build context.
@@ -122,25 +127,11 @@ func languageInstallBlock(l DetectedLang) string {
 			"ENV PATH=\"/usr/local/go/bin:/root/go/bin:${PATH}\"\n",
 			v, goArch())
 	case LangRuby:
-		return fmt.Sprintf(""+
-			"RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev linux-headers \\\n"+
-			"    && curl -fsSL https://github.com/postmodern/ruby-install/releases/download/v0.9.3/ruby-install-0.9.3.tar.gz | tar -xz \\\n"+
-			"    && cd ruby-install-0.9.3 && make install && cd .. && rm -rf ruby-install-0.9.3 \\\n"+
-			"    && ruby-install --system ruby %s\n",
-			v)
+		// Build dependencies only — mise handles the actual Ruby install.
+		return "RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev linux-headers\n"
 	case LangPython:
-		// Use pyenv to install the specific Python version requested.
-		// Alpine only ships one system python3 with no version pinning support.
-		return fmt.Sprintf(""+
-			"RUN apk add --no-cache libffi-dev openssl-dev bzip2-dev xz-dev readline-dev sqlite-dev \\\n"+
-			"    && curl -fsSL https://pyenv.run | bash \\\n"+
-			"    && export PYENV_ROOT=\"/root/.pyenv\" \\\n"+
-			"    && export PATH=\"$PYENV_ROOT/bin:$PATH\" \\\n"+
-			"    && pyenv install %s \\\n"+
-			"    && pyenv global %s\n"+
-			"ENV PYENV_ROOT=\"/root/.pyenv\"\n"+
-			"ENV PATH=\"/root/.pyenv/shims:/root/.pyenv/bin:${PATH}\"\n",
-			v, v)
+		// Build dependencies only — mise handles the actual Python install.
+		return "RUN apk add --no-cache libffi-dev openssl-dev bzip2-dev xz-dev readline-dev sqlite-dev\n"
 	case LangRust:
 		return fmt.Sprintf(""+
 			"RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain %s\n"+
@@ -163,6 +154,47 @@ func languageInstallBlock(l DetectedLang) string {
 	default:
 		return ""
 	}
+}
+
+// miseInstallBlock generates Dockerfile instructions to install Ruby and/or Python
+// via mise (https://mise.jdx.dev). Returns empty string if no mise-managed languages
+// are present. Mise provides reproducible, version-pinned installs without the
+// complexity of ruby-install/pyenv.
+func miseInstallBlock(langs []DetectedLang) string {
+	type miseEntry struct {
+		tool    string
+		version string
+	}
+	var entries []miseEntry
+	for _, l := range langs {
+		v := l.Version
+		if v == "" {
+			v = defaultVersions[l.Lang]
+		}
+		switch l.Lang {
+		case LangRuby:
+			entries = append(entries, miseEntry{tool: "ruby", version: v})
+		case LangPython:
+			entries = append(entries, miseEntry{tool: "python", version: v})
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("RUN curl -fsSL https://mise.jdx.dev/install.sh | sh \\\n")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "    && /root/.local/bin/mise install %s@%s -y \\\n", e.tool, e.version)
+		fmt.Fprintf(&b, "    && /root/.local/bin/mise use -g %s@%s \\\n", e.tool, e.version)
+	}
+	// Trim trailing " \\\n" and add newline
+	s := b.String()
+	s = strings.TrimSuffix(s, " \\\n") + "\n"
+
+	// Add mise shims to PATH so Ruby/Python are available without eval
+	s += "ENV PATH=\"/root/.local/share/mise/shims:/root/.local/bin:${PATH}\"\n"
+	return s
 }
 
 // ImageTag returns a deterministic image tag based on the Dockerfile content.
