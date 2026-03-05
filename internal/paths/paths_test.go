@@ -295,6 +295,48 @@ func TestResetClearsCache(t *testing.T) {
 	}
 }
 
+func TestManifestPath(t *testing.T) {
+	home := setupTestHome(t)
+	legacyDir := filepath.Join(home, ".erg")
+	os.MkdirAll(legacyDir, 0o755)
+	Reset()
+
+	p, err := ManifestPath()
+	if err != nil {
+		t.Fatalf("ManifestPath: %v", err)
+	}
+	if want := filepath.Join(legacyDir, "daemon.yaml"); p != want {
+		t.Errorf("ManifestPath = %q, want %q", p, want)
+	}
+}
+
+func TestManifestPath_XDG(t *testing.T) {
+	home := setupTestHome(t)
+	xdgConfig := filepath.Join(home, ".config")
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+	Reset()
+
+	p, err := ManifestPath()
+	if err != nil {
+		t.Fatalf("ManifestPath: %v", err)
+	}
+	if want := filepath.Join(xdgConfig, "erg", "daemon.yaml"); p != want {
+		t.Errorf("ManifestPath = %q, want %q", p, want)
+	}
+}
+
+func TestLaunchAgentsDir(t *testing.T) {
+	home := setupTestHome(t)
+
+	dir, err := LaunchAgentsDir()
+	if err != nil {
+		t.Fatalf("LaunchAgentsDir: %v", err)
+	}
+	if want := filepath.Join(home, "Library", "LaunchAgents"); dir != want {
+		t.Errorf("LaunchAgentsDir = %q, want %q", dir, want)
+	}
+}
+
 func TestLegacyFileNotDir(t *testing.T) {
 	home := setupTestHome(t)
 	// Create ~/.erg as a file, not a directory — should NOT be treated as legacy

@@ -44,7 +44,7 @@ tail -f ~/.erg/logs/stream-*.log    # Raw Claude stream messages (per-session)
 
 ```
 main.go              Entry point, calls cmd.Execute()
-cmd/                  CLI commands (Cobra): configure, start, stop, status, clean, mcp-server
+cmd/                  CLI commands (Cobra): configure, start, stop, status, clean, services, mcp-server
 internal/
   paths/              Path resolution, XDG support (leaf)
   exec/               Command execution + MockExecutor (leaf)
@@ -61,6 +61,7 @@ internal/
   agentconfig/        Config interface (leaf, no internal deps)
   container/          Container lifecycle and Docker management
   daemonstate/        Daemon state persistence and file-based locking (leaf)
+  launchd/            macOS LaunchAgent plist management for services mode (leaf)
   manifest/           Multi-repo manifest config: Manifest, RepoEntry, LoadFile (leaf)
   testutil/           Shared test helpers: DiscardLogger, TestConfig (leaf)
   worker/             SessionWorker — manages a single session's lifecycle
@@ -70,7 +71,7 @@ internal/
 
 Import hierarchy (no cycles):
 ```
-cmd       → daemon, agentconfig, workflow, manifest
+cmd       → daemon, agentconfig, workflow, manifest, launchd
 daemon    → worker, daemonstate, agentconfig, workflow, manager, session, config, ...
 worker    → agentconfig, claude, manager, session, config, git, ...
 workflow  → (leaf)

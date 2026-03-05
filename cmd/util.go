@@ -3,11 +3,17 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // lookPathFunc is the function used to look up binaries on PATH.
@@ -47,6 +53,86 @@ func runtimeStartHint() string {
 		return "\n\nStart with: colima start"
 	}
 	return "\n\nInstall a container runtime:\n  Docker Desktop: https://docs.docker.com/get-docker/\n  Colima:          https://github.com/abiosoft/colima"
+}
+
+// findSingleRunningDaemon scans lock files to find a running daemon when
+// no --repo flag was provided and we're not inside a git repo.
+// Returns the repo/daemon key if exactly one is running, or an error.
+func findSingleRunningDaemon() (string, error) {
+	locks, err := daemonstate.FindLocks()
+	if err != nil || len(locks) == 0 {
+		return "", fmt.Errorf("no running daemon found\n\nStart one with 'erg start' or specify --repo")
+	}
+
+	var running []string
+	for _, lockPath := range locks {
+		data, err := readLockFileKey(lockPath)
+		if err != nil {
+			continue
+		}
+		if _, alive := daemonstate.ReadLockStatus(data); alive {
+			running = append(running, data)
+		}
+	}
+
+	switch len(running) {
+	case 0:
+		return "", fmt.Errorf("no running daemon found\n\nStart one with 'erg start' or specify --repo")
+	case 1:
+		return running[0], nil
+	default:
+		return "", fmt.Errorf("multiple daemons running — specify --repo:\n  %s", strings.Join(running, "\n  "))
+	}
+}
+
+// readLockFileKey reads the lock file and returns the repo key it corresponds to.
+// Lock files don't store the repo key directly, so we use state files to reverse-map.
+// For now, we scan state files to find which repo key each lock file corresponds to.
+var readLockFileKey = readLockFileKeyDefault
+
+func readLockFileKeyDefault(lockPath string) (string, error) {
+	// Lock files are named daemon-<hash>.lock. State files are daemon-state-<hash>.json.
+	// Extract the hash from the lock file name and find the matching state file.
+	// The state file contains the repo_path.
+	base := strings.TrimSuffix(filepath.Base(lockPath), ".lock")
+	hash := strings.TrimPrefix(base, "daemon-")
+	if hash == "" {
+		return "", fmt.Errorf("unexpected lock file name: %s", lockPath)
+	}
+
+	// Look for the corresponding state file
+	dir := filepath.Dir(lockPath)
+	stateDir, err := paths.DataDir()
+	if err != nil {
+		stateDir = dir
+	}
+
+	statePath := filepath.Join(stateDir, fmt.Sprintf("daemon-state-%s.json", hash))
+	state, err := loadStateRepoPath(statePath)
+	if err != nil {
+		// If no state file, the hash itself is the best we have
+		return hash, nil
+	}
+	return state, nil
+}
+
+// loadStateRepoPath reads just the repo_path from a daemon state file.
+func loadStateRepoPath(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	// Quick extract of repo_path without full JSON unmarshal
+	var partial struct {
+		RepoPath string `json:"repo_path"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		return "", err
+	}
+	if partial.RepoPath == "" {
+		return "", fmt.Errorf("no repo_path in state file")
+	}
+	return partial.RepoPath, nil
 }
 
 // confirm prompts the user for y/n confirmation
