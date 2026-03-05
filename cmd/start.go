@@ -22,14 +22,14 @@ var startCmd = &cobra.Command{
 
 By default, forks into the background and detaches from the terminal.
 Use -f/--foreground to stay attached with a live status display.
-Use --config to watch multiple repos with a manifest file.
+Use --config to watch multiple repos with a config file.
 
 Examples:
   erg start                           # Start daemon for current repo
   erg start --repo owner/repo         # Start daemon for specific repo
   erg start -f --repo owner/repo      # Foreground with live status display
   erg start --once --repo owner/repo  # Run one tick, then exit
-  erg start --config manifest.yaml    # Watch multiple repos`,
+  erg start --config config.yaml       # Watch multiple repos`,
 	RunE: runStart,
 }
 
@@ -38,7 +38,7 @@ func init() {
 	startCmd.Flags().BoolVarP(&startForeground, "foreground", "f", false, "Stay in foreground with live status display")
 	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	startCmd.Flags().StringVar(&startWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
-	startCmd.Flags().StringVar(&startConfigFile, "config", "", "Path to manifest file for multi-repo mode")
+	startCmd.Flags().StringVar(&startConfigFile, "config", "", "Path to config file for multi-repo mode")
 	rootCmd.AddCommand(startCmd)
 }
 

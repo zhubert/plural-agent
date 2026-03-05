@@ -32,7 +32,7 @@ var (
 	agentForeground   bool
 	agentDaemonMode   bool   // hidden --_daemon flag for re-exec child
 	agentWorkflowFile string // optional explicit workflow config file path
-	agentConfigFile   string // optional manifest file for multi-repo mode
+	agentConfigFile   string // optional config file for multi-repo mode
 )
 
 // osExecutable is the function used to resolve the current binary path.
@@ -45,7 +45,7 @@ func init() {
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
 	rootCmd.Flags().StringVar(&agentWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
-	rootCmd.Flags().StringVar(&agentConfigFile, "config", "", "Path to manifest file for multi-repo mode")
+	rootCmd.Flags().StringVar(&agentConfigFile, "config", "", "Path to config file for multi-repo mode")
 	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
 	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
 	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
@@ -502,7 +502,7 @@ func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	return runSingleRepoDaemon(ctx, daemonLogger, preacquiredLock...)
 }
 
-// runMultiRepoDaemon starts a daemon that watches multiple repos defined in a manifest file.
+// runMultiRepoDaemon starts a daemon that watches multiple repos defined in a config file.
 func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacquiredLock ...*daemonstate.DaemonLock) error {
 	m, err := manifest.LoadFile(agentConfigFile)
 	if err != nil {

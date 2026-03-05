@@ -273,7 +273,7 @@ func TestBuildDaemonArgs_NoWorkflowFile(t *testing.T) {
 }
 
 func TestBuildDaemonArgs_WithConfigFile(t *testing.T) {
-	args := buildDaemonArgs("", false, "", "/path/to/manifest.yaml")
+	args := buildDaemonArgs("", false, "", "/path/to/config.yaml")
 	if slices.Contains(args, "--repo") {
 		t.Errorf("expected no '--repo' when config file is set: %v", args)
 	}
@@ -284,8 +284,8 @@ func TestBuildDaemonArgs_WithConfigFile(t *testing.T) {
 	if idx < 0 || idx+1 >= len(args) {
 		t.Fatalf("--config flag has no value in args: %v", args)
 	}
-	if args[idx+1] != "/path/to/manifest.yaml" {
-		t.Errorf("expected '/path/to/manifest.yaml', got %q", args[idx+1])
+	if args[idx+1] != "/path/to/config.yaml" {
+		t.Errorf("expected '/path/to/config.yaml', got %q", args[idx+1])
 	}
 }
 

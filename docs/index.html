@@ -1840,10 +1840,10 @@
               <td>Start in foreground with live status display</td>
             </tr>
             <tr>
-              <td><code>erg start --config manifest.yaml</code></td>
+              <td><code>erg start --config config.yaml</code></td>
               <td>
                 Start daemon watching multiple repos defined in a
-                <a href="#multi-repo">manifest file</a>
+                <a href="#multi-repo">config file</a>
               </td>
             </tr>
             <tr>
@@ -1890,16 +1890,16 @@
           from any repo.
         </p>
 
-        <h3>Manifest file</h3>
+        <h3>Config file</h3>
         <p>
-          Create a YAML manifest that lists the repos and an optional global
+          Create a YAML config file that lists the repos and an optional global
           <code>max_concurrent</code> limit. Each repo can specify a
           <code>workflow</code> path; if omitted the daemon looks for the
           default <code>&lt;repo&gt;/.erg/workflow.yaml</code>.
         </p>
         <div class="code-block">
           <div class="code-header">
-            <span class="code-filename">manifest.yaml</span>
+            <span class="code-filename">config.yaml</span>
           </div>
           <pre><span class="ck">max_concurrent:</span> <span class="cv">5</span>          <span class="cc"># global slot pool shared across all repos</span>
 
@@ -1912,16 +1912,16 @@
 
         <h3>Starting the daemon</h3>
         <p>
-          Pass the manifest to <code>erg start</code> with the
+          Pass the config file to <code>erg start</code> with the
           <code>--config</code> flag. The flag is mutually exclusive with
           <code>--repo</code> and <code>--workflow</code>.
         </p>
         <div class="install-block">
           <span class="prompt-char">$</span>
-          <code>erg start --config manifest.yaml</code>
+          <code>erg start --config config.yaml</code>
           <button
             class="copy-btn"
-            onclick="copyCmd(this, 'erg start --config manifest.yaml')"
+            onclick="copyCmd(this, 'erg start --config config.yaml')"
           >
             copy
           </button>
@@ -1931,10 +1931,10 @@
         </p>
         <div class="install-block">
           <span class="prompt-char">$</span>
-          <code>erg start -f --config manifest.yaml</code>
+          <code>erg start -f --config config.yaml</code>
           <button
             class="copy-btn"
-            onclick="copyCmd(this, 'erg start -f --config manifest.yaml')"
+            onclick="copyCmd(this, 'erg start -f --config config.yaml')"
           >
             copy
           </button>
@@ -1942,19 +1942,19 @@
 
         <h3>How concurrency works</h3>
         <p>
-          The <code>max_concurrent</code> in the manifest sets the global
+          The <code>max_concurrent</code> in the config file sets the global
           number of slots. A slot is a slot regardless of which repo the work
           came from &mdash; if three of five slots are running backend tasks,
           the remaining two can pick up frontend issues.
         </p>
         <p>
-          If the manifest omits <code>max_concurrent</code>, the default
+          If the config file omits <code>max_concurrent</code>, the default
           (<code>3</code>) is used. Per-repo
           <code>settings.max_concurrent</code> in individual workflow files is
-          ignored in multi-repo mode; the manifest value always wins.
+          ignored in multi-repo mode; the config file value always wins.
         </p>
 
-        <h3>Manifest reference</h3>
+        <h3>Config reference</h3>
         <table class="cli-table">
           <thead>
             <tr>
