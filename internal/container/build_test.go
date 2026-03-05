@@ -309,6 +309,7 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 	defer func() { dockerCommandFunc = orig }()
 
 	buildCalled := false
+	var buildContextArg string
 	dockerCommandFunc = func(_ context.Context, stdin string, args ...string) ([]byte, error) {
 		if args[0] == "image" && args[1] == "inspect" {
 			return nil, fmt.Errorf("not found") // Not cached
@@ -321,6 +322,7 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 			if args[1] != "-t" {
 				t.Error("expected -t flag")
 			}
+			buildContextArg = args[len(args)-1]
 			return []byte("built"), nil
 		}
 		return nil, fmt.Errorf("unexpected call: %v", args)
@@ -339,6 +341,10 @@ func TestEnsureImage_BuildsWhenNotCached(t *testing.T) {
 	}
 	if !strings.HasPrefix(tag, "erg:") {
 		t.Errorf("expected valid tag, got %q", tag)
+	}
+	// Non-dev builds should use an empty temp dir, not "." as build context
+	if buildContextArg == "." {
+		t.Error("expected build context to be a temp dir, not '.' (avoids scanning large/inaccessible directories)")
 	}
 }
 

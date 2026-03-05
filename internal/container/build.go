@@ -325,13 +325,20 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 	}
 	logger.Info("building container image", "image", tag, "languages", strings.Join(langNames, ", "))
 
-	var err error
-	if buildContextDir != "" {
-		// Dev build: use temp dir with the cross-compiled binary as build context
-		_, err = dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", buildContextDir)
-	} else {
-		_, err = dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", ".")
+	// Ensure we have a build context directory. Dev builds already have one
+	// (with the cross-compiled binary). Non-dev builds don't COPY anything,
+	// so use an empty temp dir to avoid scanning the (potentially large/
+	// inaccessible) working directory.
+	if buildContextDir == "" {
+		emptyDir, mkErr := os.MkdirTemp("", "erg-build-ctx-*")
+		if mkErr != nil {
+			return "", false, fmt.Errorf("failed to create build context dir: %w", mkErr)
+		}
+		defer os.RemoveAll(emptyDir)
+		buildContextDir = emptyDir
 	}
+
+	_, err := dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", buildContextDir)
 	if err != nil {
 		return "", false, fmt.Errorf("docker build failed: %w", err)
 	}
