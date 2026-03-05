@@ -167,6 +167,43 @@ func TestPollForNewIssues_StoresBodyInStepData(t *testing.T) {
 	}
 }
 
+func TestPollForNewIssues_StoresRepoPathInStepData(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	type ghIssue struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		URL    string `json:"url"`
+	}
+	issuesJSON, _ := json.Marshal([]ghIssue{
+		{Number: 7, Title: "Test issue", URL: "https://github.com/owner/repo/issues/7"},
+	})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: issuesJSON,
+	})
+	mockExec.AddPrefixMatch("git", []string{"remote", "get-url"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "owner/repo"
+	d.maxConcurrent = 10
+
+	d.pollForNewIssues(context.Background())
+
+	item, ok := d.state.GetWorkItem("/test/repo-7")
+	if !ok {
+		t.Fatal("expected work item for issue 7")
+	}
+	rp, ok := item.StepData["_repo_path"].(string)
+	if !ok || rp != "/test/repo" {
+		t.Errorf("expected _repo_path=/test/repo, got %q (ok=%v)", rp, ok)
+	}
+}
+
 func TestStartQueuedItems_StartsWhenSlotsAvailable(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)

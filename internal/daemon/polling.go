@@ -24,7 +24,7 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 		return
 	}
 
-	if d.repoFilter == "" {
+	if d.repoFilter == "" && len(d.repoWorkflowFiles) == 0 {
 		log.Debug("no repo filter set, skipping issue polling")
 		return
 	}
@@ -103,7 +103,9 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 					Title:  issue.Title,
 					URL:    issue.URL,
 				},
-				StepData: map[string]any{},
+				StepData: map[string]any{
+					"_repo_path": repoPath,
+				},
 			}
 			if issue.Body != "" {
 				item.StepData["issue_body"] = issue.Body
@@ -194,6 +196,8 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 		repoPath := ""
 		if sess != nil {
 			repoPath = sess.RepoPath
+		} else if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+			repoPath = rp
 		} else if d.repoFilter != "" {
 			repoPath = d.findRepoPath(ctx)
 		}
@@ -226,6 +230,10 @@ func (d *Daemon) startQueuedItems(ctx context.Context) {
 
 // matchesRepoFilter checks if a repo path matches the daemon's repo filter.
 func (d *Daemon) matchesRepoFilter(ctx context.Context, repoPath string) bool {
+	// In multi-repo mode (no single repoFilter), all configured repos match.
+	if d.repoFilter == "" && len(d.repoWorkflowFiles) > 0 {
+		return true
+	}
 	if repoPath == d.repoFilter {
 		return true
 	}
@@ -278,7 +286,9 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 		},
 		Branch:   pr.HeadRefName,
 		PRURL:    pr.URL,
-		StepData: map[string]any{},
+		StepData: map[string]any{
+			"_repo_path": repoPath,
+		},
 	}
 	d.state.AddWorkItem(item)
 

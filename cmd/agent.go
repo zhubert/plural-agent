@@ -21,6 +21,7 @@ import (
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/logger"
+	"github.com/zhubert/erg/internal/manifest"
 	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/workflow"
 )
@@ -31,6 +32,7 @@ var (
 	agentForeground   bool
 	agentDaemonMode   bool   // hidden --_daemon flag for re-exec child
 	agentWorkflowFile string // optional explicit workflow config file path
+	agentConfigFile   string // optional manifest file for multi-repo mode
 )
 
 // osExecutable is the function used to resolve the current binary path.
@@ -43,9 +45,11 @@ func init() {
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
 	rootCmd.Flags().StringVar(&agentWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
+	rootCmd.Flags().StringVar(&agentConfigFile, "config", "", "Path to manifest file for multi-repo mode")
 	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
 	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
 	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
+	rootCmd.Flags().MarkHidden("config")  //nolint:errcheck
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -97,18 +101,91 @@ func daemonize(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Starting to erg...")
 
-	// Create services
-	sessSvc := session.NewSessionService()
+	// Set up cancellable context for image build phase
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Resolve repo
-	resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
-	if err != nil {
-		return err
+	// Initialize file logger for the build phase — all output goes to log file, not stdout
+	logger.SetDebug(true)
+	defer logger.Close()
+	buildLogger := logger.Get()
+
+	// Determine lock key — multi-repo uses manifest's DaemonID, single-repo uses repo path
+	var lockKey string
+	if agentConfigFile != "" {
+		m, err := manifest.LoadFile(agentConfigFile)
+		if err != nil {
+			return fmt.Errorf("error loading manifest: %w", err)
+		}
+		lockKey = m.DaemonID()
+
+		// Build container images for each repo
+		for _, entry := range m.Repos {
+			wfCfg, err := workflow.LoadAndMergeWithFile(entry.Repo, entry.Workflow)
+			if err != nil {
+				return fmt.Errorf("error loading workflow config for %s: %w", entry.Repo, err)
+			}
+			if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
+				detected := container.Detect(ctx, entry.Repo)
+				buildLogger.Info("auto-detected languages", "languages", detected, "repo", entry.Repo)
+				image, built, err := container.EnsureImage(ctx, detected, version, buildLogger)
+				if err != nil {
+					return fmt.Errorf("failed to auto-build container image for %s: %w", entry.Repo, err)
+				}
+				if built {
+					fmt.Printf("Container image built for %s.\n", entry.Repo)
+				}
+				if wfCfg.Settings == nil {
+					wfCfg.Settings = &workflow.SettingsConfig{}
+				}
+				wfCfg.Settings.ContainerImage = image
+			}
+			if err := validateWorkflowConfig(wfCfg); err != nil {
+				return fmt.Errorf("repo %s: %w", entry.Repo, err)
+			}
+		}
+	} else {
+		// Single-repo mode
+		sessSvc := session.NewSessionService()
+		resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
+		if err != nil {
+			return err
+		}
+		agentRepo = resolved
+		lockKey = agentRepo
+
+		// Load workflow config + build image
+		wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
+		if err != nil {
+			return fmt.Errorf("error loading workflow config: %w", err)
+		}
+
+		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
+			detected := container.Detect(ctx, agentRepo)
+			buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
+
+			image, built, err := container.EnsureImage(ctx, detected, version, buildLogger)
+			if err != nil {
+				return fmt.Errorf("failed to auto-build container image: %w\n\n"+
+					"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
+			}
+			if built {
+				fmt.Println("Container image built successfully.")
+			}
+			if wfCfg.Settings == nil {
+				wfCfg.Settings = &workflow.SettingsConfig{}
+			}
+			wfCfg.Settings.ContainerImage = image
+		}
+
+		// Validate after auto-detection so the config is fully populated.
+		if err := validateWorkflowConfig(wfCfg); err != nil {
+			return err
+		}
 	}
-	agentRepo = resolved
 
 	// Acquire exclusive lock BEFORE spawning child to prevent race conditions.
-	lock, err := daemonstate.AcquireLock(agentRepo)
+	lock, err := daemonstate.AcquireLock(lockKey)
 	if err != nil {
 		return fmt.Errorf("daemon already running or lock held: %w", err)
 	}
@@ -119,46 +196,8 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Set up cancellable context for image build phase
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Initialize file logger for the build phase — all output goes to log file, not stdout
-	logger.SetDebug(true)
-	defer logger.Close()
-	buildLogger := logger.Get()
-
-	// Load workflow config + build image
-	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
-	if err != nil {
-		return fmt.Errorf("error loading workflow config: %w", err)
-	}
-
-	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
-		detected := container.Detect(ctx, agentRepo)
-		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
-
-		image, built, err := container.EnsureImage(ctx, detected, version, buildLogger)
-		if err != nil {
-			return fmt.Errorf("failed to auto-build container image: %w\n\n"+
-				"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
-		}
-		if built {
-			fmt.Println("Container image built successfully.")
-		}
-		if wfCfg.Settings == nil {
-			wfCfg.Settings = &workflow.SettingsConfig{}
-		}
-		wfCfg.Settings.ContainerImage = image
-	}
-
-	// Validate after auto-detection so the config is fully populated.
-	if err := validateWorkflowConfig(wfCfg); err != nil {
-		return err
-	}
-
 	// Build args for re-exec
-	childArgs := buildDaemonArgs(agentRepo, agentOnce, agentWorkflowFile)
+	childArgs := buildDaemonArgs(agentRepo, agentOnce, agentWorkflowFile, agentConfigFile)
 
 	// Re-exec self with --_daemon
 	self, err := osExecutable()
@@ -204,7 +243,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 
 	// Brief wait to confirm child didn't exit immediately
 	time.Sleep(500 * time.Millisecond)
-	if _, running := daemonstate.ReadLockStatus(agentRepo); !running {
+	if _, running := daemonstate.ReadLockStatus(lockKey); !running {
 		return fmt.Errorf("daemon child exited immediately (PID %d)", childPID)
 	}
 
@@ -214,8 +253,13 @@ func daemonize(cmd *cobra.Command, args []string) error {
 }
 
 // buildDaemonArgs constructs the args slice for the re-exec'd child process.
-func buildDaemonArgs(repo string, once bool, workflowFile string) []string {
-	args := []string{"--_daemon", "--repo", repo}
+func buildDaemonArgs(repo string, once bool, workflowFile, configFile string) []string {
+	args := []string{"--_daemon"}
+	if configFile != "" {
+		args = append(args, "--config", configFile)
+	} else {
+		args = append(args, "--repo", repo)
+	}
 	if once {
 		args = append(args, "--once")
 	}
@@ -234,18 +278,27 @@ func runDaemonChild(_ *cobra.Command, _ []string) error {
 
 	fileLogger := logger.Get()
 
-	sessSvc := session.NewSessionService()
-
-	// Resolve repo (should already be set via --repo)
-	resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
-	if err != nil {
-		return err
+	// Determine lock key — multi-repo uses manifest's DaemonID
+	var lockKey string
+	if agentConfigFile != "" {
+		m, err := manifest.LoadFile(agentConfigFile)
+		if err != nil {
+			return fmt.Errorf("error loading manifest: %w", err)
+		}
+		lockKey = m.DaemonID()
+	} else {
+		sessSvc := session.NewSessionService()
+		resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
+		if err != nil {
+			return err
+		}
+		agentRepo = resolved
+		lockKey = agentRepo
 	}
-	agentRepo = resolved
 
 	// Re-claim the lock that the parent process transferred to us.
 	// The parent wrote our PID into the lock file before detaching.
-	lock, err := daemonstate.AdoptLock(agentRepo)
+	lock, err := daemonstate.AdoptLock(lockKey)
 	if err != nil {
 		return fmt.Errorf("failed to adopt daemon lock: %w", err)
 	}
@@ -316,17 +369,6 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		Level: slog.LevelInfo,
 	}))
 
-	sessSvc := session.NewSessionService()
-
-	resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
-	if err != nil {
-		return err
-	}
-	if resolved != agentRepo && agentRepo != "" {
-		buildLogger.Info("using repo", "repo", resolved)
-	}
-	agentRepo = resolved
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -342,31 +384,77 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		os.Exit(1)
 	}()
 
-	// Load workflow config + build image
-	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
-	if err != nil {
-		return fmt.Errorf("error loading workflow config: %w", err)
-	}
+	// Determine the status key for the live tail view
+	statusKey := agentRepo
 
-	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
-		detected := container.Detect(ctx, agentRepo)
-		buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
-
-		image, _, err := container.EnsureImage(ctx, detected, version, buildLogger)
+	if agentConfigFile != "" {
+		// Multi-repo mode: validate and build images for all repos
+		m, err := manifest.LoadFile(agentConfigFile)
 		if err != nil {
-			return fmt.Errorf("failed to auto-build container image: %w\n\n"+
-				"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
+			return fmt.Errorf("error loading manifest: %w", err)
+		}
+		statusKey = m.DaemonID()
+
+		for _, entry := range m.Repos {
+			wfCfg, err := workflow.LoadAndMergeWithFile(entry.Repo, entry.Workflow)
+			if err != nil {
+				return fmt.Errorf("error loading workflow config for %s: %w", entry.Repo, err)
+			}
+			if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
+				detected := container.Detect(ctx, entry.Repo)
+				buildLogger.Info("auto-detected languages", "languages", detected, "repo", entry.Repo)
+				image, _, err := container.EnsureImage(ctx, detected, version, buildLogger)
+				if err != nil {
+					return fmt.Errorf("failed to auto-build container image for %s: %w", entry.Repo, err)
+				}
+				if wfCfg.Settings == nil {
+					wfCfg.Settings = &workflow.SettingsConfig{}
+				}
+				wfCfg.Settings.ContainerImage = image
+			}
+			if err := validateWorkflowConfig(wfCfg); err != nil {
+				return fmt.Errorf("repo %s: %w", entry.Repo, err)
+			}
+		}
+	} else {
+		// Single-repo mode
+		sessSvc := session.NewSessionService()
+		resolved, err := resolveAgentRepo(context.Background(), agentRepo, sessSvc)
+		if err != nil {
+			return err
+		}
+		if resolved != agentRepo && agentRepo != "" {
+			buildLogger.Info("using repo", "repo", resolved)
+		}
+		agentRepo = resolved
+		statusKey = agentRepo
+
+		// Load workflow config + build image
+		wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
+		if err != nil {
+			return fmt.Errorf("error loading workflow config: %w", err)
 		}
 
-		if wfCfg.Settings == nil {
-			wfCfg.Settings = &workflow.SettingsConfig{}
-		}
-		wfCfg.Settings.ContainerImage = image
-	}
+		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
+			detected := container.Detect(ctx, agentRepo)
+			buildLogger.Info("auto-detected languages", "languages", detected, "repo", agentRepo)
 
-	// Validate after auto-detection so the config is fully populated.
-	if err := validateWorkflowConfig(wfCfg); err != nil {
-		return err
+			image, _, err := container.EnsureImage(ctx, detected, version, buildLogger)
+			if err != nil {
+				return fmt.Errorf("failed to auto-build container image: %w\n\n"+
+					"You can skip auto-detection by setting container_image in .erg/workflow.yaml", err)
+			}
+
+			if wfCfg.Settings == nil {
+				wfCfg.Settings = &workflow.SettingsConfig{}
+			}
+			wfCfg.Settings.ContainerImage = image
+		}
+
+		// Validate after auto-detection so the config is fully populated.
+		if err := validateWorkflowConfig(wfCfg); err != nil {
+			return err
+		}
 	}
 
 	// Run daemon in a goroutine
@@ -389,7 +477,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 	defer fmt.Print("\033[?25h\n")
 
 	// Draw immediately on first run
-	_ = drawTailFrame(agentRepo)
+	_ = drawTailFrame(statusKey)
 
 	for {
 		select {
@@ -399,7 +487,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 			clearScreen()
 			return nil
 		case <-ticker.C:
-			_ = drawTailFrame(agentRepo)
+			_ = drawTailFrame(statusKey)
 		}
 	}
 }
@@ -408,6 +496,100 @@ func runForeground(_ *cobra.Command, _ []string) error {
 // This is the shared core between runDaemonChild and runForeground.
 // If preacquiredLock is non-nil, it is passed to the daemon so it skips lock acquisition.
 func runDaemonWithLogger(ctx context.Context, daemonLogger *slog.Logger, preacquiredLock ...*daemonstate.DaemonLock) error {
+	if agentConfigFile != "" {
+		return runMultiRepoDaemon(ctx, daemonLogger, preacquiredLock...)
+	}
+	return runSingleRepoDaemon(ctx, daemonLogger, preacquiredLock...)
+}
+
+// runMultiRepoDaemon starts a daemon that watches multiple repos defined in a manifest file.
+func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacquiredLock ...*daemonstate.DaemonLock) error {
+	m, err := manifest.LoadFile(agentConfigFile)
+	if err != nil {
+		return fmt.Errorf("error loading manifest: %w", err)
+	}
+
+	gitSvc := git.NewGitService()
+
+	// Build per-repo workflow file mapping and ensure container images
+	repoWorkflowFiles := make(map[string]string)
+	for _, entry := range m.Repos {
+		wfFile := entry.Workflow
+		repoWorkflowFiles[entry.Repo] = wfFile
+
+		// Load workflow config to check for container image
+		wfCfg, err := workflow.LoadAndMergeWithFile(entry.Repo, wfFile)
+		if err != nil {
+			return fmt.Errorf("error loading workflow config for %s: %w", entry.Repo, err)
+		}
+
+		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
+			detected := container.Detect(ctx, entry.Repo)
+			image, _, err := container.EnsureImage(ctx, detected, version, daemonLogger)
+			if err != nil {
+				return fmt.Errorf("failed to auto-build container image for %s: %w", entry.Repo, err)
+			}
+			if wfCfg.Settings == nil {
+				wfCfg.Settings = &workflow.SettingsConfig{}
+			}
+			wfCfg.Settings.ContainerImage = image
+		}
+
+		if err := validateWorkflowConfig(wfCfg); err != nil {
+			return fmt.Errorf("repo %s: %w", entry.Repo, err)
+		}
+	}
+
+	// Build AgentConfig with all repos
+	var cfgOpts []agentconfig.AgentConfigOption
+	cfgOpts = append(cfgOpts, agentconfig.WithRepos(m.RepoPaths()))
+	if m.MaxConcurrent > 0 {
+		cfgOpts = append(cfgOpts, agentconfig.WithMaxConcurrent(m.MaxConcurrent))
+	}
+	cfg := agentconfig.NewAgentConfig(cfgOpts...)
+
+	// Sync issue provider settings from each repo's workflow config
+	for _, entry := range m.Repos {
+		wfCfg, _ := workflow.LoadAndMergeWithFile(entry.Repo, entry.Workflow)
+		if wfCfg == nil {
+			continue
+		}
+		if wfCfg.Source.Provider == "asana" && wfCfg.Source.Filter.Project != "" {
+			cfg.SetAsanaProject(entry.Repo, wfCfg.Source.Filter.Project)
+		}
+		if wfCfg.Source.Provider == "linear" && wfCfg.Source.Filter.Team != "" {
+			cfg.SetLinearTeam(entry.Repo, wfCfg.Source.Filter.Team)
+		}
+	}
+
+	// Initialize issue providers
+	githubProvider := issues.NewGitHubProvider(gitSvc)
+	asanaProvider := issues.NewAsanaProvider(cfg)
+	linearProvider := issues.NewLinearProvider(cfg)
+	issueRegistry := issues.NewProviderRegistry(githubProvider, asanaProvider, linearProvider)
+
+	// Build daemon options
+	var opts []daemon.Option
+	if agentOnce {
+		opts = append(opts, daemon.WithOnce(true))
+	}
+	opts = append(opts, daemon.WithDaemonID(m.DaemonID()))
+	opts = append(opts, daemon.WithRepoWorkflowFiles(repoWorkflowFiles))
+	if len(preacquiredLock) > 0 && preacquiredLock[0] != nil {
+		opts = append(opts, daemon.WithPreacquiredLock(preacquiredLock[0]))
+	}
+
+	sessSvc := session.NewSessionService()
+	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, daemonLogger, opts...)
+
+	if err := d.Run(ctx); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return nil
+}
+
+// runSingleRepoDaemon starts a daemon that watches a single repo (original behavior).
+func runSingleRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacquiredLock ...*daemonstate.DaemonLock) error {
 	gitSvc := git.NewGitService()
 	sessSvc := session.NewSessionService()
 

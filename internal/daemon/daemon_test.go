@@ -139,6 +139,86 @@ func TestDaemonOptions(t *testing.T) {
 	})
 }
 
+func TestWithRepoWorkflowFiles(t *testing.T) {
+	cfg := testConfig()
+	files := map[string]string{
+		"owner/repo-a": "/path/to/a.yaml",
+		"owner/repo-b": "/path/to/b.yaml",
+	}
+	d := testDaemon(cfg)
+	WithRepoWorkflowFiles(files)(d)
+	if len(d.repoWorkflowFiles) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(d.repoWorkflowFiles))
+	}
+	if d.repoWorkflowFiles["owner/repo-a"] != "/path/to/a.yaml" {
+		t.Errorf("expected /path/to/a.yaml, got %s", d.repoWorkflowFiles["owner/repo-a"])
+	}
+}
+
+func TestWithDaemonID(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	WithDaemonID("multi-abc123")(d)
+	if d.daemonID != "multi-abc123" {
+		t.Errorf("expected multi-abc123, got %s", d.daemonID)
+	}
+}
+
+func TestStateKey(t *testing.T) {
+	cfg := testConfig()
+
+	t.Run("uses repoFilter when no daemonID", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.repoFilter = "/test/repo"
+		if got := d.stateKey(); got != "/test/repo" {
+			t.Errorf("expected /test/repo, got %s", got)
+		}
+	})
+
+	t.Run("uses daemonID when set", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.repoFilter = "/test/repo"
+		d.daemonID = "multi-abc"
+		if got := d.stateKey(); got != "multi-abc" {
+			t.Errorf("expected multi-abc, got %s", got)
+		}
+	})
+}
+
+func TestGetWorkflowFileForRepo(t *testing.T) {
+	cfg := testConfig()
+
+	t.Run("per-repo override", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.repoWorkflowFiles = map[string]string{
+			"/repo/a": "/path/a.yaml",
+		}
+		d.workflowFile = "/global.yaml"
+		if got := d.getWorkflowFileForRepo("/repo/a"); got != "/path/a.yaml" {
+			t.Errorf("expected /path/a.yaml, got %s", got)
+		}
+	})
+
+	t.Run("falls back to global", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.repoWorkflowFiles = map[string]string{
+			"/repo/a": "/path/a.yaml",
+		}
+		d.workflowFile = "/global.yaml"
+		if got := d.getWorkflowFileForRepo("/repo/b"); got != "/global.yaml" {
+			t.Errorf("expected /global.yaml, got %s", got)
+		}
+	})
+
+	t.Run("no overrides", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.workflowFile = "/global.yaml"
+		if got := d.getWorkflowFileForRepo("/repo/a"); got != "/global.yaml" {
+			t.Errorf("expected /global.yaml, got %s", got)
+		}
+	})
+}
+
 func TestWithPreacquiredLock_SkipsAcquire(t *testing.T) {
 	cfg := testConfig()
 	// Create a real lock (we just need a non-nil *DaemonLock)
@@ -387,6 +467,34 @@ func TestDaemon_MatchesRepoFilter(t *testing.T) {
 		d.repoFilter = "/other/path"
 		if d.matchesRepoFilter(context.Background(), "/path/to/repo") {
 			t.Error("expected no match")
+		}
+	})
+}
+
+func TestDaemon_MatchesRepoFilter_MultiRepo(t *testing.T) {
+	t.Run("all configured repos match when repoFilter empty", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		d.repoFilter = ""
+		d.repoWorkflowFiles = map[string]string{
+			"/repo/a": "/path/a.yaml",
+			"/repo/b": "/path/b.yaml",
+		}
+		if !d.matchesRepoFilter(context.Background(), "/repo/a") {
+			t.Error("expected match for configured repo in multi-repo mode")
+		}
+		if !d.matchesRepoFilter(context.Background(), "/repo/c") {
+			t.Error("expected match for any repo in multi-repo mode (filtering is via config.GetRepos)")
+		}
+	})
+
+	t.Run("no match when both empty", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		d.repoFilter = ""
+		d.repoWorkflowFiles = nil
+		if d.matchesRepoFilter(context.Background(), "/repo/a") {
+			t.Error("expected no match when both repoFilter and repoWorkflowFiles are empty")
 		}
 	})
 }

@@ -64,7 +64,9 @@ type Daemon struct {
 	dockerHealthCheck func(context.Context) error // injectable for testing; nil means use default
 
 	// Workflow
-	workflowFile string // optional explicit workflow config file path
+	workflowFile       string            // optional explicit workflow config file path
+	repoWorkflowFiles  map[string]string // per-repo workflow file overrides (repo path → file path)
+	daemonID           string            // stable ID for lock/state keying in multi-repo mode
 }
 
 // Option configures the daemon.
@@ -127,6 +129,19 @@ func WithWorkflowFile(file string) Option {
 	return func(d *Daemon) { d.workflowFile = file }
 }
 
+// WithRepoWorkflowFiles sets per-repo workflow file overrides.
+// Each key is a repo path (or owner/repo), and the value is the path to
+// its workflow config file. This takes precedence over WithWorkflowFile.
+func WithRepoWorkflowFiles(files map[string]string) Option {
+	return func(d *Daemon) { d.repoWorkflowFiles = files }
+}
+
+// WithDaemonID sets a stable identifier for lock and state files.
+// This is used in multi-repo mode where repoFilter may be empty.
+func WithDaemonID(id string) Option {
+	return func(d *Daemon) { d.daemonID = id }
+}
+
 // New creates a new daemon.
 func New(cfg agentconfig.Config, gitSvc *git.GitService, sessSvc *session.SessionService, registry *issues.ProviderRegistry, logger *slog.Logger, opts ...Option) *Daemon {
 	d := &Daemon{
@@ -153,15 +168,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.logger.Info("daemon starting",
 		"once", d.once,
 		"repoFilter", d.repoFilter,
+		"daemonID", d.daemonID,
+		"repos", d.config.GetRepos(),
 		"maxConcurrent", d.getMaxConcurrent(),
 		"maxTurns", d.getMaxTurns(),
 		"maxDuration", d.getMaxDuration(),
 		"autoMerge", d.autoMerge,
 	)
 
+	key := d.stateKey()
+
 	// Acquire lock (unless pre-acquired by parent process)
 	if d.lock == nil {
-		lock, err := daemonstate.AcquireLock(d.repoFilter)
+		lock, err := daemonstate.AcquireLock(key)
 		if err != nil {
 			return fmt.Errorf("failed to acquire daemon lock: %w", err)
 		}
@@ -182,11 +201,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Load or create state
-	state, err := daemonstate.LoadDaemonState(d.repoFilter)
+	state, err := daemonstate.LoadDaemonState(key)
 	if err != nil {
 		// If state is for a different repo, create fresh
 		d.logger.Warn("failed to load daemon state, creating new", "error", err)
-		state = daemonstate.NewDaemonState(d.repoFilter)
+		state = daemonstate.NewDaemonState(key)
 	}
 	d.state = state
 
@@ -291,13 +310,23 @@ func (d *Daemon) getAutoAddressPRComments() bool {
 	return d.autoAddressPRComments || d.config.GetAutoAddressPRComments()
 }
 
+// stateKey returns the key used for lock and state file paths.
+// In multi-repo mode this is the daemonID; otherwise it's the repoFilter.
+func (d *Daemon) stateKey() string {
+	if d.daemonID != "" {
+		return d.daemonID
+	}
+	return d.repoFilter
+}
+
 // loadWorkflowConfigs loads workflow configs and creates engines for all registered repos.
 func (d *Daemon) loadWorkflowConfigs() {
 	d.workflowConfigs = make(map[string]*workflow.Config)
 	d.engines = make(map[string]*workflow.Engine)
 
 	for _, repoPath := range d.config.GetRepos() {
-		cfg, err := workflow.LoadAndMergeWithFile(repoPath, d.workflowFile)
+		wfFile := d.getWorkflowFileForRepo(repoPath)
+		cfg, err := workflow.LoadAndMergeWithFile(repoPath, wfFile)
 		if err != nil {
 			d.logger.Warn("failed to load workflow config", "repo", repoPath, "error", err)
 			continue
@@ -356,6 +385,17 @@ func (d *Daemon) buildActionRegistry() *workflow.ActionRegistry {
 	registry.Register("workflow.retry", workflow.NewRetryAction(registry))
 	registry.Register("workflow.wait", &waitAction{daemon: d})
 	return registry
+}
+
+// getWorkflowFileForRepo returns the workflow file path for a specific repo.
+// It checks repoWorkflowFiles first, then falls back to the global workflowFile.
+func (d *Daemon) getWorkflowFileForRepo(repoPath string) string {
+	if d.repoWorkflowFiles != nil {
+		if f, ok := d.repoWorkflowFiles[repoPath]; ok {
+			return f
+		}
+	}
+	return d.workflowFile
 }
 
 // getWorkflowConfig returns the workflow config for a repo, or defaults.
