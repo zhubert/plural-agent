@@ -3120,3 +3120,35 @@ func TestGetPRNumber_InvalidJSON(t *testing.T) {
 		t.Fatal("expected parse error, got nil")
 	}
 }
+
+func TestCheckUserIsCollaborator_IsCollaborator(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/alice"}, pexec.MockResponse{
+		Stdout: []byte(`{}`), // 204 response has no body, but we return empty JSON
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	isCollab, err := svc.CheckUserIsCollaborator(context.Background(), "/repo", "alice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isCollab {
+		t.Error("expected alice to be a collaborator")
+	}
+}
+
+func TestCheckUserIsCollaborator_NotCollaborator(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/outsider"}, pexec.MockResponse{
+		Err: fmt.Errorf("HTTP 404: Not Found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	isCollab, err := svc.CheckUserIsCollaborator(context.Background(), "/repo", "outsider")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isCollab {
+		t.Error("expected outsider to not be a collaborator")
+	}
+}

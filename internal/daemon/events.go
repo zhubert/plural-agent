@@ -457,6 +457,18 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 				continue
 			}
 			if re.MatchString(comment.Body) {
+				// For GitHub issues, only collaborators may approve via comment.
+				if source == "github" {
+					isCollab, err := d.gitService.CheckUserIsCollaborator(pollCtx, repoPath, comment.Author)
+					if err != nil {
+						log.Warn("failed to check collaborator status, skipping comment", "author", comment.Author, "error", err)
+						continue
+					}
+					if !isCollab {
+						log.Info("ignoring gate approval from non-collaborator", "author", comment.Author)
+						continue
+					}
+				}
 				log.Info("gate comment pattern matched", "pattern", pattern, "author", comment.Author)
 				return true, map[string]any{"gate_approved": true, "gate_trigger": "comment_match", "gate_comment_author": comment.Author}, nil
 			}
@@ -593,6 +605,17 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 
 		// Found a new comment — check if it's an approval.
 		approved := approvalRe != nil && approvalRe.MatchString(comment.Body)
+		// For GitHub issues, only collaborators may approve plans.
+		if approved && workItem.IssueRef.Source == "github" {
+			isCollab, err := d.gitService.CheckUserIsCollaborator(pollCtx, repoPath, comment.Author)
+			if err != nil {
+				log.Warn("failed to check collaborator status, denying plan approval", "author", comment.Author, "error", err)
+				approved = false
+			} else if !isCollab {
+				log.Info("plan approval from non-collaborator, treating as feedback only", "author", comment.Author)
+				approved = false
+			}
+		}
 		log.Info("user replied to plan", "author", comment.Author, "approved", approved)
 		return true, map[string]any{
 			"plan_approved":        approved,
