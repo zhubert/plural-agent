@@ -28,7 +28,7 @@ import (
 func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) error {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
 
-	repoPath := d.findRepoPath(ctx)
+	repoPath := d.repoPathForItem(ctx, item)
 	if repoPath == "" {
 		return fmt.Errorf("no matching repo found")
 	}
@@ -118,7 +118,7 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID)
 
 	// Find the matching repo path
-	repoPath := d.findRepoPath(ctx)
+	repoPath := d.repoPathForItem(ctx, item)
 	if repoPath == "" {
 		return fmt.Errorf("no matching repo found")
 	}
@@ -663,6 +663,17 @@ func parseWorktreeForBranch(porcelainOutput, branchName string) string {
 		}
 	}
 	return ""
+}
+
+// repoPathForItem returns the repo path for a work item, preferring the
+// _repo_path stored in StepData (set at poll time) over findRepoPath.
+// This is critical in multi-repo mode where findRepoPath would return the
+// first repo in the list rather than the repo the issue actually belongs to.
+func (d *Daemon) repoPathForItem(ctx context.Context, item daemonstate.WorkItem) string {
+	if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+		return rp
+	}
+	return d.findRepoPath(ctx)
 }
 
 // findRepoPath returns the first repo path that matches the daemon's filter.

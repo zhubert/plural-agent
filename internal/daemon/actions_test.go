@@ -9026,3 +9026,134 @@ func TestLinearMoveToStateAction_NoProvider(t *testing.T) {
 		t.Error("expected error when linear provider not registered")
 	}
 }
+
+func TestRepoPathForItem_PrefersStepData(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/repo/alpha", "/repo/beta"}
+	d := testDaemon(cfg)
+	// No repoFilter set — multi-repo mode
+
+	item := daemonstate.WorkItem{
+		ID:       "work-1",
+		StepData: map[string]any{"_repo_path": "/repo/beta"},
+	}
+
+	got := d.repoPathForItem(context.Background(), item)
+	if got != "/repo/beta" {
+		t.Errorf("expected /repo/beta, got %q", got)
+	}
+}
+
+func TestRepoPathForItem_FallsBackToFindRepoPath(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/repo/alpha"}
+	d := testDaemon(cfg)
+	d.repoFilter = "/repo/alpha"
+
+	item := daemonstate.WorkItem{
+		ID:       "work-2",
+		StepData: map[string]any{},
+	}
+
+	got := d.repoPathForItem(context.Background(), item)
+	if got != "/repo/alpha" {
+		t.Errorf("expected /repo/alpha, got %q", got)
+	}
+}
+
+func TestStartPlanning_UsesWorkItemRepoPath(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/repo/erg", "/repo/plural"}
+
+	mockExec := exec.NewMockExecutor(nil)
+	mockExec.AddPrefixMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/plural.git\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"worktree", "add"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	// No repoFilter — multi-repo mode
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-plural",
+		IssueRef: config.IssueRef{Source: "github", ID: "313", Title: "Fix plural"},
+		StepData: map[string]any{"_repo_path": "/repo/plural"},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startPlanning(t.Context(), *item)
+	if err != nil {
+		t.Fatalf("startPlanning failed: %v", err)
+	}
+
+	// The session must use the plural repo, not the first repo in the list
+	sess := cfg.GetSession(d.state.GetActiveWorkItems()[0].SessionID)
+	if sess == nil {
+		t.Fatal("session should exist")
+	}
+	if sess.RepoPath != "/repo/plural" {
+		t.Errorf("expected session RepoPath=/repo/plural, got %q", sess.RepoPath)
+	}
+}
+
+func TestStartCoding_UsesWorkItemRepoPath(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/repo/erg", "/repo/plural"}
+
+	mockExec := exec.NewMockExecutor(nil)
+	mockExec.AddPrefixMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("https://github.com/owner/plural.git\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("git", []string{"worktree", "add"}, exec.MockResponse{})
+	// BranchExists checks "git rev-parse --verify <branch>" — make it fail
+	// so startCoding takes the "create new session" path.
+	mockExec.AddExactMatch("git", []string{"rev-parse", "--verify", "issue-313"}, exec.MockResponse{
+		Err: fmt.Errorf("not a valid ref"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	// No repoFilter — multi-repo mode
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-plural",
+		IssueRef: config.IssueRef{Source: "github", ID: "313", Title: "Fix plural"},
+		StepData: map[string]any{"_repo_path": "/repo/plural"},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startCoding(t.Context(), *item)
+	if err != nil {
+		t.Fatalf("startCoding failed: %v", err)
+	}
+
+	// The session must use the plural repo, not the first repo in the list
+	updatedItem, ok := d.state.GetWorkItem(item.ID)
+	if !ok {
+		t.Fatal("work item should exist")
+	}
+	sess := cfg.GetSession(updatedItem.SessionID)
+	if sess == nil {
+		t.Fatal("session should exist")
+	}
+	if sess.RepoPath != "/repo/plural" {
+		t.Errorf("expected session RepoPath=/repo/plural, got %q", sess.RepoPath)
+	}
+}
