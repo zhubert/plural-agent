@@ -1218,6 +1218,7 @@
             <span class="sidebar-section-title">Reference</span>
             <a href="#cli" class="sidebar-link">CLI commands</a>
             <a href="#multi-repo" class="sidebar-link">Multi-repo</a>
+            <a href="#services" class="sidebar-link">Services</a>
             <a href="#actions" class="sidebar-link">Actions</a>
             <a href="#actions-ai" class="sidebar-sublink">ai</a>
             <a href="#actions-github" class="sidebar-sublink">github</a>
@@ -1830,8 +1831,12 @@
           </thead>
           <tbody>
             <tr>
+              <td><code>erg start</code></td>
+              <td>Start daemon using <code>~/.erg/daemon.yaml</code> or current repo</td>
+            </tr>
+            <tr>
               <td><code>erg start --repo owner/repo</code></td>
-              <td>Start daemon in the background (prints PID and exits)</td>
+              <td>Start daemon in the background for a specific repo</td>
             </tr>
             <tr>
               <td><code>erg start -f --repo owner/repo</code></td>
@@ -1846,11 +1851,11 @@
             </tr>
             <tr>
               <td><code>erg stop</code></td>
-              <td>Gracefully shut down the running daemon</td>
+              <td>Gracefully shut down the running daemon (auto-detects which one)</td>
             </tr>
             <tr>
               <td><code>erg status</code></td>
-              <td>Show daemon status (PID, uptime, active sessions)</td>
+              <td>Show daemon status (auto-detects which daemon)</td>
             </tr>
             <tr>
               <td><code>erg status --tail</code></td>
@@ -1864,6 +1869,25 @@
                 Interactive wizard: checks prerequisites, sets up issue tracker,
                 and scaffolds <code>.erg/workflow.yaml</code>
               </td>
+            </tr>
+            <tr>
+              <td><code>erg services install</code></td>
+              <td>
+                Install macOS LaunchAgent — starts on login, restarts on crash.
+                See <a href="#services">Services</a>
+              </td>
+            </tr>
+            <tr>
+              <td><code>erg services uninstall</code></td>
+              <td>Stop and remove the LaunchAgent</td>
+            </tr>
+            <tr>
+              <td><code>erg services status</code></td>
+              <td>Show LaunchAgent service status</td>
+            </tr>
+            <tr>
+              <td><code>erg services log</code></td>
+              <td>Tail the service log</td>
             </tr>
             <tr>
               <td><code>erg clean</code></td>
@@ -1989,6 +2013,117 @@
             </tr>
           </tbody>
         </table>
+
+        <!-- Services -->
+        <h2 id="services">Services (macOS)</h2>
+        <p>
+          On macOS, erg can run as a LaunchAgent — a system service that starts
+          automatically when you log in and restarts if it crashes. This is the
+          recommended way to run erg in production.
+        </p>
+
+        <h3>Setup</h3>
+        <p>
+          First, create a daemon config file at <code>~/.erg/daemon.yaml</code>
+          listing the repos you want erg to watch. This uses the same format as
+          the <a href="#multi-repo">multi-repo config</a>:
+        </p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">~/.erg/daemon.yaml</span>
+          </div>
+          <pre><span class="ck">max_concurrent:</span> <span class="cv">3</span>
+
+<span class="ck">repos:</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/backend</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/frontend</span></pre>
+        </div>
+        <p>
+          Each repo should already have an <code>.erg/workflow.yaml</code> —
+          run <code>erg configure</code> inside each repo first.
+        </p>
+
+        <h3>Installing the service</h3>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>erg services install</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'erg services install')"
+          >
+            copy
+          </button>
+        </div>
+        <p>
+          This writes a LaunchAgent plist to
+          <code>~/Library/LaunchAgents/com.erg.daemon.plist</code> and loads it
+          immediately. The service runs <code>erg start -f --config ~/.erg/daemon.yaml</code>
+          under the hood.
+        </p>
+        <p>
+          To use a custom config path:
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>erg services install --config /path/to/config.yaml</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'erg services install --config /path/to/config.yaml')"
+          >
+            copy
+          </button>
+        </div>
+
+        <h3>Managing the service</h3>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>erg services install</code></td>
+              <td>Write plist and start the service (starts on login, restarts on crash)</td>
+            </tr>
+            <tr>
+              <td><code>erg services uninstall</code></td>
+              <td>Stop the service and remove the plist</td>
+            </tr>
+            <tr>
+              <td><code>erg services status</code></td>
+              <td>Show whether the service is installed, running, and its PID</td>
+            </tr>
+            <tr>
+              <td><code>erg services log</code></td>
+              <td>Tail the service log (<code>~/.erg/logs/service.log</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Default config auto-discovery</h3>
+        <p>
+          When <code>~/.erg/daemon.yaml</code> exists, several commands work
+          without any flags:
+        </p>
+        <ul>
+          <li>
+            <code>erg start</code> — automatically uses the default config
+          </li>
+          <li>
+            <code>erg stop</code> — finds the running daemon by scanning lock
+            files
+          </li>
+          <li>
+            <code>erg status</code> — same auto-detection as stop
+          </li>
+        </ul>
+        <p>
+          If multiple daemons are running, <code>stop</code> and
+          <code>status</code> will list them and ask you to specify
+          <code>--repo</code>.
+        </p>
 
         <!-- Action reference -->
         <h2 id="actions">Action reference</h2>
