@@ -812,6 +812,35 @@ func TestToolUseResultField_UnmarshalJSON_ObjectWithFile(t *testing.T) {
 	}
 }
 
+func TestToolUseResultField_UnmarshalJSON_Array(t *testing.T) {
+	// Test unmarshaling an array of content blocks (Claude CLI sometimes sends this)
+	jsonStr := `[{"type":"text","text":"{\"id\":3,\"success\":true}"}]`
+	var field toolUseResultField
+	if err := json.Unmarshal([]byte(jsonStr), &field); err != nil {
+		t.Fatalf("Failed to unmarshal array: %v", err)
+	}
+	if field.StringValue != "" {
+		t.Errorf("Expected StringValue to be empty, got %q", field.StringValue)
+	}
+	if field.Data == nil {
+		t.Fatal("Expected Data to be populated from first array element")
+	}
+	if field.Data.Type != "text" {
+		t.Errorf("Expected Data.Type 'text', got %q", field.Data.Type)
+	}
+}
+
+func TestToolUseResultField_UnmarshalJSON_EmptyArray(t *testing.T) {
+	jsonStr := `[]`
+	var field toolUseResultField
+	if err := json.Unmarshal([]byte(jsonStr), &field); err != nil {
+		t.Fatalf("Failed to unmarshal empty array: %v", err)
+	}
+	if field.Data != nil {
+		t.Errorf("Expected Data to be nil for empty array, got %+v", field.Data)
+	}
+}
+
 func TestParseStreamMessage_Result(t *testing.T) {
 	log := testLogger()
 	msg := `{"type":"result","subtype":"success","result":"Operation completed"}`

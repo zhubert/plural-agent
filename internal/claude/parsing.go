@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -89,7 +90,7 @@ type toolUseResultField struct {
 }
 
 // UnmarshalJSON implements json.Unmarshaler for toolUseResultField.
-// It handles both string values and structured objects.
+// It handles string values, structured objects, and arrays of content blocks.
 func (f *toolUseResultField) UnmarshalJSON(data []byte) error {
 	// First, try to unmarshal as a string
 	var s string
@@ -98,12 +99,22 @@ func (f *toolUseResultField) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Not a string, try as structured object
+	// Try as structured object
 	var obj toolUseResultData
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return err
+	if err := json.Unmarshal(data, &obj); err == nil {
+		f.Data = &obj
+		return nil
 	}
-	f.Data = &obj
+
+	// Try as array of content blocks (e.g., [{"type":"text","text":"..."}])
+	var arr []toolUseResultData
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return fmt.Errorf("tool_use_result: cannot unmarshal as string, object, or array: %w", err)
+	}
+	// Use the first element if available
+	if len(arr) > 0 {
+		f.Data = &arr[0]
+	}
 	return nil
 }
 
