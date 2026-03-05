@@ -467,6 +467,82 @@ func TestConfigureRunner_ContainerMode_Disabled(t *testing.T) {
 	}
 }
 
+func TestContainerImageForRepo(t *testing.T) {
+	t.Run("per-repo override", func(t *testing.T) {
+		cfg := testConfig()
+		d := testDaemon(cfg)
+		d.repoContainerImages = map[string]string{
+			"/repo/a": "auto-built-a:abc123",
+			"/repo/b": "auto-built-b:def456",
+		}
+
+		if got := d.containerImageForRepo("/repo/a"); got != "auto-built-a:abc123" {
+			t.Errorf("expected auto-built-a:abc123, got %q", got)
+		}
+		if got := d.containerImageForRepo("/repo/b"); got != "auto-built-b:def456" {
+			t.Errorf("expected auto-built-b:def456, got %q", got)
+		}
+	})
+
+	t.Run("falls back to global config", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.SetContainerImage("global-image:latest")
+		d := testDaemon(cfg)
+
+		if got := d.containerImageForRepo("/unknown/repo"); got != "global-image:latest" {
+			t.Errorf("expected global-image:latest, got %q", got)
+		}
+	})
+
+	t.Run("nil map falls back to global", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.SetContainerImage("global:v1")
+		d := testDaemon(cfg)
+		d.repoContainerImages = nil
+
+		if got := d.containerImageForRepo("/repo/a"); got != "global:v1" {
+			t.Errorf("expected global:v1, got %q", got)
+		}
+	})
+
+	t.Run("empty string in map falls back to global", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.SetContainerImage("global:v2")
+		d := testDaemon(cfg)
+		d.repoContainerImages = map[string]string{
+			"/repo/a": "",
+		}
+
+		if got := d.containerImageForRepo("/repo/a"); got != "global:v2" {
+			t.Errorf("expected global:v2, got %q", got)
+		}
+	})
+}
+
+func TestConfigureRunner_ContainerMode_PerRepoImage(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+	d.repoContainerImages = map[string]string{
+		"/test/repo": "erg-auto:go1.23-abc123",
+	}
+
+	runner := newTrackingRunner("test-session")
+	sess := &config.Session{
+		ID:            "test-session",
+		RepoPath:      "/test/repo",
+		Containerized: true,
+	}
+
+	d.configureRunner(runner, sess, "", nil)
+
+	if !runner.containerized {
+		t.Error("expected containerized to be true")
+	}
+	if runner.containerImage != "erg-auto:go1.23-abc123" {
+		t.Errorf("expected per-repo image, got %q", runner.containerImage)
+	}
+}
+
 func TestConfigureRunner_HostToolsEnabled(t *testing.T) {
 	// Daemon enables host tools so Claude can use comment_issue and submit_review.
 	// The worker rejects create_pr and push_branch with helpful error messages.

@@ -513,6 +513,7 @@ func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqui
 
 	// Build per-repo workflow file mapping and ensure container images
 	repoWorkflowFiles := make(map[string]string)
+	repoContainerImages := make(map[string]string)
 	for _, entry := range m.Repos {
 		wfFile := entry.Workflow
 		repoWorkflowFiles[entry.Path] = wfFile
@@ -534,6 +535,7 @@ func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqui
 			}
 			wfCfg.Settings.ContainerImage = image
 		}
+		repoContainerImages[entry.Path] = wfCfg.Settings.ContainerImage
 
 		if err := validateWorkflowConfig(wfCfg); err != nil {
 			return fmt.Errorf("repo %s: %w", entry.Path, err)
@@ -575,6 +577,7 @@ func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqui
 	}
 	opts = append(opts, daemon.WithDaemonID(m.DaemonID()))
 	opts = append(opts, daemon.WithRepoWorkflowFiles(repoWorkflowFiles))
+	opts = append(opts, daemon.WithRepoContainerImages(repoContainerImages))
 	if len(preacquiredLock) > 0 && preacquiredLock[0] != nil {
 		opts = append(opts, daemon.WithPreacquiredLock(preacquiredLock[0]))
 	}

@@ -64,9 +64,10 @@ type Daemon struct {
 	dockerHealthCheck func(context.Context) error // injectable for testing; nil means use default
 
 	// Workflow
-	workflowFile       string            // optional explicit workflow config file path
-	repoWorkflowFiles  map[string]string // per-repo workflow file overrides (repo path → file path)
-	daemonID           string            // stable ID for lock/state keying in multi-repo mode
+	workflowFile           string            // optional explicit workflow config file path
+	repoWorkflowFiles      map[string]string // per-repo workflow file overrides (repo path → file path)
+	repoContainerImages    map[string]string // per-repo auto-built container images (repo path → image tag)
+	daemonID               string            // stable ID for lock/state keying in multi-repo mode
 }
 
 // Option configures the daemon.
@@ -138,6 +139,12 @@ func WithRepoWorkflowFiles(files map[string]string) Option {
 
 // WithDaemonID sets a stable identifier for lock and state files.
 // This is used in multi-repo mode where repoFilter may be empty.
+// WithRepoContainerImages sets per-repo container image overrides.
+// Used in multi-repo mode where each repo may auto-build a different image.
+func WithRepoContainerImages(images map[string]string) Option {
+	return func(d *Daemon) { d.repoContainerImages = images }
+}
+
 func WithDaemonID(id string) Option {
 	return func(d *Daemon) { d.daemonID = id }
 }

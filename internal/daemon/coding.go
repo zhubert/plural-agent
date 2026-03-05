@@ -499,7 +499,7 @@ func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Sessio
 
 	// Container mode
 	if sess.Containerized {
-		runner.SetContainerized(true, d.config.GetContainerImage())
+		runner.SetContainerized(true, d.containerImageForRepo(sess.RepoPath))
 	}
 
 	// Enable host tools so Claude can use comment_issue and submit_review.
@@ -515,6 +515,18 @@ func (d *Daemon) configureRunner(runner claude.RunnerConfig, sess *config.Sessio
 	if customPrompt != "" {
 		runner.SetSystemPrompt(customPrompt)
 	}
+}
+
+// containerImageForRepo returns the container image for a given repo path.
+// It checks per-repo overrides first (from auto-build), then falls back to
+// the global config setting.
+func (d *Daemon) containerImageForRepo(repoPath string) string {
+	if d.repoContainerImages != nil {
+		if img, ok := d.repoContainerImages[repoPath]; ok && img != "" {
+			return img
+		}
+	}
+	return d.config.GetContainerImage()
 }
 
 // createWorkerWithPrompt creates a session worker with an optional custom system prompt
