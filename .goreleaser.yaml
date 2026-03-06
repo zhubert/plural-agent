@@ -58,6 +58,8 @@ brews:
         type: recommended
     install: |
       bin.install "erg"
+      (var/"erg").mkpath
+      (var/"log/erg").mkpath
     service: |
       run [opt_bin/"erg", "start", "-f"]
       keep_alive true
