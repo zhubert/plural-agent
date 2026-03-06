@@ -250,11 +250,19 @@ func TestFormatInitialMessage_BodyPlacement(t *testing.T) {
 		}
 	})
 
-	t.Run("body appears after URL", func(t *testing.T) {
+	t.Run("body appears after URL wrapped in user-content", func(t *testing.T) {
 		result := FormatInitialMessage(ref, "Detailed description here")
-		expected := "GitHub Issue #10: Test\n\nhttps://github.com/owner/repo/issues/10\n\nDetailed description here"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		if !strings.Contains(result, "https://github.com/owner/repo/issues/10") {
+			t.Errorf("expected URL in result, got %q", result)
+		}
+		if !strings.Contains(result, `<user-content type="issue_body">`) {
+			t.Errorf("expected user-content wrapper, got %q", result)
+		}
+		if !strings.Contains(result, "Detailed description here") {
+			t.Errorf("expected body content, got %q", result)
+		}
+		if !strings.Contains(result, "</user-content>") {
+			t.Errorf("expected closing user-content tag, got %q", result)
 		}
 	})
 }

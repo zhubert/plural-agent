@@ -7,6 +7,7 @@ import (
 	"github.com/zhubert/erg/internal/config"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/sanitize"
 )
 
 // TrimURL extracts a URL from output text.
@@ -26,7 +27,7 @@ func FormatPRCommentsPrompt(comments []git.PRReviewComment) string {
 	for i, c := range comments {
 		sb.WriteString(fmt.Sprintf("--- Comment %d", i+1))
 		if c.Author != "" {
-			sb.WriteString(fmt.Sprintf(" by @%s", c.Author))
+			sb.WriteString(fmt.Sprintf(" by @%s", sanitize.StripHidden(c.Author)))
 		}
 		sb.WriteString(" ---\n")
 		if c.Path != "" {
@@ -36,7 +37,7 @@ func FormatPRCommentsPrompt(comments []git.PRReviewComment) string {
 				sb.WriteString(fmt.Sprintf("File: %s\n", c.Path))
 			}
 		}
-		sb.WriteString(c.Body)
+		sb.WriteString(sanitize.UntrustedContent("review_comment", c.Body))
 		sb.WriteString("\n\n")
 	}
 
@@ -82,23 +83,29 @@ func FindPlanComment(comments []issues.IssueComment) string {
 
 // FormatInitialMessage formats the initial message for a coding session based on the issue provider.
 // The optional body parameter contains the issue description/body text.
+// Both the title and body are sanitized to defend against prompt injection
+// (hidden Unicode, HTML comments, invisible elements) and wrapped in
+// <user-content> delimiters so the model treats them as data, not instructions.
 func FormatInitialMessage(ref config.IssueRef, body string) string {
 	provider := issues.Source(ref.Source)
+
+	// Sanitize the title — it comes from untrusted issue authors.
+	safeTitle := sanitize.StripHidden(ref.Title)
 
 	var header string
 	switch provider {
 	case issues.SourceGitHub:
-		header = fmt.Sprintf("GitHub Issue #%s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("GitHub Issue #%s: %s\n\n%s", ref.ID, safeTitle, ref.URL)
 	case issues.SourceAsana:
-		header = fmt.Sprintf("Asana Task: %s\n\n%s", ref.Title, ref.URL)
+		header = fmt.Sprintf("Asana Task: %s\n\n%s", safeTitle, ref.URL)
 	case issues.SourceLinear:
-		header = fmt.Sprintf("Linear Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("Linear Issue %s: %s\n\n%s", ref.ID, safeTitle, ref.URL)
 	default:
-		header = fmt.Sprintf("Issue %s: %s\n\n%s", ref.ID, ref.Title, ref.URL)
+		header = fmt.Sprintf("Issue %s: %s\n\n%s", ref.ID, safeTitle, ref.URL)
 	}
 
 	if body != "" {
-		return header + "\n\n" + body
+		return header + "\n\n" + sanitize.UntrustedContent("issue_body", body)
 	}
 	return header
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/paths"
+	"github.com/zhubert/erg/internal/sanitize"
 	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/worker"
 	"github.com/zhubert/erg/internal/workflow"
@@ -113,10 +114,11 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 	// feedback so Claude can revise the plan accordingly.
 	if userFeedback, ok := item.StepData["user_feedback"].(string); ok && userFeedback != "" {
 		author, _ := item.StepData["user_feedback_author"].(string)
+		safeFeedback := sanitize.UntrustedContent("user_feedback", userFeedback)
 		if author != "" {
-			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan (from @%s):\n%s", author, userFeedback)
+			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan (from @%s):\n%s", sanitize.StripHidden(author), safeFeedback)
 		} else {
-			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan:\n%s", userFeedback)
+			initialMsg += fmt.Sprintf("\n\n---\nUser feedback on the previous plan:\n%s", safeFeedback)
 		}
 	}
 
@@ -296,7 +298,7 @@ func (d *Daemon) startCoding(ctx context.Context, item daemonstate.WorkItem) err
 	if planErr != nil {
 		log.Debug("could not fetch issue comments for plan context", "error", planErr)
 	} else if plan := worker.FindPlanComment(comments); plan != "" {
-		initialMsg += "\n\n---\nApproved implementation plan:\n" + plan
+		initialMsg += "\n\n---\nApproved implementation plan:\n" + sanitize.UntrustedContent("approved_plan", plan)
 	}
 
 	// Resolve coding system prompt from workflow config
