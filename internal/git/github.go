@@ -405,7 +405,7 @@ func (s *GitService) FetchPRReviewComments(ctx context.Context, repoPath, branch
 // the `gh pr view --json reviews` output.
 func (s *GitService) fetchInlineReviewComments(ctx context.Context, repoPath string, prNumber int) ([]PRReviewComment, error) {
 	output, err := s.executor.Output(ctx, repoPath, "gh", "api",
-		fmt.Sprintf("repos/:owner/:repo/pulls/%d/comments", prNumber),
+		fmt.Sprintf("repos/:owner/:repo/pulls/%d/comments?per_page=100", prNumber),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("gh api pull review comments failed: %w", err)
