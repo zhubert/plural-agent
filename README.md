@@ -1,6 +1,6 @@
 # erg
 
-**Autonomous headless daemon for Claude Code** — does the work.
+**Workflow-driven autonomous coding daemon for Claude Code.**
 
 **Docs: [zhubert.com/erg](https://zhubert.com/erg/)** — setup, workflow configuration, CLI reference, and more.
 
