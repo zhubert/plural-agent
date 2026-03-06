@@ -63,7 +63,10 @@ brews:
     service: |
       run [opt_bin/"erg", "start", "-f"]
       keep_alive true
-      environment_variables PATH: "#{Dir.home}/.local/bin:#{std_service_path_env}"
+      environment_variables PATH: "#{Dir.home}/.local/bin:#{std_service_path_env}",
+                              XDG_CONFIG_HOME: ENV.fetch("XDG_CONFIG_HOME", ""),
+                              XDG_DATA_HOME: ENV.fetch("XDG_DATA_HOME", ""),
+                              XDG_STATE_HOME: ENV.fetch("XDG_STATE_HOME", "")
       working_dir var/"erg"
       log_path var/"log/erg/daemon.log"
       error_log_path var/"log/erg/daemon.err.log"
