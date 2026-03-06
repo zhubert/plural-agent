@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>erg - autonomous headless daemon for claude code</title>
+    <title>Multi-repo — erg</title>
     <meta
       name="description"
       content="erg does the work. Autonomous headless daemon for Claude Code."
@@ -1196,11 +1196,11 @@
         <ul class="sidebar-nav">
           <li class="sidebar-section">
             <span class="sidebar-section-title">Getting started</span>
-            <a href="#overview" class="sidebar-link">Overview</a>
-            <a href="#how-it-works" class="sidebar-link">How it works</a>
-            <a href="#install" class="sidebar-link">Installation</a>
-            <a href="#quickstart" class="sidebar-sublink">Quick start</a>
-            <a href="#file-layout" class="sidebar-sublink">File layout</a>
+            <a href="index.html#overview" class="sidebar-link">Overview</a>
+            <a href="index.html#how-it-works" class="sidebar-link">How it works</a>
+            <a href="index.html#install" class="sidebar-link">Installation</a>
+            <a href="index.html#quickstart" class="sidebar-sublink">Quick start</a>
+            <a href="index.html#file-layout" class="sidebar-sublink">File layout</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
@@ -1218,8 +1218,8 @@
           <li class="sidebar-section">
             <span class="sidebar-section-title">Reference</span>
             <a href="cli.html#cli" class="sidebar-link">CLI commands</a>
-            <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
-            <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
+            <a href="#multi-repo" class="sidebar-link">Multi-repo</a>
+            <a href="#services" class="sidebar-link">Brew services</a>
             <a href="actions.html#actions" class="sidebar-link">Actions</a>
             <a href="actions.html#actions-ai" class="sidebar-sublink">ai</a>
             <a href="actions.html#actions-github" class="sidebar-sublink">github</a>
@@ -1255,222 +1255,212 @@
 
       <!-- Content -->
       <main class="main">
-        <!-- Overview -->
-        <section id="overview">
-          <span class="hero-badge">autonomous coding daemon</span>
-          <p class="hero-tagline">
-            <span class="hero-tagline-accent">does the work.</span>
-          </p>
-          <p>
-            Autonomous headless daemon for Claude Code. Polls GitHub, Asana, or
-            Linear for issues, starts containerized Claude sessions, and drives
-            the full PR lifecycle &mdash; as automated as your workflow allows.
-          </p>
-          <div class="hero-cta">
-            <a href="#install" class="btn btn-primary">install</a>
-            <a href="https://github.com/zhubert/erg" class="btn btn-ghost"
-              >view on github</a
-            >
-          </div>
-        </section>
+        <!-- Multi-repo -->
+        <h2 id="multi-repo">Multi-repo</h2>
+        <p>
+          A single erg daemon can watch multiple repositories, each with its own
+          workflow configuration. All repos share a global pool of concurrency
+          slots &mdash; when a slot is free, the daemon picks up the next issue
+          from any repo.
+        </p>
 
-        <div class="feature-grid">
-          <div class="feature-item">
-            <span class="fi-icon">#</span>
-            <h4>issue polling</h4>
-            <p>
-              Polls GitHub, Asana, or Linear for new issues. Label an issue
-              <code>queued</code> and the agent picks it up.
-            </p>
+        <h3>Config file</h3>
+        <p>
+          Create a YAML config file that lists the repos and an optional global
+          <code>max_concurrent</code> limit. Each repo can specify a
+          <code>workflow</code> path; if omitted the daemon looks for the
+          default <code>&lt;repo&gt;/.erg/workflow.yaml</code>.
+        </p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">config.yaml</span>
           </div>
-          <div class="feature-item">
-            <span class="fi-icon">[ ]</span>
-            <h4>containerized sessions</h4>
-            <p>
-              Every session runs inside a Docker container. The container is the
-              sandbox &mdash; Claude has full permissions.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">//</span>
-            <h4>concurrent workers</h4>
-            <p>
-              Process multiple issues in parallel. Each gets its own branch,
-              container, and Claude session.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">&lt;&gt;</span>
-            <h4>PR lifecycle</h4>
-            <p>
-              Creates PRs, addresses review comments, waits for CI, and
-              auto-merges. Full lifecycle management.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">~</span>
-            <h4>workflow engine</h4>
-            <p>
-              Configurable state machine via <code>.erg/workflow.yaml</code>.
-              Task, wait, choice, and pass states with retry, catch, and
-              timeout.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">*</span>
-            <h4>automated workflow</h4>
-            <p>
-              From issue to merged PR: coding, CI fixes, review feedback, and
-              merge — all managed by the workflow engine.
-            </p>
-          </div>
+          <pre><span class="ck">max_concurrent:</span> <span class="cv">5</span>          <span class="cc"># global slot pool shared across all repos</span>
+
+<span class="ck">repos:</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/backend</span>       <span class="cc"># uses &lt;path&gt;/.erg/workflow.yaml</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/frontend</span>
+    <span class="ck">workflow:</span> <span class="cv">/path/to/frontend-workflow.yaml</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/local-project</span></pre>
         </div>
 
-        <!-- How it works -->
-        <h2 id="how-it-works">How it works</h2>
+        <h3>Starting the daemon</h3>
         <p>
-          At its core, erg is a
-          <strong>state machine engine paired with AI coding</strong>. Each
-          issue becomes a work item that advances through a configurable
-          flowchart of states — from AI-generated code to a merged PR. You
-          define exactly how much automation applies: require human review,
-          auto-merge after CI, loop back for fixes, or notify external systems
-          at any step.
+          Pass the config file to <code>erg start</code> with the
+          <code>--config</code> flag. The flag is mutually exclusive with
+          <code>--repo</code> and <code>--workflow</code>.
         </p>
-        <ol class="steps-list">
-          <li>
-            <div class="step-body">
-              <h4>Tag or label an issue</h4>
-              <p>
-                Mark a task in GitHub, Asana, or Linear with the configured
-                trigger label (e.g. <code>plan</code> or <code>queued</code>).
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Daemon picks it up</h4>
-              <p>
-                erg starts a containerized Claude session. With planning
-                enabled, no branch is created yet — Claude reads the codebase in
-                read-only mode.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude analyzes and posts a plan</h4>
-              <p>
-                The <code>ai.plan</code> session explores the codebase and posts
-                a structured implementation plan as an issue comment — no code
-                written yet.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>You review and approve</h4>
-              <p>
-                Reply with approval (e.g. "LGTM") to proceed, or leave feedback.
-                Claude revises the plan and loops back until you approve.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude writes the code</h4>
-              <p>
-                Once approved, <code>ai.code</code> creates a branch, implements
-                the changes, runs tests, and commits.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>State machine advances</h4>
-              <p>
-                The workflow engine opens a PR, waits for CI, handles review
-                feedback, and merges — automatically, according to your rules.
-              </p>
-            </div>
-          </li>
-        </ol>
-
-        <!-- Installation -->
-        <h2 id="install">Installation</h2>
-        <h3>Homebrew</h3>
         <div class="install-block">
           <span class="prompt-char">$</span>
-          <code>brew install zhubert/tap/erg</code>
+          <code>erg start --config config.yaml</code>
           <button
             class="copy-btn"
-            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
+            onclick="copyCmd(this, 'erg start --config config.yaml')"
+          >
+            copy
+          </button>
+        </div>
+        <p>
+          Or in the foreground for development:
+        </p>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>erg start -f --config config.yaml</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'erg start -f --config config.yaml')"
           >
             copy
           </button>
         </div>
 
-        <h3>Build from source</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>go build -o erg .</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
-            copy
-          </button>
-        </div>
-
-        <h3 id="quickstart">Quick start</h3>
+        <h3>How concurrency works</h3>
         <p>
-          Run <code>erg configure</code> inside your repo. It will walk you through
-          choosing an issue provider (GitHub, Asana, or Linear), configuring
-          credentials, and scaffolding a workflow — then start the daemon.
+          The <code>max_concurrent</code> in the config file sets the global
+          number of slots. A slot is a slot regardless of which repo the work
+          came from &mdash; if three of five slots are running backend tasks,
+          the remaining two can pick up frontend issues.
         </p>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>erg configure</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'erg configure')">
-            copy
-          </button>
-        </div>
-
-
-        <h3 id="file-layout">File layout</h3>
         <p>
-          Erg stores configuration, session data, and logs under
-          <code>~/.erg/</code> by default. On Linux, if <code>~/.erg/</code>
-          does not exist, Erg respects the
-          <a href="https://specifications.freedesktop.org/basedir-spec/latest/">XDG Base Directory Specification</a>:
+          If the config file omits <code>max_concurrent</code>, the default
+          (<code>3</code>) is used. Per-repo
+          <code>settings.max_concurrent</code> in individual workflow files is
+          ignored in multi-repo mode; the config file value always wins.
         </p>
+
+        <h3>Config reference</h3>
         <table class="cli-table">
           <thead>
             <tr>
-              <th>Data type</th>
-              <th>Default path</th>
-              <th>XDG override</th>
+              <th>Key</th>
+              <th>Type</th>
+              <th>Description</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td>Config (<code>config.json</code>)</td>
-              <td><code>~/.erg/</code></td>
-              <td><code>$XDG_CONFIG_HOME/erg/</code></td>
+              <td><code>max_concurrent</code></td>
+              <td>int</td>
+              <td>
+                Global concurrency limit &mdash; maximum sessions running at
+                once across all repos. Default <code>3</code>.
+              </td>
             </tr>
             <tr>
-              <td>Session data</td>
-              <td><code>~/.erg/sessions/</code></td>
-              <td><code>$XDG_DATA_HOME/erg/sessions/</code></td>
+              <td><code>repos</code></td>
+              <td>list</td>
+              <td>
+                One or more repo entries. At least one is required.
+              </td>
             </tr>
             <tr>
-              <td>Logs &amp; state</td>
-              <td><code>~/.erg/logs/</code></td>
-              <td><code>$XDG_STATE_HOME/erg/logs/</code></td>
+              <td><code>repos[].repo</code></td>
+              <td>string</td>
+              <td>
+                Repository identifier &mdash; either <code>owner/repo</code> or
+                an absolute filesystem path.
+              </td>
+            </tr>
+            <tr>
+              <td><code>repos[].workflow</code></td>
+              <td>string</td>
+              <td>
+                Optional path to a workflow config file for this repo. If
+                omitted, uses
+                <code>&lt;repo&gt;/.erg/workflow.yaml</code>.
+              </td>
             </tr>
           </tbody>
         </table>
+
+        <!-- Services -->
+        <h2 id="services">Brew services (macOS)</h2>
         <p>
-          Resolution order: (1) if <code>~/.erg/</code> exists, use the legacy
-          flat layout; (2) if any XDG env var is set, use XDG layout with
-          defaults for unset vars; (3) otherwise default to <code>~/.erg/</code>.
+          If you installed erg via Homebrew, you can use <code>brew services</code>
+          to run it as a persistent background service that starts on login and
+          restarts on crash.
+        </p>
+
+        <h3>Setup</h3>
+        <p>
+          First, create a daemon config file at <code>~/.erg/daemon.yaml</code>
+          listing the repos you want erg to watch. This uses the same format as
+          the <a href="#multi-repo">multi-repo config</a>:
+        </p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">~/.erg/daemon.yaml</span>
+          </div>
+          <pre><span class="ck">max_concurrent:</span> <span class="cv">3</span>
+
+<span class="ck">repos:</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/backend</span>
+  - <span class="ck">path:</span> <span class="cv">/home/user/frontend</span></pre>
+        </div>
+        <p>
+          Each repo should already have an <code>.erg/workflow.yaml</code> —
+          run <code>erg configure</code> inside each repo first.
+        </p>
+
+        <h3>Managing the service</h3>
+        <div class="install-block">
+          <span class="prompt-char">$</span>
+          <code>brew services start erg</code>
+          <button
+            class="copy-btn"
+            onclick="copyCmd(this, 'brew services start erg')"
+          >
+            copy
+          </button>
+        </div>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>brew services start erg</code></td>
+              <td>Start erg and register it to launch on login</td>
+            </tr>
+            <tr>
+              <td><code>brew services stop erg</code></td>
+              <td>Stop erg and remove the login item</td>
+            </tr>
+            <tr>
+              <td><code>brew services restart erg</code></td>
+              <td>Restart erg (e.g. after updating config)</td>
+            </tr>
+            <tr>
+              <td><code>brew services info erg</code></td>
+              <td>Show service status</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Default config auto-discovery</h3>
+        <p>
+          When <code>~/.erg/daemon.yaml</code> exists, several commands work
+          without any flags:
+        </p>
+        <ul>
+          <li>
+            <code>erg start</code> — automatically uses the default config
+          </li>
+          <li>
+            <code>erg stop</code> — finds the running daemon by scanning lock
+            files
+          </li>
+          <li>
+            <code>erg status</code> — same auto-detection as stop
+          </li>
+        </ul>
+        <p>
+          If multiple daemons are running, <code>stop</code> and
+          <code>status</code> will list them and ask you to specify
+          <code>--repo</code>.
         </p>
 
         <div

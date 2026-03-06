@@ -1,0 +1,3190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Action reference — erg</title>
+    <meta
+      name="description"
+      content="erg does the work. Autonomous headless daemon for Claude Code."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #141416;
+        --bg-sidebar: #0f0f11;
+        --bg-card: #1e1e21;
+        --bg-code: #1a1a1d;
+        --bg-inset: #111113;
+        --accent: #f97316;
+        --accent-dim: #ea580c;
+        --accent-bg: rgba(249, 115, 22, 0.08);
+        --accent-border: rgba(249, 115, 22, 0.2);
+        --cyan: #22d3ee;
+        --green: #34d399;
+        --violet: #a78bfa;
+        --text: #e4e4e7;
+        --text-muted: #a1a1aa;
+        --text-dim: #71717a;
+        --border: #2a2a2e;
+        --border-light: #3f3f46;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html {
+        font-size: 100%;
+        scroll-behavior: smooth;
+        scroll-padding-top: 2rem;
+      }
+
+      body {
+        font-family:
+          "IBM Plex Sans",
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
+
+      ::selection {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        font-family: "Bricolage Grotesque", sans-serif;
+        letter-spacing: -0.02em;
+      }
+
+      code,
+      pre {
+        font-family: "IBM Plex Mono", monospace;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      /* ---- Two-column layout ---- */
+
+      .page {
+        display: flex;
+        min-height: 100vh;
+      }
+
+      /* ---- Sidebar ---- */
+
+      .sidebar {
+        width: 15rem;
+        flex-shrink: 0;
+        background: var(--bg-sidebar);
+        border-right: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+        padding: 1.5rem 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-logo {
+        padding: 0 1.25rem;
+        margin-bottom: 1.75rem;
+      }
+
+      .sidebar-logo a {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 2rem;
+        font-weight: 800;
+        color: var(--text);
+        text-decoration: none;
+        letter-spacing: -0.03em;
+      }
+
+      .sidebar-logo a span {
+        color: var(--accent);
+      }
+
+      .sidebar-nav {
+        list-style: none;
+        flex: 1;
+      }
+
+      .sidebar-section {
+        margin-bottom: 0.25rem;
+      }
+
+      .sidebar-section-title {
+        display: block;
+        padding: 0.4rem 1.25rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        margin-top: 0.75rem;
+      }
+
+      .sidebar-link {
+        display: block;
+        padding: 0.35rem 1.25rem 0.35rem 1.75rem;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        text-decoration: none;
+        transition:
+          color 0.15s,
+          background 0.15s;
+        border-left: 2px solid transparent;
+      }
+
+      .sidebar-link:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.03);
+        text-decoration: none;
+      }
+
+      .sidebar-link.active {
+        color: var(--accent);
+        border-left-color: var(--accent);
+        background: var(--accent-bg);
+      }
+
+      .sidebar-footer {
+        padding: 1rem 1.25rem 0;
+        border-top: 1px solid var(--border);
+        margin-top: auto;
+      }
+
+      .sidebar-footer a {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        padding: 0.2rem 0;
+        text-decoration: none;
+      }
+
+      .sidebar-footer a:hover {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
+      /* ---- Main content ---- */
+
+      .main {
+        flex: 1;
+        min-width: 0;
+        max-width: 820px;
+        padding: 2.5rem 3rem 4rem;
+      }
+
+      /* ---- Content typography ---- */
+
+      .main h1 {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: var(--text);
+        margin-bottom: 0.75rem;
+      }
+
+      .main h2 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-top: 3.5rem;
+        margin-bottom: 1rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+      }
+
+      .main h2:first-of-type {
+        margin-top: 2.5rem;
+      }
+
+      .main h3 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 2rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .main h4 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 1.5rem;
+        margin-bottom: 0.4rem;
+      }
+
+      .main p {
+        margin-bottom: 1rem;
+        color: var(--text-muted);
+      }
+
+      .main p code,
+      .main li code {
+        background: var(--bg-code);
+        color: var(--cyan);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-size: 0.85em;
+        border: 1px solid var(--border);
+      }
+
+      .main ul,
+      .main ol {
+        margin-bottom: 1rem;
+        padding-left: 1.5rem;
+        color: var(--text-muted);
+      }
+
+      .main li {
+        margin-bottom: 0.35rem;
+        font-size: 0.95rem;
+      }
+
+      /* ---- Hero area ---- */
+
+      .hero-badge {
+        display: inline-block;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.65rem;
+        font-weight: 600;
+        color: var(--accent);
+        background: transparent;
+        border: 1px solid var(--accent-border);
+        border-radius: 3px;
+        padding: 0.2rem 0.6rem;
+        margin-bottom: 1.25rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .hero-tagline {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 2.8rem;
+        font-weight: 800;
+        color: var(--text);
+        margin-bottom: 1rem;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+      }
+
+      .hero-tagline-accent {
+        background: linear-gradient(135deg, var(--accent), #fbbf24);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .hero-cta {
+        display: inline-flex;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.55rem 1.25rem;
+        border-radius: 6px;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.15s;
+        border: 1px solid transparent;
+      }
+
+      .btn:hover {
+        text-decoration: none;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-dim);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-muted);
+        border-color: var(--border-light);
+      }
+
+      .btn-ghost:hover {
+        color: var(--text);
+        border-color: var(--text-dim);
+      }
+
+      /* ---- Feature grid ---- */
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.85rem;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .feature-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+        padding: 1.25rem 1.4rem;
+        transition:
+          transform 0.15s,
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+
+      .feature-item:nth-child(2) {
+        border-left-color: var(--cyan);
+      }
+      .feature-item:nth-child(3) {
+        border-left-color: var(--violet);
+      }
+      .feature-item:nth-child(4) {
+        border-left-color: var(--green);
+      }
+      .feature-item:nth-child(5) {
+        border-left-color: var(--cyan);
+      }
+      .feature-item:nth-child(6) {
+        border-left-color: var(--violet);
+      }
+
+      .feature-item:hover {
+        border-color: var(--border-light);
+        transform: scale(1.01);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+      }
+      .feature-item:hover {
+        border-left-color: var(--accent);
+      }
+      .feature-item:nth-child(2):hover {
+        border-left-color: var(--cyan);
+      }
+      .feature-item:nth-child(3):hover {
+        border-left-color: var(--violet);
+      }
+      .feature-item:nth-child(4):hover {
+        border-left-color: var(--green);
+      }
+      .feature-item:nth-child(5):hover {
+        border-left-color: var(--cyan);
+      }
+      .feature-item:nth-child(6):hover {
+        border-left-color: var(--violet);
+      }
+
+      .feature-item h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.35rem;
+      }
+
+      .feature-item .fi-icon {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--accent);
+        margin-bottom: 0.65rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 50%;
+        background: var(--accent-bg);
+        border: 1px solid var(--accent-border);
+      }
+
+      .feature-item:nth-child(2) .fi-icon {
+        color: var(--cyan);
+        background: rgba(34, 211, 238, 0.08);
+        border-color: rgba(34, 211, 238, 0.2);
+      }
+      .feature-item:nth-child(3) .fi-icon {
+        color: var(--violet);
+        background: rgba(167, 139, 250, 0.08);
+        border-color: rgba(167, 139, 250, 0.2);
+      }
+      .feature-item:nth-child(4) .fi-icon {
+        color: var(--green);
+        background: rgba(52, 211, 153, 0.08);
+        border-color: rgba(52, 211, 153, 0.2);
+      }
+      .feature-item:nth-child(5) .fi-icon {
+        color: var(--cyan);
+        background: rgba(34, 211, 238, 0.08);
+        border-color: rgba(34, 211, 238, 0.2);
+      }
+      .feature-item:nth-child(6) .fi-icon {
+        color: var(--violet);
+        background: rgba(167, 139, 250, 0.08);
+        border-color: rgba(167, 139, 250, 0.2);
+      }
+
+      .feature-item p {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin: 0;
+      }
+
+      /* ---- Steps (how it works) ---- */
+
+      .steps-list {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0 1.5rem;
+        counter-reset: step;
+      }
+
+      .steps-list li {
+        counter-increment: step;
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border);
+        margin: 0;
+      }
+
+      .steps-list li:last-child {
+        border-bottom: none;
+      }
+
+      .steps-list li::before {
+        content: counter(step);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        border-radius: 50%;
+        background: var(--accent-bg);
+        border: 1px solid var(--accent-border);
+        color: var(--accent);
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 700;
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+      }
+
+      .step-body h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.15rem;
+      }
+
+      .step-body p {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin: 0;
+      }
+
+      /* ---- State diagram ---- */
+
+      .state-flow {
+        display: flex;
+        align-items: flex-start;
+        gap: 0;
+        padding: 1.25rem 0;
+        overflow-x: auto;
+        margin: 0.5rem 0 0.75rem;
+      }
+
+      .sf-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        flex-shrink: 0;
+      }
+
+      .sf-box {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        font-weight: 500;
+        padding: 0.45rem 0.85rem;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text);
+        white-space: nowrap;
+        transition: border-color 0.15s;
+      }
+
+      .sf-box.sf-task {
+        border-color: rgba(249, 115, 22, 0.3);
+        background: rgba(249, 115, 22, 0.06);
+      }
+      .sf-box.sf-wait {
+        border-color: rgba(167, 139, 250, 0.3);
+        background: rgba(167, 139, 250, 0.06);
+      }
+      .sf-box.sf-done {
+        border-color: rgba(52, 211, 153, 0.3);
+        background: rgba(52, 211, 153, 0.06);
+      }
+
+      .sf-type {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.65rem;
+        color: var(--text-dim);
+      }
+
+      .sf-step {
+        display: flex;
+        align-items: flex-start;
+      }
+
+      .sf-arrow {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+        padding: 0 0.35rem;
+        flex-shrink: 0;
+        user-select: none;
+        line-height: 1;
+        /* Match sf-box height: 0.78rem line + 0.45rem*2 padding + 2px border */
+        height: calc(0.78rem * 1.75 + 0.9rem + 2px);
+        display: flex;
+        align-items: center;
+      }
+
+      .state-note {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        margin-bottom: 1.5rem;
+      }
+
+      /* ---- Code block ---- */
+
+      .code-block {
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .code-header {
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border);
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .code-filename {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+      }
+
+      .code-block pre {
+        margin: 0;
+        padding: 1rem 1.25rem;
+        font-size: 0.8rem;
+        line-height: 1.75;
+        overflow-x: auto;
+        color: var(--text-muted);
+      }
+
+      .code-block .ck {
+        color: var(--accent);
+      }
+      .code-block .cv {
+        color: var(--text);
+      }
+      .code-block .cc {
+        color: var(--text-dim);
+        font-style: italic;
+      }
+      .code-block .cs {
+        color: var(--green);
+      }
+      .code-block .ca {
+        color: var(--violet);
+      }
+
+      /* ---- Example tabs ---- */
+
+      .example-tabs {
+        margin: 1rem 0 1.5rem;
+      }
+
+      .tab-bar {
+        display: flex;
+        gap: 0.35rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .tab-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text-dim);
+        padding: 0.3rem 0.8rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.73rem;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s,
+          background 0.15s;
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-color: var(--accent-border);
+        background: var(--accent-bg);
+      }
+
+      .tab-btn:hover:not(.active) {
+        color: var(--text-muted);
+        border-color: var(--border-light);
+      }
+
+      .example-tabs [data-panel="yaml"] .code-block {
+        margin: 0;
+      }
+
+      .diagram-panel {
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem 1rem;
+        overflow-x: auto;
+      }
+
+      .diagram-panel svg {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+      }
+
+      /* ---- Info cards ---- */
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin: 1rem 0 1.5rem;
+      }
+
+      .info-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.15rem;
+      }
+
+      .info-card h4 {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 0.3rem;
+      }
+
+      .info-card p {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin: 0;
+      }
+
+      /* ---- CLI reference table ---- */
+
+      .cli-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0 1.5rem;
+        font-size: 0.85rem;
+      }
+
+      .cli-table th {
+        text-align: left;
+        padding: 0.6rem 1rem;
+        font-weight: 600;
+        color: var(--text-dim);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border-bottom: 1px solid var(--border-light);
+        background: var(--bg-card);
+      }
+
+      .cli-table td {
+        padding: 0.6rem 1rem;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-muted);
+      }
+
+      .cli-table td code {
+        background: var(--bg-code);
+        color: var(--cyan);
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.82rem;
+        border: 1px solid var(--border);
+      }
+
+      .cli-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* ---- Install block ---- */
+
+      .install-block {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+        padding: 0.9rem 1.25rem;
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        max-width: 520px;
+      }
+
+      .install-block .prompt-char {
+        color: var(--accent);
+        user-select: none;
+        font-family: "IBM Plex Mono", monospace;
+        font-weight: 500;
+        font-size: 0.88rem;
+      }
+
+      .install-block code {
+        font-size: 0.88rem;
+        color: var(--text);
+      }
+
+      .copy-btn {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        padding: 0.3rem 0.65rem;
+        border-radius: 4px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.7rem;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .copy-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        box-shadow: 0 0 8px rgba(249, 115, 22, 0.15);
+      }
+
+      .copy-btn.copied {
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      /* ---- Mobile sidebar toggle ---- */
+
+      .mobile-header {
+        display: none;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--bg-sidebar);
+        border-bottom: 1px solid var(--border);
+        padding: 0.75rem 1rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .mobile-header .logo-text {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--text);
+      }
+
+      .mobile-header .logo-text span {
+        color: var(--accent);
+      }
+
+      .menu-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        cursor: pointer;
+      }
+
+      /* ---- Responsive ---- */
+
+      @media (max-width: 860px) {
+        .sidebar {
+          position: fixed;
+          left: -16.25rem;
+          z-index: 200;
+          transition: left 0.25s ease;
+          box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .sidebar.open {
+          left: 0;
+        }
+
+        .sidebar-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 199;
+        }
+
+        .sidebar-overlay.open {
+          display: block;
+        }
+
+        .mobile-header {
+          display: flex;
+        }
+
+        .main {
+          padding: 1.5rem 1.25rem 3rem;
+        }
+
+        .feature-grid,
+        .info-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .feature-item,
+        .info-card,
+        .action-ref {
+          overflow: hidden;
+          overflow-wrap: break-word;
+          word-break: break-word;
+          min-width: 0;
+        }
+
+        .install-block {
+          max-width: 100%;
+          flex-wrap: wrap;
+        }
+
+        .cli-table {
+          display: block;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .state-flow {
+          padding: 1rem 0;
+          flex-wrap: wrap;
+        }
+      }
+
+      /* ---- Sidebar sub-links (category TOC) ---- */
+
+      .sidebar-sublink {
+        display: block;
+        padding: 0.2rem 1.25rem 0.2rem 2.75rem;
+        font-size: 0.75rem;
+        font-family: "IBM Plex Mono", monospace;
+        color: var(--text-dim);
+        text-decoration: none;
+        transition: color 0.15s;
+        line-height: 1.5;
+      }
+
+      .sidebar-sublink:hover {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
+      /* ---- Action reference ---- */
+
+      .action-ref {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .action-header {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .action-title {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .action-title::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+      }
+
+      .action-header:has(.badge-async) .action-title::before {
+        background: var(--violet);
+      }
+
+      .action-header:has(.badge-sync) .action-title::before {
+        background: var(--green);
+      }
+
+      .action-desc {
+        font-size: 0.88rem;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+        line-height: 1.6;
+      }
+
+      .badge {
+        display: inline-block;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.63rem;
+        font-weight: 500;
+        padding: 0.15rem 0.5rem;
+        border-radius: 100px;
+        flex-shrink: 0;
+      }
+
+      .badge-async {
+        background: rgba(167, 139, 250, 0.1);
+        border: 1px solid rgba(167, 139, 250, 0.25);
+        color: var(--violet);
+      }
+
+      .badge-sync {
+        background: rgba(52, 211, 153, 0.1);
+        border: 1px solid rgba(52, 211, 153, 0.25);
+        color: var(--green);
+      }
+
+      .param-section {
+        margin-top: 0.85rem;
+      }
+
+      .param-section-title {
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        margin-bottom: 0.4rem;
+      }
+
+      .param-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      .param-table th {
+        text-align: left;
+        padding: 0.4rem 0.75rem;
+        font-size: 0.66rem;
+        font-weight: 600;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        background: var(--bg-inset);
+        border-bottom: 1px solid var(--border-light);
+      }
+
+      .param-table td {
+        padding: 0.45rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-muted);
+        vertical-align: top;
+      }
+
+      .param-table td:first-child {
+        font-family: "IBM Plex Mono", monospace;
+        color: var(--cyan);
+        font-size: 0.8rem;
+        white-space: nowrap;
+      }
+
+      .param-table td:nth-child(2) {
+        font-family: "IBM Plex Mono", monospace;
+        color: var(--text-dim);
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }
+
+      .param-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .param-none {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        margin-top: 0.35rem;
+      }
+
+      @media (max-width: 480px) {
+        .hero-tagline {
+          font-size: 1.8rem;
+        }
+
+        .hero-cta {
+          flex-direction: column;
+        }
+
+        .btn {
+          width: 100%;
+          justify-content: center;
+          max-width: 280px;
+        }
+
+        .cli-table {
+          font-size: 0.78rem;
+        }
+
+        .cli-table th,
+        .cli-table td {
+          padding: 0.5rem 0.6rem;
+        }
+
+        .code-block pre {
+          font-size: 0.72rem;
+          padding: 0.75rem 1rem;
+        }
+
+        .action-ref {
+          padding: 1rem;
+        }
+
+        .action-title {
+          font-size: 0.85rem;
+        }
+
+        .action-desc {
+          font-size: 0.82rem;
+        }
+      }
+
+      /* ---- Scrollable param-table on narrow phones ---- */
+      @media (max-width: 560px) {
+        .param-section {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          margin-left: -0.25rem;
+          margin-right: -0.25rem;
+        }
+
+        .param-table {
+          font-size: 0.75rem;
+          width: max-content;
+          min-width: 100%;
+        }
+
+        .param-table th {
+          white-space: nowrap;
+        }
+
+        .param-table th,
+        .param-table td {
+          padding: 0.35rem 0.5rem;
+        }
+
+        .param-table td:first-child {
+          font-size: 0.73rem;
+        }
+
+        .param-table td:nth-child(2) {
+          font-size: 0.7rem;
+        }
+
+        .install-block {
+          gap: 0.35rem;
+        }
+
+        .install-block code {
+          font-size: 0.78rem;
+        }
+
+        .copy-btn {
+          position: static;
+          transform: none;
+          flex-shrink: 0;
+          padding: 0.25rem 0.5rem;
+          font-size: 0.65rem;
+        }
+      }
+    </style>
+    <script src="./mermaid.min.js"></script>
+  </head>
+  <body>
+    <div class="mobile-header">
+      <span class="logo-text">erg<span>.</span></span>
+      <button class="menu-btn" onclick="toggleSidebar()">menu</button>
+    </div>
+
+    <div
+      class="sidebar-overlay"
+      id="sidebarOverlay"
+      onclick="toggleSidebar()"
+    ></div>
+
+    <div class="page">
+      <nav class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+          <a href="index.html">erg<span>.</span></a>
+        </div>
+        <ul class="sidebar-nav">
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Getting started</span>
+            <a href="index.html#overview" class="sidebar-link">Overview</a>
+            <a href="index.html#how-it-works" class="sidebar-link">How it works</a>
+            <a href="index.html#install" class="sidebar-link">Installation</a>
+            <a href="index.html#quickstart" class="sidebar-sublink">Quick start</a>
+            <a href="index.html#file-layout" class="sidebar-sublink">File layout</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Workflow</span>
+            <a href="workflow.html#workflow" class="sidebar-link">Configuration</a>
+            <a href="workflow.html#settings" class="sidebar-sublink">settings</a>
+            <a href="workflow.html#source-filter" class="sidebar-sublink">source.filter</a>
+            <a href="workflow.html#states" class="sidebar-link">State types</a>
+            <a href="workflow.html#state-task" class="sidebar-sublink">task</a>
+            <a href="workflow.html#state-wait" class="sidebar-sublink">wait</a>
+            <a href="workflow.html#state-choice" class="sidebar-sublink">choice</a>
+            <a href="workflow.html#state-pass" class="sidebar-sublink">pass</a>
+            <a href="workflow.html#error-handling" class="sidebar-link">Error handling</a>
+            <a href="workflow.html#hooks" class="sidebar-link">Hooks</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Reference</span>
+            <a href="cli.html#cli" class="sidebar-link">CLI commands</a>
+            <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
+            <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
+            <a href="#actions" class="sidebar-link">Actions</a>
+            <a href="#actions-ai" class="sidebar-sublink">ai</a>
+            <a href="#actions-github" class="sidebar-sublink">github</a>
+            <a href="#actions-git" class="sidebar-sublink">git</a>
+            <a href="#actions-asana" class="sidebar-sublink">asana</a>
+            <a href="#actions-linear" class="sidebar-sublink">linear</a>
+            <a href="#actions-slack" class="sidebar-sublink">slack</a>
+            <a href="#actions-webhook" class="sidebar-sublink">webhook</a>
+            <a href="#actions-workflow" class="sidebar-sublink">workflow</a>
+            <a href="events.html#events" class="sidebar-link">Wait events</a>
+            <a href="events.html#events-pr" class="sidebar-sublink">pr</a>
+            <a href="events.html#events-ci" class="sidebar-sublink">ci</a>
+            <a href="events.html#events-plan" class="sidebar-sublink">plan</a>
+            <a href="events.html#events-asana" class="sidebar-sublink">asana</a>
+            <a href="events.html#events-linear" class="sidebar-sublink">linear</a>
+            <a href="events.html#events-gate" class="sidebar-sublink">gate</a>
+          </li>
+          <li class="sidebar-section">
+            <span class="sidebar-section-title">Examples</span>
+            <a href="examples.html#examples" class="sidebar-link">Example workflows</a>
+            <a href="examples.html#example-minimal" class="sidebar-sublink">Minimal</a>
+            <a href="examples.html#example-supervised" class="sidebar-sublink">Supervised</a>
+            <a href="examples.html#example-ci-gate" class="sidebar-sublink">CI gate</a>
+            <a href="examples.html#example-label-tracking" class="sidebar-sublink">Label tracking</a>
+            <a href="examples.html#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
+          </li>
+        </ul>
+        <div class="sidebar-footer">
+          <a href="https://github.com/zhubert/erg">GitHub</a>
+          <a href="https://github.com/zhubert/erg/issues">Issues</a>
+        </div>
+      </nav>
+
+      <!-- Content -->
+      <main class="main">
+        <!-- Action reference -->
+        <h2 id="actions">Action reference</h2>
+        <p>
+          Actions are used in <code>task</code> states via the
+          <code>action:</code> key. Each action accepts typed
+          <code>params</code> and may produce output data that downstream
+          <code>choice</code> states can inspect.
+        </p>
+
+        <h3 id="actions-ai">AI actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.code</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Starts an autonomous Claude Code session that reads the issue,
+            writes code, runs tests, and commits changes locally. The daemon
+            waits for the session to complete before advancing.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_turns</td>
+                  <td>int</td>
+                  <td>50</td>
+                  <td>Maximum number of Claude turns per session.</td>
+                </tr>
+                <tr>
+                  <td>max_duration</td>
+                  <td>duration</td>
+                  <td>30m</td>
+                  <td>
+                    Hard time limit for the session, e.g. <code>20m</code>,
+                    <code>2h</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>containerized</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Run Claude inside a Docker container sandbox.</td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>
+                    Inline prompt or <code>file:.erg/prompt.md</code> to load
+                    from the repo. Overrides the default coding prompt.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_command</td>
+                  <td>string</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Shell command to run as a formatter after coding completes
+                    (e.g. <code>go fmt ./...</code>). Claude is also instructed
+                    to run it before each commit. Omit to skip auto-formatting.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the daemon commits the post-coding
+                    format pass. Only used when
+                    <code>format_command</code> is set.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">
+              None. Session completion is signalled internally; the daemon
+              advances the state machine when the worker exits.
+            </p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Notes</div>
+            <ul
+              style="
+                margin: 0.35rem 0 0;
+                padding-left: 1.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              <li>
+                If the branch already has an open PR, coding is skipped and the
+                workflow advances to <code>github.create_pr</code>, which
+                detects the existing PR.
+              </li>
+              <li>
+                If the branch was already merged, the issue is closed and the
+                workflow jumps to <code>done</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.fix_ci</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Resumes the existing Claude session to fix failing CI. Fetches
+            failure logs from the most recent GitHub Actions run and passes them
+            to Claude as context.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_ci_fix_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of CI fix attempts before returning an error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the fix session.</td>
+                </tr>
+                <tr>
+                  <td>format_command</td>
+                  <td>string</td>
+                  <td><em>inherited</em></td>
+                  <td>
+                    Shell command to run as a formatter after each CI fix round
+                    (e.g. <code>go fmt ./...</code>). Overrides the value
+                    inherited from the <code>ai.code</code> step. Omit to keep
+                    the inherited formatter or skip formatting.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the daemon commits the
+                    post-fix-round format pass. Only used when
+                    <code>format_command</code> is set (directly or inherited).
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ci_fix_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.address_review</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Fetches PR review comments and resumes the coding session to address
+            them. Daemon-managed transcript comments are filtered out so Claude
+            only sees human feedback. Increments <code>review_rounds</code> on
+            each invocation; returns an error when the max is reached.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_review_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of review-address attempts before returning
+                    an error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the review-address session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.write_pr_description</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Generates a rich PR description from the branch diff using Claude
+            and updates the open PR body. Useful after coding to produce a
+            concise, human-readable summary before requesting review.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.resolve_conflicts</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Merges the base branch into the feature branch (leaving conflict
+            markers in place), then starts a Claude session to resolve the
+            conflicts. Claude reads each conflicted file, resolves the markers,
+            stages the files, and commits the merge.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_conflict_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of conflict resolution attempts before
+                    returning an error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the resolution session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>conflict_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.plan</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Starts a read-only planning session where Claude analyzes the issue
+            and codebase, then posts a structured implementation plan as an
+            issue comment. No new branch or worktree is created — Claude reads
+            from the main repo directory. Useful as a first step before
+            <code>ai.code</code> to get human sign-off on the approach.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>
+                    Inline prompt or <code>file:.erg/plan_prompt.md</code> to
+                    load from the repo. Overrides the default planning prompt.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_turns</td>
+                  <td>int</td>
+                  <td><em>unlimited</em></td>
+                  <td>
+                    Maximum number of Claude turns for the planning session.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_duration</td>
+                  <td>duration</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Hard time limit for the session, e.g. <code>20m</code>,
+                    <code>2h</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>containerized</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Run Claude inside a Docker container sandbox.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">
+              None. The plan is posted as an issue comment by Claude during the
+              session. The daemon advances the state machine when the worker
+              exits.
+            </p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ai.review</span>
+            <span class="badge badge-async">async</span>
+          </div>
+          <p class="action-desc">
+            Runs a Claude session to self-review the branch diff before pushing,
+            acting as a quality gate. Claude examines the diff, checks for
+            correctness, test coverage, security issues, and code quality, then
+            reports via the <code>submit_review</code> MCP tool. If the review
+            fails (<code>passed=false</code>), the step returns an error and the
+            workflow follows the error edge.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_ai_review_rounds</td>
+                  <td>int</td>
+                  <td>1</td>
+                  <td>
+                    Maximum number of review attempts before returning an error.
+                  </td>
+                </tr>
+                <tr>
+                  <td>system_prompt</td>
+                  <td>string</td>
+                  <td><em>built-in</em></td>
+                  <td>Custom system prompt for the review session.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_passed</td>
+                  <td>bool</td>
+                  <td>
+                    <code>true</code> if the review passed,
+                    <code>false</code> if it was blocked. Inspect in
+                    <code>choice</code> states to branch on review outcome.
+                  </td>
+                </tr>
+                <tr>
+                  <td>ai_review_summary</td>
+                  <td>string</td>
+                  <td>One-sentence summary of the review findings.</td>
+                </tr>
+                <tr>
+                  <td>ai_review_rounds</td>
+                  <td>int</td>
+                  <td>
+                    Incremented on each attempt. Inspect in
+                    <code>choice</code> states to check round count.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-github">GitHub actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.create_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Opens a pull request from the working branch to the base branch.
+            Detects and reuses an existing PR if one was already opened in a
+            previous attempt.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>draft</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>
+                    Create the pull request as a draft. Use when you want
+                    the PR visible for early feedback but not yet ready for
+                    formal review.
+                  </td>
+                </tr>
+                <tr>
+                  <td>link_issue</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>
+                    Add a closing reference to the source issue in the PR body
+                    (e.g. <code>Closes #42</code>).
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>pr_url</td>
+                  <td>string</td>
+                  <td>URL of the created (or existing) pull request.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Notes</div>
+            <ul
+              style="
+                margin: 0.35rem 0 0;
+                padding-left: 1.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              <li>
+                If the coding session made no commits, the issue is closed
+                automatically and the workflow skips to <code>done</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.push</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Pushes committed changes to the remote branch. Typically used after
+            Claude addresses review feedback.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.merge</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Merges the pull request into the base branch using the configured
+            strategy.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>method</td>
+                  <td>string</td>
+                  <td>rebase</td>
+                  <td>
+                    Merge strategy: <code>rebase</code>, <code>squash</code>, or
+                    <code>merge</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>cleanup</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>
+                    Delete the worktree and branch after a successful merge.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.comment_issue</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the original issue associated with the work item.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load content
+                    from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.comment_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the pull request for the work item.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load content
+                    from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.add_label</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Adds a label to the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>label</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Label name to add.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.remove_label</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Removes a label from the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>label</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Label name to remove.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.close_issue</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">Closes the source issue.</p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.request_review</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Requests a review from a specific GitHub user on the pull request.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>reviewer</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>GitHub username to request a review from.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.assign_pr</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Assigns the pull request to a specific GitHub user. Useful for
+            routing work to the right person after coding completes.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>assignee</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>GitHub username to assign the PR to.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">github.create_release</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Creates a GitHub release for the repository. Typically used in
+            post-merge workflows to publish a tagged release after a PR lands.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>tag</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Git tag for the release, e.g. <code>v1.2.0</code>.</td>
+                </tr>
+                <tr>
+                  <td>title</td>
+                  <td>string</td>
+                  <td><em>same as tag</em></td>
+                  <td>Release title displayed on GitHub.</td>
+                </tr>
+                <tr>
+                  <td>notes</td>
+                  <td>string</td>
+                  <td><em>empty</em></td>
+                  <td>Release body / change notes.</td>
+                </tr>
+                <tr>
+                  <td>draft</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>Create the release as a draft (not publicly visible).</td>
+                </tr>
+                <tr>
+                  <td>prerelease</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>Mark the release as a pre-release.</td>
+                </tr>
+                <tr>
+                  <td>target</td>
+                  <td>string</td>
+                  <td><em>default branch</em></td>
+                  <td>Target branch or commit SHA for the release tag.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>release_url</td>
+                  <td>string</td>
+                  <td>URL of the created GitHub release.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-asana">Asana actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.comment</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the Asana task associated with the work item.
+            Requires the <code>ASANA_PAT</code> environment variable to be set
+            and an Asana provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load content
+                    from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.move_to_section</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Moves the Asana task to a named section within its configured
+            project board. Use this to reflect workflow progress on the board
+            (e.g., move a card to &ldquo;In Review&rdquo; after opening a PR).
+            Requires the <code>ASANA_PAT</code> environment variable to be set
+            and an Asana provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Name of the board section to move the task into. Matched
+                    case-insensitively against the project's sections.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3 id="actions-linear">Linear actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.comment</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a comment on the Linear issue associated with the work item.
+            Requires the <code>LINEAR_API_KEY</code> environment variable to be
+            set and a Linear provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Comment text. Prefix with <code>file:</code> to load content
+                    from a repo path, e.g.
+                    <code>file:.erg/comments/msg.md</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.move_to_state</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Moves the Linear issue to a named workflow state (e.g.,
+            &ldquo;In Progress&rdquo;, &ldquo;Done&rdquo;). Use this to reflect
+            workflow progress in Linear as work advances through the pipeline.
+            Requires the <code>LINEAR_API_KEY</code> environment variable to be
+            set and a Linear provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Name of the workflow state to move the issue into. Matched
+                    case-insensitively against the team's configured states.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3 id="actions-git">Git actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.format</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Runs a formatter command in the session worktree, stages all changes
+            with <code>git add -A</code>, and commits them. Silently succeeds if
+            the formatter produces no changes.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>command</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Shell command to run, e.g. <code>gofmt -w .</code> or
+                    <code>prettier --write .</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the formatter produces changes.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.rebase</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Rebases the feature branch onto the latest base branch and
+            force-pushes. This is a mechanical rebase — if real file-level
+            conflicts exist, the rebase is aborted and an error is returned.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_rebase_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of rebase attempts before returning an error.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>rebase_rounds</td>
+                  <td>int</td>
+                  <td>Incremented on each attempt.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.squash</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Squashes all commits on the feature branch since it diverged from
+            the base branch into a single commit. Useful before opening a PR
+            when you want a clean, single-commit history.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>message</td>
+                  <td>string</td>
+                  <td><em>auto-generated</em></td>
+                  <td>
+                    Commit message for the squashed commit. Defaults to a
+                    summary generated from the original commit messages.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.validate_diff</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Runs static validation checks on the branch diff before pushing or
+            opening a PR. All params are optional; with no params the check
+            always passes. Returns an error listing all violations found.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_diff_lines</td>
+                  <td>int</td>
+                  <td>0 (disabled)</td>
+                  <td>
+                    Fail if total added + deleted lines exceed this value.
+                  </td>
+                </tr>
+                <tr>
+                  <td>forbidden_patterns</td>
+                  <td>[]string</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Fail if any changed file matches one of these glob patterns,
+                    e.g. <code>[".env", "*.pem"]</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>require_tests</td>
+                  <td>bool</td>
+                  <td>false</td>
+                  <td>
+                    Fail if source files were modified but no test files appear
+                    in the diff.
+                  </td>
+                </tr>
+                <tr>
+                  <td>source_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common extensions</em></td>
+                  <td>
+                    Glob patterns identifying source files for the
+                    <code>require_tests</code> check. Defaults to
+                    <code>*.go</code>, <code>*.py</code>, <code>*.js</code>,
+                    etc.
+                  </td>
+                </tr>
+                <tr>
+                  <td>test_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common patterns</em></td>
+                  <td>
+                    Glob patterns identifying test files. Defaults to
+                    <code>*_test.go</code>, <code>test_*.py</code>,
+                    <code>*.test.js</code>, etc.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_lock_file_lines</td>
+                  <td>int</td>
+                  <td>0 (disabled)</td>
+                  <td>
+                    Fail if any single lock file has more than this many lines
+                    changed.
+                  </td>
+                </tr>
+                <tr>
+                  <td>lock_file_patterns</td>
+                  <td>[]string</td>
+                  <td><em>common lock files</em></td>
+                  <td>
+                    Glob patterns for lock files. Defaults to
+                    <code>go.sum</code>, <code>package-lock.json</code>,
+                    <code>yarn.lock</code>, etc.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>violations</td>
+                  <td>[]string</td>
+                  <td>List of violation messages when checks fail.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">git.cherry_pick</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Cherry-picks one or more commits onto a target branch. Designed for
+            backport workflows where merged changes need to be applied to a
+            release or maintenance branch.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>commits</td>
+                  <td>[]string | string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    List of commit SHAs to cherry-pick. Accepts a YAML sequence
+                    or a space-separated string.
+                  </td>
+                </tr>
+                <tr>
+                  <td>target_branch</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Branch to cherry-pick the commits onto.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <h3 id="actions-slack">Slack actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">slack.notify</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Posts a notification to a Slack channel via an incoming webhook. The
+            message supports Go <code>text/template</code> syntax with work item
+            variables. The webhook URL supports <code>$ENV_VAR</code> expansion
+            so secrets stay out of config files.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>webhook_url</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Slack incoming webhook URL. Supports
+                    <code>$ENV_VAR</code> substitution, e.g.
+                    <code>$SLACK_WEBHOOK_URL</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>message</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Message text. Go <code>text/template</code> variables:
+                    <code>{{.Title}}</code>, <code>{{.IssueID}}</code>,
+                    <code>{{.IssueURL}}</code>, <code>{{.PRURL}}</code>,
+                    <code>{{.Branch}}</code>, <code>{{.Status}}</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>username</td>
+                  <td>string</td>
+                  <td>erg</td>
+                  <td>Display name shown in Slack.</td>
+                </tr>
+                <tr>
+                  <td>icon_emoji</td>
+                  <td>string</td>
+                  <td>:robot_face:</td>
+                  <td>Emoji icon for the Slack message.</td>
+                </tr>
+                <tr>
+                  <td>channel</td>
+                  <td>string</td>
+                  <td><em>webhook default</em></td>
+                  <td>
+                    Override the channel configured in the webhook, e.g.
+                    <code>#alerts</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Setup</div>
+            <p class="param-none">
+              Slack uses <strong>Incoming Webhooks</strong> for authentication —
+              there is no separate API token. To get a webhook URL:
+            </p>
+            <ol
+              style="
+                margin: 0.35rem 0 0;
+                padding-left: 1.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              <li>
+                Go to
+                <a
+                  href="https://api.slack.com/apps"
+                  target="_blank"
+                  rel="noopener"
+                  style="color: var(--cyan)"
+                  >api.slack.com/apps</a
+                >
+                and create a new app (or open an existing one).
+              </li>
+              <li>
+                Under <strong>Features</strong>, click
+                <strong>Incoming Webhooks</strong> and toggle it on.
+              </li>
+              <li>
+                Click <strong>Add New Webhook to Workspace</strong>, choose a
+                channel, and authorise.
+              </li>
+              <li>
+                Copy the generated URL (e.g.
+                <code>https://hooks.slack.com/services/T.../B.../...</code>).
+              </li>
+              <li>
+                Set it as an environment variable on the host running erg:<br />
+                <code
+                  >export
+                  SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...</code
+                >
+              </li>
+              <li>
+                Reference it in your workflow config as
+                <code>webhook_url: $SLACK_WEBHOOK_URL</code>.
+              </li>
+            </ol>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Example</div>
+            <div class="code-block" style="margin-top: 0.4rem">
+              <div class="code-header">
+                <span class="code-filename">workflow.yaml (excerpt)</span>
+              </div>
+              <pre>
+  notify_merged:
+    type: task
+    action: slack.notify
+    params:
+      webhook_url: $SLACK_WEBHOOK_URL           # set in the host environment
+      message: "Merged: {{.Title}} (#{{.IssueID}})\n{{.PRURL}}"
+      username: erg
+      icon_emoji: ":white_check_mark:"
+      channel: "#eng-deployments"              # optional — overrides webhook default
+    next: done</pre
+              >
+            </div>
+            <p
+              style="
+                margin: 0.6rem 0 0.25rem;
+                font-size: 0.82rem;
+                color: var(--text-muted);
+              "
+            >
+              Given an issue titled <em>"Fix login redirect loop"</em> with ID
+              <code>42</code> and a merged PR, the message posted to Slack would
+              be:
+            </p>
+            <div class="code-block" style="margin-top: 0.25rem">
+              <div class="code-header">
+                <span class="code-filename">Slack message (rendered)</span>
+              </div>
+              <pre>
+Merged: Fix login redirect loop (#42)
+https://github.com/your-org/your-repo/pull/99</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <h3 id="actions-webhook">Webhook actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">webhook.post</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            POSTs a JSON body to a configurable URL. The body is a Go
+            <code>text/template</code> string interpolated with work item data.
+            Use for integrating with external systems &mdash; CI triggers,
+            deployment pipelines, or custom notification endpoints.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>url</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>Destination URL for the POST request.</td>
+                </tr>
+                <tr>
+                  <td>body</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    JSON body template. Go <code>text/template</code> variables:
+                    <code>{{.IssueID}}</code>, <code>{{.IssueTitle}}</code>,
+                    <code>{{.IssueURL}}</code>, <code>{{.IssueSource}}</code>,
+                    <code>{{.PRURL}}</code>, <code>{{.Branch}}</code>,
+                    <code>{{.State}}</code>, <code>{{.WorkItemID}}</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>headers</td>
+                  <td>map[string]string</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Additional HTTP request headers, e.g.
+                    <code>Authorization: Bearer $TOKEN</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>timeout</td>
+                  <td>duration</td>
+                  <td>30s</td>
+                  <td>
+                    Request timeout, e.g. <code>10s</code>, <code>1m</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>expected_status</td>
+                  <td>int</td>
+                  <td>200</td>
+                  <td>
+                    HTTP status code considered a success. Non-matching codes
+                    return an error.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>response_status</td>
+                  <td>int</td>
+                  <td>HTTP status code returned by the server.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="actions-workflow">Workflow actions</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">workflow.retry</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Meta-action that wraps another registered action with synchronous
+            retry logic. On failure it sleeps for the configured interval
+            (scaled by <code>backoff_rate</code> on each subsequent attempt) and
+            re-executes the inner action. Async inner actions are passed through
+            unchanged on the first attempt since they cannot be retried
+            synchronously.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>action</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Name of the inner action to execute, e.g.
+                    <code>github.push</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_attempts</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>Total number of attempts (1 = no retry).</td>
+                </tr>
+                <tr>
+                  <td>interval</td>
+                  <td>duration</td>
+                  <td>0</td>
+                  <td>
+                    Base delay between retries, e.g. <code>10s</code>,
+                    <code>1m</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>backoff_rate</td>
+                  <td>float</td>
+                  <td>1.0</td>
+                  <td>
+                    Multiplier applied to <code>interval</code> after each
+                    failed attempt. <code>1.0</code> = fixed delay;
+                    <code>2.0</code> = double each time.
+                  </td>
+                </tr>
+                <tr>
+                  <td>params</td>
+                  <td>map</td>
+                  <td><em>none</em></td>
+                  <td>Parameters forwarded to the inner action.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">
+              Returns the output data from the inner action on success.
+            </p>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">workflow.wait</span>
+            <span class="badge badge-sync">sync</span>
+          </div>
+          <p class="action-desc">
+            Pauses workflow execution for a configurable duration. Cancels
+            cleanly on daemon shutdown. Useful as a delay between polling cycles
+            or before time-sensitive operations.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>duration</td>
+                  <td>duration</td>
+                  <td><em>required</em></td>
+                  <td>
+                    How long to pause, e.g. <code>30s</code>, <code>5m</code>,
+                    <code>1h</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <p class="param-none">None.</p>
+          </div>
+        </div>
+
+        <div
+          style="
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid transparent;
+            border-image: linear-gradient(
+                90deg,
+                transparent,
+                var(--border-light),
+                transparent
+              )
+              1;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            text-align: center;
+          "
+        >
+          made by
+          <a href="https://www.zhubert.com" style="color: var(--accent)"
+            >zack</a
+          >
+          &middot; mit license
+        </div>
+      </main>
+    </div>
+
+    <script>
+      mermaid.initialize({ startOnLoad: false, theme: "dark" });
+
+      function switchTab(btn, tab) {
+        var tabs = btn.closest(".example-tabs");
+        tabs.querySelectorAll(".tab-btn").forEach(function (b) {
+          b.classList.remove("active");
+        });
+        btn.classList.add("active");
+        tabs.querySelectorAll("[data-panel]").forEach(function (p) {
+          p.style.display = "none";
+        });
+        var panel = tabs.querySelector('[data-panel="' + tab + '"]');
+        if (panel) panel.style.display = "";
+        if (tab === "diagram" && !tabs.dataset.rendered) {
+          tabs.dataset.rendered = "1";
+          var el = tabs.querySelector(".mermaid");
+          if (el) mermaid.run({ nodes: [el] });
+        }
+      }
+
+      function copyCmd(btn, cmd) {
+        navigator.clipboard.writeText(cmd).then(function () {
+          btn.textContent = "copied";
+          btn.classList.add("copied");
+          setTimeout(function () {
+            btn.textContent = "copy";
+            btn.classList.remove("copied");
+          }, 2000);
+        });
+      }
+
+      function toggleSidebar() {
+        document.getElementById("sidebar").classList.toggle("open");
+        document.getElementById("sidebarOverlay").classList.toggle("open");
+      }
+
+      // Scroll spy for sidebar
+      (function () {
+        var links = document.querySelectorAll(".sidebar-link");
+        var sections = [];
+        links.forEach(function (link) {
+          var id = link.getAttribute("href");
+          if (id && id.startsWith("#")) {
+            var el = document.querySelector(id);
+            if (el) sections.push({ el: el, link: link });
+          }
+        });
+
+        function update() {
+          var scrollY = window.scrollY + 80;
+          var current = sections[0];
+          for (var i = 0; i < sections.length; i++) {
+            if (sections[i].el.offsetTop <= scrollY) {
+              current = sections[i];
+            }
+          }
+          links.forEach(function (l) {
+            l.classList.remove("active");
+          });
+          if (current) current.link.classList.add("active");
+        }
+
+        window.addEventListener("scroll", update, { passive: true });
+        update();
+      })();
+
+      // Close sidebar on link click (mobile)
+      document
+        .querySelectorAll(".sidebar-link, .sidebar-sublink")
+        .forEach(function (link) {
+          link.addEventListener("click", function () {
+            if (window.innerWidth <= 860) {
+              document.getElementById("sidebar").classList.remove("open");
+              document
+                .getElementById("sidebarOverlay")
+                .classList.remove("open");
+            }
+          });
+        });
+
+      // Label param-table cells for responsive stacking
+      document.querySelectorAll(".param-table").forEach(function (table) {
+        var headers = Array.from(table.querySelectorAll("thead th")).map(
+          function (th) {
+            return th.textContent.trim();
+          },
+        );
+        table.querySelectorAll("tbody tr").forEach(function (row) {
+          row.querySelectorAll("td").forEach(function (td, i) {
+            if (headers[i]) td.setAttribute("data-label", headers[i]);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
+

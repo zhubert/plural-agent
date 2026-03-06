@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>erg - autonomous headless daemon for claude code</title>
+    <title>Wait events — erg</title>
     <meta
       name="description"
       content="erg does the work. Autonomous headless daemon for Claude Code."
@@ -1196,11 +1196,11 @@
         <ul class="sidebar-nav">
           <li class="sidebar-section">
             <span class="sidebar-section-title">Getting started</span>
-            <a href="#overview" class="sidebar-link">Overview</a>
-            <a href="#how-it-works" class="sidebar-link">How it works</a>
-            <a href="#install" class="sidebar-link">Installation</a>
-            <a href="#quickstart" class="sidebar-sublink">Quick start</a>
-            <a href="#file-layout" class="sidebar-sublink">File layout</a>
+            <a href="index.html#overview" class="sidebar-link">Overview</a>
+            <a href="index.html#how-it-works" class="sidebar-link">How it works</a>
+            <a href="index.html#install" class="sidebar-link">Installation</a>
+            <a href="index.html#quickstart" class="sidebar-sublink">Quick start</a>
+            <a href="index.html#file-layout" class="sidebar-sublink">File layout</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
@@ -1229,13 +1229,13 @@
             <a href="actions.html#actions-slack" class="sidebar-sublink">slack</a>
             <a href="actions.html#actions-webhook" class="sidebar-sublink">webhook</a>
             <a href="actions.html#actions-workflow" class="sidebar-sublink">workflow</a>
-            <a href="events.html#events" class="sidebar-link">Wait events</a>
-            <a href="events.html#events-pr" class="sidebar-sublink">pr</a>
-            <a href="events.html#events-ci" class="sidebar-sublink">ci</a>
-            <a href="events.html#events-plan" class="sidebar-sublink">plan</a>
-            <a href="events.html#events-asana" class="sidebar-sublink">asana</a>
-            <a href="events.html#events-linear" class="sidebar-sublink">linear</a>
-            <a href="events.html#events-gate" class="sidebar-sublink">gate</a>
+            <a href="#events" class="sidebar-link">Wait events</a>
+            <a href="#events-pr" class="sidebar-sublink">pr</a>
+            <a href="#events-ci" class="sidebar-sublink">ci</a>
+            <a href="#events-plan" class="sidebar-sublink">plan</a>
+            <a href="#events-asana" class="sidebar-sublink">asana</a>
+            <a href="#events-linear" class="sidebar-sublink">linear</a>
+            <a href="#events-gate" class="sidebar-sublink">gate</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
@@ -1255,223 +1255,600 @@
 
       <!-- Content -->
       <main class="main">
-        <!-- Overview -->
-        <section id="overview">
-          <span class="hero-badge">autonomous coding daemon</span>
-          <p class="hero-tagline">
-            <span class="hero-tagline-accent">does the work.</span>
+        <!-- Wait events reference -->
+        <h2 id="events">Wait events</h2>
+        <p>
+          Events are used in <code>wait</code> states via the
+          <code>event:</code> key. The daemon polls on each tick and advances
+          the state machine when the event fires. All wait states support
+          <code>timeout</code> and <code>timeout_next</code>.
+        </p>
+
+        <h3 id="events-pr">PR events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">pr.reviewed</span>
+          </div>
+          <p class="action-desc">
+            Fires when the pull request receives a formal approval. While
+            waiting, the daemon automatically resumes Claude to address new
+            review comments (configurable via <code>auto_address</code>).
           </p>
-          <p>
-            Autonomous headless daemon for Claude Code. Polls GitHub, Asana, or
-            Linear for issues, starts containerized Claude sessions, and drives
-            the full PR lifecycle &mdash; as automated as your workflow allows.
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>auto_address</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>
+                    Automatically resume Claude to address new review comments
+                    while waiting for approval.
+                  </td>
+                </tr>
+                <tr>
+                  <td>max_feedback_rounds</td>
+                  <td>int</td>
+                  <td>3</td>
+                  <td>
+                    Maximum number of feedback rounds before auto-addressing
+                    stops.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_command</td>
+                  <td>string</td>
+                  <td><em>inherited</em></td>
+                  <td>
+                    Shell command to run as a formatter after each review
+                    feedback round (e.g. <code>go fmt ./...</code>). Overrides
+                    the value inherited from the <code>ai.code</code> step. Omit
+                    to keep the inherited formatter or skip formatting.
+                  </td>
+                </tr>
+                <tr>
+                  <td>format_message</td>
+                  <td>string</td>
+                  <td>Apply auto-formatting</td>
+                  <td>
+                    Commit message used when the daemon commits the
+                    post-feedback format pass. Only used when
+                    <code>format_command</code> is set (directly or inherited).
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_approved</td>
+                  <td>bool</td>
+                  <td>Set to <code>true</code> when a reviewer approves.</td>
+                </tr>
+                <tr>
+                  <td>pr_merged_externally</td>
+                  <td>bool</td>
+                  <td>
+                    Set to <code>true</code> if the PR was merged outside the
+                    daemon.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">pr.mergeable</span>
+          </div>
+          <p class="action-desc">
+            Convenience event that combines <code>pr.reviewed</code> and
+            <code>ci.complete</code>. Fires only when both review approval and
+            CI pass simultaneously. Useful for minimal pipelines that don't need
+            separate wait states.
           </p>
-          <div class="hero-cta">
-            <a href="#install" class="btn btn-primary">install</a>
-            <a href="https://github.com/zhubert/erg" class="btn btn-ghost"
-              >view on github</a
-            >
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>require_review</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Require an approved review before firing.</td>
+                </tr>
+                <tr>
+                  <td>require_ci</td>
+                  <td>bool</td>
+                  <td>true</td>
+                  <td>Require CI to pass before firing.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </section>
-
-        <div class="feature-grid">
-          <div class="feature-item">
-            <span class="fi-icon">#</span>
-            <h4>issue polling</h4>
-            <p>
-              Polls GitHub, Asana, or Linear for new issues. Label an issue
-              <code>queued</code> and the agent picks it up.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">[ ]</span>
-            <h4>containerized sessions</h4>
-            <p>
-              Every session runs inside a Docker container. The container is the
-              sandbox &mdash; Claude has full permissions.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">//</span>
-            <h4>concurrent workers</h4>
-            <p>
-              Process multiple issues in parallel. Each gets its own branch,
-              container, and Claude session.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">&lt;&gt;</span>
-            <h4>PR lifecycle</h4>
-            <p>
-              Creates PRs, addresses review comments, waits for CI, and
-              auto-merges. Full lifecycle management.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">~</span>
-            <h4>workflow engine</h4>
-            <p>
-              Configurable state machine via <code>.erg/workflow.yaml</code>.
-              Task, wait, choice, and pass states with retry, catch, and
-              timeout.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">*</span>
-            <h4>automated workflow</h4>
-            <p>
-              From issue to merged PR: coding, CI fixes, review feedback, and
-              merge — all managed by the workflow engine.
-            </p>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>review_approved</td>
+                  <td>bool</td>
+                  <td>True when a reviewer has approved.</td>
+                </tr>
+                <tr>
+                  <td>ci_passed</td>
+                  <td>bool</td>
+                  <td>True when all CI checks pass.</td>
+                </tr>
+                <tr>
+                  <td>ci_failed</td>
+                  <td>bool</td>
+                  <td>True when any CI check fails.</td>
+                </tr>
+                <tr>
+                  <td>pr_merged_externally</td>
+                  <td>bool</td>
+                  <td>True if the PR was merged outside the daemon.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <!-- How it works -->
-        <h2 id="how-it-works">How it works</h2>
-        <p>
-          At its core, erg is a
-          <strong>state machine engine paired with AI coding</strong>. Each
-          issue becomes a work item that advances through a configurable
-          flowchart of states — from AI-generated code to a merged PR. You
-          define exactly how much automation applies: require human review,
-          auto-merge after CI, loop back for fixes, or notify external systems
-          at any step.
-        </p>
-        <ol class="steps-list">
-          <li>
-            <div class="step-body">
-              <h4>Tag or label an issue</h4>
-              <p>
-                Mark a task in GitHub, Asana, or Linear with the configured
-                trigger label (e.g. <code>plan</code> or <code>queued</code>).
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Daemon picks it up</h4>
-              <p>
-                erg starts a containerized Claude session. With planning
-                enabled, no branch is created yet — Claude reads the codebase in
-                read-only mode.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude analyzes and posts a plan</h4>
-              <p>
-                The <code>ai.plan</code> session explores the codebase and posts
-                a structured implementation plan as an issue comment — no code
-                written yet.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>You review and approve</h4>
-              <p>
-                Reply with approval (e.g. "LGTM") to proceed, or leave feedback.
-                Claude revises the plan and loops back until you approve.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude writes the code</h4>
-              <p>
-                Once approved, <code>ai.code</code> creates a branch, implements
-                the changes, runs tests, and commits.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>State machine advances</h4>
-              <p>
-                The workflow engine opens a PR, waits for CI, handles review
-                feedback, and merges — automatically, according to your rules.
-              </p>
-            </div>
-          </li>
-        </ol>
+        <h3 id="events-ci">CI events</h3>
 
-        <!-- Installation -->
-        <h2 id="install">Installation</h2>
-        <h3>Homebrew</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>brew install zhubert/tap/erg</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
-          >
-            copy
-          </button>
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ci.complete</span>
+          </div>
+          <p class="action-desc">
+            Fires when all CI checks on the PR pass. Configurable behaviour on
+            CI failure lets workflows route to <code>ai.fix_ci</code> or other
+            states.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>on_failure</td>
+                  <td>string</td>
+                  <td>retry</td>
+                  <td>
+                    Action when CI fails: <code>retry</code> — keep waiting
+                    (default); <code>fix</code> — fire the event so the workflow
+                    can route to <code>ai.fix_ci</code>; <code>abandon</code> or
+                    <code>notify</code> — emit data for downstream routing
+                    without advancing.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ci_passed</td>
+                  <td>bool</td>
+                  <td>True when all checks pass.</td>
+                </tr>
+                <tr>
+                  <td>ci_failed</td>
+                  <td>bool</td>
+                  <td>True when any check fails.</td>
+                </tr>
+                <tr>
+                  <td>ci_action</td>
+                  <td>string</td>
+                  <td>
+                    The <code>on_failure</code> strategy that was applied.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <h3>Build from source</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>go build -o erg .</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
-            copy
-          </button>
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">ci.wait_for_checks</span>
+          </div>
+          <p class="action-desc">
+            Fires when all CI checks on the PR have finished running
+            (regardless of pass/fail). Unlike <code>ci.complete</code>, this
+            event always fires once checks finish and does not support
+            <code>on_failure</code> routing &mdash; use a downstream
+            <code>choice</code> state to branch on the result.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">None.</p>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ci_status</td>
+                  <td>string</td>
+                  <td>
+                    Overall status: <code>passing</code>,
+                    <code>failing</code>, or <code>none</code> (no checks
+                    configured).
+                  </td>
+                </tr>
+                <tr>
+                  <td>passed_checks</td>
+                  <td>[]string</td>
+                  <td>Names of checks that passed.</td>
+                </tr>
+                <tr>
+                  <td>failed_checks</td>
+                  <td>[]string</td>
+                  <td>Names of checks that failed.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <h3 id="quickstart">Quick start</h3>
-        <p>
-          Run <code>erg configure</code> inside your repo. It will walk you through
-          choosing an issue provider (GitHub, Asana, or Linear), configuring
-          credentials, and scaffolding a workflow — then start the daemon.
-        </p>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>erg configure</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'erg configure')">
-            copy
-          </button>
+        <h3 id="events-plan">Plan events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">plan.user_replied</span>
+          </div>
+          <p class="action-desc">
+            Fires when a human comments on the issue after
+            <code>ai.plan</code> posts an implementation plan. The daemon checks
+            whether the comment matches an approval pattern. If it does,
+            <code>plan_approved</code> is <code>true</code> and the workflow can
+            proceed to <code>ai.code</code>. Non-matching comments are treated
+            as feedback — the text is automatically injected into the next
+            <code>ai.plan</code> session when looping back, so Claude can revise
+            the plan accordingly. Supported for GitHub, Asana, and Linear
+            providers.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>approval_pattern</td>
+                  <td>string</td>
+                  <td><em>LGTM|looks good|approved?|…</em></td>
+                  <td>
+                    Regular expression matched against the comment body to
+                    detect approval. Defaults to
+                    <code
+                      >(?i)(LGTM|looks good|approved?|proceed|go ahead|ship
+                      it)</code
+                    >. Override to match your team's preferred phrasing.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>plan_approved</td>
+                  <td>bool</td>
+                  <td>
+                    <code>true</code> if the comment matched the approval
+                    pattern, <code>false</code> if it did not. Inspect in a
+                    <code>choice</code> state to branch on approval vs.
+                    feedback.
+                  </td>
+                </tr>
+                <tr>
+                  <td>user_feedback</td>
+                  <td>string</td>
+                  <td>
+                    Full text of the comment. Automatically passed to the next
+                    <code>ai.plan</code> session when looping back for
+                    re-planning.
+                  </td>
+                </tr>
+                <tr>
+                  <td>user_feedback_author</td>
+                  <td>string</td>
+                  <td>Username or display name of the commenter.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
+        <h3 id="events-asana">Asana events</h3>
 
-        <h3 id="file-layout">File layout</h3>
-        <p>
-          Erg stores configuration, session data, and logs under
-          <code>~/.erg/</code> by default. On Linux, if <code>~/.erg/</code>
-          does not exist, Erg respects the
-          <a href="https://specifications.freedesktop.org/basedir-spec/latest/">XDG Base Directory Specification</a>:
-        </p>
-        <table class="cli-table">
-          <thead>
-            <tr>
-              <th>Data type</th>
-              <th>Default path</th>
-              <th>XDG override</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Config (<code>config.json</code>)</td>
-              <td><code>~/.erg/</code></td>
-              <td><code>$XDG_CONFIG_HOME/erg/</code></td>
-            </tr>
-            <tr>
-              <td>Session data</td>
-              <td><code>~/.erg/sessions/</code></td>
-              <td><code>$XDG_DATA_HOME/erg/sessions/</code></td>
-            </tr>
-            <tr>
-              <td>Logs &amp; state</td>
-              <td><code>~/.erg/logs/</code></td>
-              <td><code>$XDG_STATE_HOME/erg/logs/</code></td>
-            </tr>
-          </tbody>
-        </table>
-        <p>
-          Resolution order: (1) if <code>~/.erg/</code> exists, use the legacy
-          flat layout; (2) if any XDG env var is set, use XDG layout with
-          defaults for unset vars; (3) otherwise default to <code>~/.erg/</code>.
-        </p>
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">asana.in_section</span>
+          </div>
+          <p class="action-desc">
+            Fires when the Asana task has been moved to a specific named section
+            within its configured project. Use this to gate on human board
+            movements — for example, waiting for a PM to drag a card into
+            &ldquo;Ready for Review&rdquo; before Claude opens a PR. Requires
+            the <code>ASANA_PAT</code> environment variable and an Asana
+            provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Section name to watch for. Matched case-insensitively
+                    against the task's current section within the configured
+                    project.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>section</td>
+                  <td>string</td>
+                  <td>The section name as specified in the workflow params.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="events-linear">Linear events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">linear.in_state</span>
+          </div>
+          <p class="action-desc">
+            Fires when the Linear issue has been moved to a specific named
+            workflow state. Use this to gate on human state transitions in
+            Linear — for example, waiting for a team lead to move an issue to
+            &ldquo;In Progress&rdquo; before Claude begins coding. Requires
+            the <code>LINEAR_API_KEY</code> environment variable and a Linear
+            provider registered for the repository.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td><em>required</em></td>
+                  <td>
+                    Workflow state name to watch for. Matched case-insensitively
+                    against the issue's current state.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>state</td>
+                  <td>string</td>
+                  <td>The state name as specified in the workflow params.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 id="events-gate">Gate events</h3>
+
+        <div class="action-ref">
+          <div class="action-header">
+            <span class="action-title">gate.approved</span>
+          </div>
+          <p class="action-desc">
+            A general-purpose human approval gate. Pauses the workflow until a
+            human provides an explicit approval signal on the issue. Supports
+            two trigger modes: check for a label on the issue, or match a
+            comment against a regex pattern. Works with GitHub, Asana, and
+            Linear providers.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>trigger</td>
+                  <td>string</td>
+                  <td>label_added</td>
+                  <td>
+                    Trigger mode: <code>label_added</code> &mdash; fires when
+                    the configured label is present on the issue;
+                    <code>comment_match</code> &mdash; fires when a comment
+                    matches the configured regex pattern.
+                  </td>
+                </tr>
+                <tr>
+                  <td>label</td>
+                  <td>string</td>
+                  <td>approved</td>
+                  <td>
+                    Label name to check for. Only used when
+                    <code>trigger</code> is <code>label_added</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>comment_pattern</td>
+                  <td>string</td>
+                  <td><em>none</em></td>
+                  <td>
+                    Regex pattern to match against comment bodies. Required
+                    when <code>trigger</code> is <code>comment_match</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Output data</div>
+            <table class="param-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>gate_approved</td>
+                  <td>bool</td>
+                  <td>Set to <code>true</code> when the gate fires.</td>
+                </tr>
+                <tr>
+                  <td>gate_trigger</td>
+                  <td>string</td>
+                  <td>
+                    The trigger mode that fired: <code>label_added</code> or
+                    <code>comment_match</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>gate_label</td>
+                  <td>string</td>
+                  <td>
+                    The label name (only when <code>trigger</code> is
+                    <code>label_added</code>).
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <div
           style="

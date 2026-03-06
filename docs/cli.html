@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>erg - autonomous headless daemon for claude code</title>
+    <title>CLI commands — erg</title>
     <meta
       name="description"
       content="erg does the work. Autonomous headless daemon for Claude Code."
@@ -1174,7 +1174,6 @@
         }
       }
     </style>
-    <script src="./mermaid.min.js"></script>
   </head>
   <body>
     <div class="mobile-header">
@@ -1196,11 +1195,11 @@
         <ul class="sidebar-nav">
           <li class="sidebar-section">
             <span class="sidebar-section-title">Getting started</span>
-            <a href="#overview" class="sidebar-link">Overview</a>
-            <a href="#how-it-works" class="sidebar-link">How it works</a>
-            <a href="#install" class="sidebar-link">Installation</a>
-            <a href="#quickstart" class="sidebar-sublink">Quick start</a>
-            <a href="#file-layout" class="sidebar-sublink">File layout</a>
+            <a href="index.html#overview" class="sidebar-link">Overview</a>
+            <a href="index.html#how-it-works" class="sidebar-link">How it works</a>
+            <a href="index.html#install" class="sidebar-link">Installation</a>
+            <a href="index.html#quickstart" class="sidebar-sublink">Quick start</a>
+            <a href="index.html#file-layout" class="sidebar-sublink">File layout</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
@@ -1217,7 +1216,7 @@
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Reference</span>
-            <a href="cli.html#cli" class="sidebar-link">CLI commands</a>
+            <a href="#cli" class="sidebar-link">CLI commands</a>
             <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
             <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
             <a href="actions.html#actions" class="sidebar-link">Actions</a>
@@ -1255,223 +1254,70 @@
 
       <!-- Content -->
       <main class="main">
-        <!-- Overview -->
-        <section id="overview">
-          <span class="hero-badge">autonomous coding daemon</span>
-          <p class="hero-tagline">
-            <span class="hero-tagline-accent">does the work.</span>
-          </p>
-          <p>
-            Autonomous headless daemon for Claude Code. Polls GitHub, Asana, or
-            Linear for issues, starts containerized Claude sessions, and drives
-            the full PR lifecycle &mdash; as automated as your workflow allows.
-          </p>
-          <div class="hero-cta">
-            <a href="#install" class="btn btn-primary">install</a>
-            <a href="https://github.com/zhubert/erg" class="btn btn-ghost"
-              >view on github</a
-            >
-          </div>
-        </section>
-
-        <div class="feature-grid">
-          <div class="feature-item">
-            <span class="fi-icon">#</span>
-            <h4>issue polling</h4>
-            <p>
-              Polls GitHub, Asana, or Linear for new issues. Label an issue
-              <code>queued</code> and the agent picks it up.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">[ ]</span>
-            <h4>containerized sessions</h4>
-            <p>
-              Every session runs inside a Docker container. The container is the
-              sandbox &mdash; Claude has full permissions.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">//</span>
-            <h4>concurrent workers</h4>
-            <p>
-              Process multiple issues in parallel. Each gets its own branch,
-              container, and Claude session.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">&lt;&gt;</span>
-            <h4>PR lifecycle</h4>
-            <p>
-              Creates PRs, addresses review comments, waits for CI, and
-              auto-merges. Full lifecycle management.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">~</span>
-            <h4>workflow engine</h4>
-            <p>
-              Configurable state machine via <code>.erg/workflow.yaml</code>.
-              Task, wait, choice, and pass states with retry, catch, and
-              timeout.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">*</span>
-            <h4>automated workflow</h4>
-            <p>
-              From issue to merged PR: coding, CI fixes, review feedback, and
-              merge — all managed by the workflow engine.
-            </p>
-          </div>
-        </div>
-
-        <!-- How it works -->
-        <h2 id="how-it-works">How it works</h2>
+        <!-- CLI reference -->
+        <h2 id="cli">CLI commands</h2>
         <p>
-          At its core, erg is a
-          <strong>state machine engine paired with AI coding</strong>. Each
-          issue becomes a work item that advances through a configurable
-          flowchart of states — from AI-generated code to a merged PR. You
-          define exactly how much automation applies: require human review,
-          auto-merge after CI, loop back for fixes, or notify external systems
-          at any step.
-        </p>
-        <ol class="steps-list">
-          <li>
-            <div class="step-body">
-              <h4>Tag or label an issue</h4>
-              <p>
-                Mark a task in GitHub, Asana, or Linear with the configured
-                trigger label (e.g. <code>plan</code> or <code>queued</code>).
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Daemon picks it up</h4>
-              <p>
-                erg starts a containerized Claude session. With planning
-                enabled, no branch is created yet — Claude reads the codebase in
-                read-only mode.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude analyzes and posts a plan</h4>
-              <p>
-                The <code>ai.plan</code> session explores the codebase and posts
-                a structured implementation plan as an issue comment — no code
-                written yet.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>You review and approve</h4>
-              <p>
-                Reply with approval (e.g. "LGTM") to proceed, or leave feedback.
-                Claude revises the plan and loops back until you approve.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude writes the code</h4>
-              <p>
-                Once approved, <code>ai.code</code> creates a branch, implements
-                the changes, runs tests, and commits.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>State machine advances</h4>
-              <p>
-                The workflow engine opens a PR, waits for CI, handles review
-                feedback, and merges — automatically, according to your rules.
-              </p>
-            </div>
-          </li>
-        </ol>
-
-        <!-- Installation -->
-        <h2 id="install">Installation</h2>
-        <h3>Homebrew</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>brew install zhubert/tap/erg</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
-          >
-            copy
-          </button>
-        </div>
-
-        <h3>Build from source</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>go build -o erg .</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
-            copy
-          </button>
-        </div>
-
-        <h3 id="quickstart">Quick start</h3>
-        <p>
-          Run <code>erg configure</code> inside your repo. It will walk you through
-          choosing an issue provider (GitHub, Asana, or Linear), configuring
-          credentials, and scaffolding a workflow — then start the daemon.
-        </p>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>erg configure</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'erg configure')">
-            copy
-          </button>
-        </div>
-
-
-        <h3 id="file-layout">File layout</h3>
-        <p>
-          Erg stores configuration, session data, and logs under
-          <code>~/.erg/</code> by default. On Linux, if <code>~/.erg/</code>
-          does not exist, Erg respects the
-          <a href="https://specifications.freedesktop.org/basedir-spec/latest/">XDG Base Directory Specification</a>:
+          The most commonly used commands are listed below. Run any command with
+          <code>-h</code> to see all available flags.
         </p>
         <table class="cli-table">
           <thead>
             <tr>
-              <th>Data type</th>
-              <th>Default path</th>
-              <th>XDG override</th>
+              <th>Command</th>
+              <th>Description</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td>Config (<code>config.json</code>)</td>
-              <td><code>~/.erg/</code></td>
-              <td><code>$XDG_CONFIG_HOME/erg/</code></td>
+              <td><code>erg start</code></td>
+              <td>Start daemon using <code>~/.erg/daemon.yaml</code> or current repo</td>
             </tr>
             <tr>
-              <td>Session data</td>
-              <td><code>~/.erg/sessions/</code></td>
-              <td><code>$XDG_DATA_HOME/erg/sessions/</code></td>
+              <td><code>erg start --repo owner/repo</code></td>
+              <td>Start daemon in the background for a specific repo</td>
             </tr>
             <tr>
-              <td>Logs &amp; state</td>
-              <td><code>~/.erg/logs/</code></td>
-              <td><code>$XDG_STATE_HOME/erg/logs/</code></td>
+              <td><code>erg start -f --repo owner/repo</code></td>
+              <td>Start in foreground with live status display</td>
+            </tr>
+            <tr>
+              <td><code>erg start --config config.yaml</code></td>
+              <td>
+                Start daemon watching multiple repos defined in a
+                <a href="multi-repo.html#multi-repo">config file</a>
+              </td>
+            </tr>
+            <tr>
+              <td><code>erg start --once --repo owner/repo</code></td>
+              <td>Run one polling tick then exit (useful for debugging)</td>
+            </tr>
+            <tr>
+              <td><code>erg stop</code></td>
+              <td>Gracefully shut down the running daemon (auto-detects which one)</td>
+            </tr>
+            <tr>
+              <td><code>erg status</code></td>
+              <td>Show daemon status (auto-detects which daemon)</td>
+            </tr>
+            <tr>
+              <td><code>erg status --tail</code></td>
+              <td>
+                Live split-screen log view — one column per active session
+              </td>
+            </tr>
+            <tr>
+              <td><code>erg configure</code></td>
+              <td>
+                Interactive wizard: checks prerequisites, sets up issue tracker,
+                and scaffolds <code>.erg/workflow.yaml</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>erg clean</code></td>
+              <td>Clear state, lock files, worktrees, auth files, MCP config files, session message files, and log files. Prompts for confirmation unless <code>-y</code> is passed.</td>
             </tr>
           </tbody>
         </table>
-        <p>
-          Resolution order: (1) if <code>~/.erg/</code> exists, use the legacy
-          flat layout; (2) if any XDG env var is set, use XDG layout with
-          defaults for unset vars; (3) otherwise default to <code>~/.erg/</code>.
-        </p>
 
         <div
           style="
@@ -1500,37 +1346,6 @@
     </div>
 
     <script>
-      mermaid.initialize({ startOnLoad: false, theme: "dark" });
-
-      function switchTab(btn, tab) {
-        var tabs = btn.closest(".example-tabs");
-        tabs.querySelectorAll(".tab-btn").forEach(function (b) {
-          b.classList.remove("active");
-        });
-        btn.classList.add("active");
-        tabs.querySelectorAll("[data-panel]").forEach(function (p) {
-          p.style.display = "none";
-        });
-        var panel = tabs.querySelector('[data-panel="' + tab + '"]');
-        if (panel) panel.style.display = "";
-        if (tab === "diagram" && !tabs.dataset.rendered) {
-          tabs.dataset.rendered = "1";
-          var el = tabs.querySelector(".mermaid");
-          if (el) mermaid.run({ nodes: [el] });
-        }
-      }
-
-      function copyCmd(btn, cmd) {
-        navigator.clipboard.writeText(cmd).then(function () {
-          btn.textContent = "copied";
-          btn.classList.add("copied");
-          setTimeout(function () {
-            btn.textContent = "copy";
-            btn.classList.remove("copied");
-          }, 2000);
-        });
-      }
-
       function toggleSidebar() {
         document.getElementById("sidebar").classList.toggle("open");
         document.getElementById("sidebarOverlay").classList.toggle("open");

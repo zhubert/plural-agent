@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>erg - autonomous headless daemon for claude code</title>
+    <title>Example workflows — erg</title>
     <meta
       name="description"
       content="erg does the work. Autonomous headless daemon for Claude Code."
@@ -1196,11 +1196,11 @@
         <ul class="sidebar-nav">
           <li class="sidebar-section">
             <span class="sidebar-section-title">Getting started</span>
-            <a href="#overview" class="sidebar-link">Overview</a>
-            <a href="#how-it-works" class="sidebar-link">How it works</a>
-            <a href="#install" class="sidebar-link">Installation</a>
-            <a href="#quickstart" class="sidebar-sublink">Quick start</a>
-            <a href="#file-layout" class="sidebar-sublink">File layout</a>
+            <a href="index.html#overview" class="sidebar-link">Overview</a>
+            <a href="index.html#how-it-works" class="sidebar-link">How it works</a>
+            <a href="index.html#install" class="sidebar-link">Installation</a>
+            <a href="index.html#quickstart" class="sidebar-sublink">Quick start</a>
+            <a href="index.html#file-layout" class="sidebar-sublink">File layout</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
@@ -1239,12 +1239,12 @@
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
-            <a href="examples.html#examples" class="sidebar-link">Example workflows</a>
-            <a href="examples.html#example-minimal" class="sidebar-sublink">Minimal</a>
-            <a href="examples.html#example-supervised" class="sidebar-sublink">Supervised</a>
-            <a href="examples.html#example-ci-gate" class="sidebar-sublink">CI gate</a>
-            <a href="examples.html#example-label-tracking" class="sidebar-sublink">Label tracking</a>
-            <a href="examples.html#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
+            <a href="#examples" class="sidebar-link">Example workflows</a>
+            <a href="#example-minimal" class="sidebar-sublink">Minimal</a>
+            <a href="#example-supervised" class="sidebar-sublink">Supervised</a>
+            <a href="#example-ci-gate" class="sidebar-sublink">CI gate</a>
+            <a href="#example-label-tracking" class="sidebar-sublink">Label tracking</a>
+            <a href="#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -1255,224 +1255,1000 @@
 
       <!-- Content -->
       <main class="main">
-        <!-- Overview -->
-        <section id="overview">
-          <span class="hero-badge">autonomous coding daemon</span>
-          <p class="hero-tagline">
-            <span class="hero-tagline-accent">does the work.</span>
-          </p>
-          <p>
-            Autonomous headless daemon for Claude Code. Polls GitHub, Asana, or
-            Linear for issues, starts containerized Claude sessions, and drives
-            the full PR lifecycle &mdash; as automated as your workflow allows.
-          </p>
-          <div class="hero-cta">
-            <a href="#install" class="btn btn-primary">install</a>
-            <a href="https://github.com/zhubert/erg" class="btn btn-ghost"
-              >view on github</a
-            >
-          </div>
-        </section>
+        <!-- Example workflows -->
+        <h2 id="examples">Example workflows</h2>
+        <p>
+          Ready-made configs for common use cases. Copy any of these into
+          <code>.erg/workflow.yaml</code> in your repo, or run
+          <code>erg configure</code> to generate a starting point
+          interactively.
+        </p>
 
-        <div class="feature-grid">
-          <div class="feature-item">
-            <span class="fi-icon">#</span>
-            <h4>issue polling</h4>
-            <p>
-              Polls GitHub, Asana, or Linear for new issues. Label an issue
-              <code>queued</code> and the agent picks it up.
-            </p>
+        <h3 id="example-minimal">Minimal</h3>
+        <p>
+          Simple pipeline: code, open PR, wait for review + CI to pass together,
+          merge. Uses <code>pr.mergeable</code> to combine approval and CI into
+          a single wait state. The best starting point for most projects.
+        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
           </div>
-          <div class="feature-item">
-            <span class="fi-icon">[ ]</span>
-            <h4>containerized sessions</h4>
-            <p>
-              Every session runs inside a Docker container. The container is the
-              sandbox &mdash; Claude has full permissions.
-            </p>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">minimal.yaml</span>
+              </div>
+              <pre>
+# Minimal workflow — code, open PR, wait for approval + CI, merge.
+#
+# Use this for small teams or bots where you want the simplest possible
+# pipeline. Uses pr.mergeable to fire a single event when both review
+# approval and CI pass, replacing the separate await_review + await_ci
+# states from the default workflow.
+#
+# Highlights:
+#   - pr.mergeable: combined review + CI wait in a single state
+#   - squash merge for clean commit history
+#   - settings block: max_concurrent, branch_prefix, cleanup_merged
+
+workflow: minimal
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+settings:
+  max_concurrent: 5          # Allow up to 5 sessions running at once
+  branch_prefix: bot/        # All branches will start with "bot/"
+  cleanup_merged: true       # Delete branches and worktrees after merge
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 30
+      max_duration: 20m
+    next: open_pr
+    error: failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_merge
+    error: failed
+
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  # No need to manage them as separate wait states.
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true   # Must be approved by a reviewer
+      require_ci: true       # CI must pass
+    timeout: 72h             # Time out after 3 days of inactivity
+    timeout_next: timed_out
+    next: merge
+    error: failed
+
+  # Comment on the PR and fail if the wait times out.
+  timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been waiting 72h with no activity. Closing — re-label the issue to retry."
+    next: failed
+    error: failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash         # Squash all commits into one for a clean history
+      cleanup: true
+    next: done
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
           </div>
-          <div class="feature-item">
-            <span class="fi-icon">//</span>
-            <h4>concurrent workers</h4>
-            <p>
-              Process multiple issues in parallel. Each gets its own branch,
-              container, and Claude session.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">&lt;&gt;</span>
-            <h4>PR lifecycle</h4>
-            <p>
-              Creates PRs, addresses review comments, waits for CI, and
-              auto-merges. Full lifecycle management.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">~</span>
-            <h4>workflow engine</h4>
-            <p>
-              Configurable state machine via <code>.erg/workflow.yaml</code>.
-              Task, wait, choice, and pass states with retry, catch, and
-              timeout.
-            </p>
-          </div>
-          <div class="feature-item">
-            <span class="fi-icon">*</span>
-            <h4>automated workflow</h4>
-            <p>
-              From issue to merged PR: coding, CI fixes, review feedback, and
-              merge — all managed by the workflow engine.
-            </p>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> coding
+    coding --> open_pr : ai.code
+    open_pr --> await_merge : github.create_pr
+    await_merge --> merge : pr.mergeable
+    await_merge --> timed_out : timeout
+    timed_out --> failed : github.comment_pr
+    merge --> done : github.merge
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
           </div>
         </div>
 
-        <!-- How it works -->
-        <h2 id="how-it-works">How it works</h2>
+        <h3 id="example-supervised">Supervised</h3>
         <p>
-          At its core, erg is a
-          <strong>state machine engine paired with AI coding</strong>. Each
-          issue becomes a work item that advances through a configurable
-          flowchart of states — from AI-generated code to a merged PR. You
-          define exactly how much automation applies: require human review,
-          auto-merge after CI, loop back for fixes, or notify external systems
-          at any step.
+          The recommended starting workflow for most teams. Claude analyzes the
+          issue and posts a structured implementation plan as an issue comment —
+          <em>before writing any code</em>. A human approves the approach or
+          leaves feedback; Claude revises and loops back until approved. Once
+          the plan is signed off, the full PR lifecycle runs automatically.
         </p>
-        <ol class="steps-list">
-          <li>
-            <div class="step-body">
-              <h4>Tag or label an issue</h4>
-              <p>
-                Mark a task in GitHub, Asana, or Linear with the configured
-                trigger label (e.g. <code>plan</code> or <code>queued</code>).
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Daemon picks it up</h4>
-              <p>
-                erg starts a containerized Claude session. With planning
-                enabled, no branch is created yet — Claude reads the codebase in
-                read-only mode.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude analyzes and posts a plan</h4>
-              <p>
-                The <code>ai.plan</code> session explores the codebase and posts
-                a structured implementation plan as an issue comment — no code
-                written yet.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>You review and approve</h4>
-              <p>
-                Reply with approval (e.g. "LGTM") to proceed, or leave feedback.
-                Claude revises the plan and loops back until you approve.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>Claude writes the code</h4>
-              <p>
-                Once approved, <code>ai.code</code> creates a branch, implements
-                the changes, runs tests, and commits.
-              </p>
-            </div>
-          </li>
-          <li>
-            <div class="step-body">
-              <h4>State machine advances</h4>
-              <p>
-                The workflow engine opens a PR, waits for CI, handles review
-                feedback, and merges — automatically, according to your rules.
-              </p>
-            </div>
-          </li>
-        </ol>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">supervised.yaml</span>
+              </div>
+              <pre>
+# Supervised workflow — plan first, get human approval, then code.
+#
+# Claude analyzes the issue and codebase in read-only mode, then posts
+# a structured implementation plan as an issue comment. A human reviews
+# the plan and replies to approve or give feedback. Claude loops back to
+# revise the plan until approved, then proceeds to code and open a PR.
+#
+# Label an issue "plan" to trigger this workflow.
+#
+# Highlights:
+#   - ai.plan: read-only session, posts plan as issue comment (no branch created)
+#   - plan.user_replied: waits for human feedback on the plan
+#   - choice state routes on plan_approved: approved → coding, feedback → re-plan
+#   - label transitions for visibility: plan → plan-review → in-progress
+#   - pr.mergeable: combined review + CI wait before merge
 
-        <!-- Installation -->
-        <h2 id="install">Installation</h2>
-        <h3>Homebrew</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>brew install zhubert/tap/erg</code>
-          <button
-            class="copy-btn"
-            onclick="copyCmd(this, 'brew install zhubert/tap/erg')"
-          >
-            copy
-          </button>
+workflow: supervised
+start: planning
+
+source:
+  provider: github
+  filter:
+    label: plan              # Label an issue "plan" to trigger this workflow
+
+settings:
+  max_concurrent: 3
+  branch_prefix: bot/
+  cleanup_merged: true
+
+states:
+  # Claude explores the codebase and posts a plan as an issue comment.
+  # Read-only: no branch is created, no code is written.
+  planning:
+    type: task
+    action: ai.plan
+    params:
+      max_turns: 30
+      max_duration: 15m
+    next: remove_plan_label
+    error: notify_failed
+
+  # Swap labels so the issue shows it is ready for plan review.
+  remove_plan_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan
+    next: add_plan_review_label
+
+  add_plan_review_label:
+    type: task
+    action: github.add_label
+    params:
+      label: plan-review
+    next: await_plan_feedback
+
+  # Wait for a human to comment on the issue.
+  # Reply "LGTM", "approved", "proceed", etc. to approve.
+  # Any other reply is treated as feedback — Claude will revise the plan.
+  await_plan_feedback:
+    type: wait
+    event: plan.user_replied
+    params:
+      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
+    timeout: 72h
+    timeout_next: plan_expired
+    next: check_plan_feedback
+    error: notify_failed
+
+  # Route based on whether the human approved or gave feedback.
+  check_plan_feedback:
+    type: choice
+    choices:
+      - variable: plan_approved
+        equals: true
+        next: remove_plan_review_label   # Approved → proceed to coding
+      - variable: plan_approved
+        equals: false
+        next: planning                   # Feedback → revise and re-post the plan
+    default: notify_failed
+
+  remove_plan_review_label:
+    type: task
+    action: github.remove_label
+    params:
+      label: plan-review
+    next: add_in_progress_label
+
+  add_in_progress_label:
+    type: task
+    action: github.add_label
+    params:
+      label: in-progress
+    next: coding
+
+  # Plan approved — Claude now creates a branch and writes the code.
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: notify_failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_merge
+    error: notify_failed
+
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    timeout_next: review_overdue
+    next: merge
+    error: notify_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: squash
+      cleanup: true
+    next: done
+
+  # Comment on the issue if the plan is not approved within 72h.
+  plan_expired:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "The implementation plan has been awaiting approval for 72h. Re-label the issue to restart."
+    next: failed
+    error: failed
+
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> planning
+    planning --> remove_plan_label : ai.plan
+    remove_plan_label --> add_plan_review_label : github.remove_label
+    add_plan_review_label --> await_plan_feedback : github.add_label
+    await_plan_feedback --> check_plan_feedback : plan.user_replied
+    await_plan_feedback --> plan_expired : timeout
+    check_plan_feedback --> remove_plan_review_label : plan_approved is true
+    check_plan_feedback --> planning : plan_approved is false
+    remove_plan_review_label --> add_in_progress_label : github.remove_label
+    add_in_progress_label --> coding : github.add_label
+    coding --> open_pr : ai.code
+    open_pr --> await_merge : github.create_pr
+    await_merge --> merge : pr.mergeable
+    await_merge --> review_overdue : timeout
+    review_overdue --> notify_failed : github.comment_pr
+    merge --> done : github.merge
+    plan_expired --> failed : github.comment_issue
+    notify_failed --> failed : github.comment_issue
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
         </div>
 
-        <h3>Build from source</h3>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>go build -o erg .</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'go build -o erg .')">
-            copy
-          </button>
+        <h3 id="example-ci-gate">CI gate</h3>
+        <p>
+          CI must pass before a reviewer is assigned. A
+          <code>choice</code> state routes on the CI result: green goes to
+          review, red triggers a Claude fix loop, merge conflicts are rebased
+          automatically or resolved by Claude. Failures comment on the issue
+          before terminating. This is the config that
+          <code>erg configure</code> generates.
+        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">ci-gate.yaml</span>
+              </div>
+              <pre>
+# CI-gate workflow — CI must pass before any human reviews the code.
+#
+# Use this for open-source projects or teams where failing CI wastes
+# reviewers' time. Claude automatically attempts to fix CI failures
+# and merge conflicts before requesting review from a designated maintainer.
+#
+# Highlights:
+#   - CI runs before review (open_pr → await_ci → check_ci → request_reviewer)
+#   - choice state routes CI results: pass → reviewer, fail → fix loop
+#   - ai.fix_ci loop (bounded by max_ci_fix_rounds) with choice-gated cycle
+#   - Merge conflict handling: git.rebase → ai.resolve_conflicts fallback
+#   - github.request_review to assign a specific reviewer once CI is green
+#   - notify_failed comments on the issue before terminating
+
+workflow: ci-gate
+start: coding
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: notify_failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_ci              # Check CI before requesting review
+    error: notify_failed
+
+  await_ci:
+    type: wait
+    event: ci.complete
+    timeout: 2h
+    timeout_next: ci_timed_out
+    params:
+      on_failure: fix           # Fire event with ci_failed=true on CI failure
+    next: check_ci              # Route based on CI result
+    error: notify_failed
+
+  # Branch on the CI result written into step data by ci.complete.
+  check_ci:
+    type: choice
+    choices:
+      - variable: conflicting
+        equals: true
+        next: rebase            # Merge conflicts → rebase onto main
+      - variable: ci_passed
+        equals: true
+        next: request_reviewer  # CI green → assign reviewer
+      - variable: ci_failed
+        equals: true
+        next: fix_ci            # CI red → let Claude fix it
+    default: notify_failed
+
+  # Rebase branch onto main to resolve merge conflicts.
+  rebase:
+    type: task
+    action: git.rebase
+    params:
+      max_rebase_rounds: 3
+    next: await_ci
+    error: resolve_conflicts    # If rebase fails, use Claude
+
+  # Claude resolves merge conflicts that mechanical rebase cannot handle.
+  resolve_conflicts:
+    type: task
+    action: ai.resolve_conflicts
+    params:
+      max_conflict_rounds: 3
+    next: push_conflict_fix
+    error: notify_failed
+
+  push_conflict_fix:
+    type: task
+    action: github.push
+    next: await_ci
+    error: notify_failed
+
+  # Claude attempts to fix failing CI. Loops back through check_ci (choice
+  # state), which keeps the cycle valid per the workflow engine rules.
+  fix_ci:
+    type: task
+    action: ai.fix_ci
+    params:
+      max_ci_fix_rounds: 3      # Give up after 3 unsuccessful fix attempts
+    next: push_ci_fix
+    error: ci_unfixable
+
+  push_ci_fix:
+    type: task
+    action: github.push
+    next: await_ci              # Loop back: await_ci → check_ci → fix_ci (cycle through choice)
+    error: notify_failed
+
+  # Notify when all fix attempts are exhausted.
+  ci_unfixable:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI fix attempts exhausted after 3 rounds. Manual intervention required."
+    next: notify_failed
+    error: notify_failed
+
+  ci_timed_out:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "CI has been running for over 2h. Please check the CI pipeline."
+    next: notify_failed
+    error: notify_failed
+
+  # Assign a reviewer only after CI is green, avoiding wasted review time.
+  request_reviewer:
+    type: task
+    action: github.request_review
+    params:
+      reviewer: your-github-username   # Replace with the reviewer's GitHub username
+    next: await_review
+    error: await_review               # If request fails, still wait for review
+
+  await_review:
+    type: wait
+    event: pr.reviewed
+    timeout: 48h
+    timeout_next: review_overdue
+    params:
+      auto_address: true
+      max_feedback_rounds: 3
+    next: merge
+    error: notify_failed
+
+  # Comment on the issue when review takes too long, then fail.
+  review_overdue:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "This PR has been awaiting review for 48h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: done
+
+  done:
+    type: succeed
+
+  notify_failed:
+    type: task
+    action: github.comment_issue
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> coding
+    coding --> open_pr : ai.code
+    open_pr --> await_ci : github.create_pr
+    await_ci --> check_ci : ci.complete
+    await_ci --> ci_timed_out : timeout
+    check_ci --> rebase : conflicting is true
+    check_ci --> request_reviewer : ci_passed is true
+    check_ci --> fix_ci : ci_failed is true
+    check_ci --> notify_failed : default
+    rebase --> await_ci : git.rebase
+    rebase --> resolve_conflicts : error
+    resolve_conflicts --> push_conflict_fix : ai.resolve_conflicts
+    push_conflict_fix --> await_ci : github.push
+    fix_ci --> push_ci_fix : ai.fix_ci
+    fix_ci --> ci_unfixable : error
+    push_ci_fix --> await_ci : github.push
+    ci_unfixable --> notify_failed : github.comment_pr
+    ci_timed_out --> notify_failed : github.comment_pr
+    request_reviewer --> await_review : github.request_review
+    await_review --> merge : pr.reviewed
+    await_review --> review_overdue : timeout
+    review_overdue --> notify_failed : github.comment_issue
+    merge --> done : github.merge
+    notify_failed --> failed : github.comment_issue
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
         </div>
 
-        <h3 id="quickstart">Quick start</h3>
+        <h3 id="example-label-tracking">Label tracking</h3>
         <p>
-          Run <code>erg configure</code> inside your repo. It will walk you through
-          choosing an issue provider (GitHub, Asana, or Linear), configuring
-          credentials, and scaffolding a workflow — then start the daemon.
+          Issues move through GitHub labels as they advance:
+          <code>queued</code> → <code>in-progress</code> →
+          <code>in-review</code>. A <code>pass</code> state injects config
+          flags, and a <code>choice</code> state reads them to conditionally
+          close the source issue after merge.
         </p>
-        <div class="install-block">
-          <span class="prompt-char">$</span>
-          <code>erg configure</code>
-          <button class="copy-btn" onclick="copyCmd(this, 'erg configure')">
-            copy
-          </button>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">label-tracking.yaml</span>
+              </div>
+              <pre>
+# Label-tracking workflow — use GitHub labels to show workflow progress.
+#
+# Issues move through labels as they advance: queued → in-progress →
+# in-review, and the source issue is closed automatically after merge.
+# A pass state at the top injects configuration flags that a downstream
+# choice state reads to decide whether to auto-close the issue.
+#
+# Highlights:
+#   - pass state to inject workflow configuration at startup
+#   - choice state reads pass-state data to conditionally close the issue
+#   - github.add_label / github.remove_label for real-time status tracking
+#   - github.close_issue to close the source issue after merge
+
+workflow: label-tracking
+start: configure
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  # Inject static workflow configuration into step data.
+  # Downstream states can read these values via choice rules.
+  configure:
+    type: pass
+    data:
+      close_issue_on_merge: true   # Set to false to keep the issue open after merge
+    next: start_coding
+
+  # Remove the "queued" label and add "in-progress" when work begins.
+  start_coding:
+    type: task
+    action: github.remove_label
+    params:
+      label: queued
+    next: label_in_progress
+    error: label_in_progress       # Continue even if the label was already missing
+
+  label_in_progress:
+    type: task
+    action: github.add_label
+    params:
+      label: in-progress
+    next: coding
+    error: coding                  # Continue even if labeling fails
+
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: label_in_review
+    error: label_failed
+
+  # Swap labels from "in-progress" to "in-review" before opening the PR.
+  label_in_review:
+    type: task
+    action: github.remove_label
+    params:
+      label: in-progress
+    next: add_in_review
+    error: add_in_review
+
+  add_in_review:
+    type: task
+    action: github.add_label
+    params:
+      label: in-review
+    next: open_pr
+    error: open_pr
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: await_merge
+    error: label_failed
+
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    timeout_next: label_failed     # Route to label_failed after 3 days of inactivity
+    next: merge
+    error: label_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: check_close
+
+  # Read the close_issue_on_merge flag set by the configure pass state.
+  check_close:
+    type: choice
+    choices:
+      - variable: close_issue_on_merge
+        equals: true
+        next: close_issue
+    default: done
+
+  close_issue:
+    type: task
+    action: github.close_issue     # Close the source issue after a successful merge
+    next: done
+    error: done                    # Proceed to done even if the close fails
+
+  done:
+    type: succeed
+
+  # Add a "bot-failed" label so failed issues are easy to find.
+  label_failed:
+    type: task
+    action: github.add_label
+    params:
+      label: bot-failed
+    next: failed
+    error: failed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> configure
+    configure --> start_coding : pass
+    start_coding --> label_in_progress : github.remove_label
+    label_in_progress --> coding : github.add_label
+    coding --> label_in_review : ai.code
+    coding --> label_failed : error
+    label_in_review --> add_in_review : github.remove_label
+    add_in_review --> open_pr : github.add_label
+    open_pr --> await_merge : github.create_pr
+    open_pr --> label_failed : error
+    await_merge --> merge : pr.mergeable
+    await_merge --> label_failed : timeout
+    merge --> check_close : github.merge
+    check_close --> close_issue : close_issue_on_merge is true
+    check_close --> done : default
+    close_issue --> done : github.close_issue
+    label_failed --> failed : github.add_label
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
         </div>
 
-
-        <h3 id="file-layout">File layout</h3>
+        <h3 id="example-asana-kanban">Asana kanban</h3>
         <p>
-          Erg stores configuration, session data, and logs under
-          <code>~/.erg/</code> by default. On Linux, if <code>~/.erg/</code>
-          does not exist, Erg respects the
-          <a href="https://specifications.freedesktop.org/basedir-spec/latest/">XDG Base Directory Specification</a>:
+          A board-section-driven workflow for Asana. Tasks in the
+          <em>Todo</em> section are picked up automatically — no tag required.
+          Claude plans and posts a comment; the card moves to
+          <em>Planned</em>. Human feedback triggers re-planning; dragging the
+          card to <em>Doing</em> starts coding. After the PR opens the card
+          moves to <em>In Review</em>, then to <em>Done</em> on merge.
         </p>
-        <table class="cli-table">
-          <thead>
-            <tr>
-              <th>Data type</th>
-              <th>Default path</th>
-              <th>XDG override</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Config (<code>config.json</code>)</td>
-              <td><code>~/.erg/</code></td>
-              <td><code>$XDG_CONFIG_HOME/erg/</code></td>
-            </tr>
-            <tr>
-              <td>Session data</td>
-              <td><code>~/.erg/sessions/</code></td>
-              <td><code>$XDG_DATA_HOME/erg/sessions/</code></td>
-            </tr>
-            <tr>
-              <td>Logs &amp; state</td>
-              <td><code>~/.erg/logs/</code></td>
-              <td><code>$XDG_STATE_HOME/erg/logs/</code></td>
-            </tr>
-          </tbody>
-        </table>
-        <p>
-          Resolution order: (1) if <code>~/.erg/</code> exists, use the legacy
-          flat layout; (2) if any XDG env var is set, use XDG layout with
-          defaults for unset vars; (3) otherwise default to <code>~/.erg/</code>.
-        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">asana-kanban.yaml</span>
+              </div>
+              <pre>
+# Asana kanban workflow — board sections drive the lifecycle.
+#
+# Section flow: Todo → Planned → Doing → In Review → Done
+#
+# Tasks in the "Todo" section are picked up automatically.
+# No tag is required — section position is the only trigger.
+#
+# Highlights:
+#   - source.filter.section: poll a named board section, not a tag
+#   - asana.move_to_section: advance the card as work progresses
+#   - plan.user_replied: comment feedback triggers re-planning
+#   - asana.in_section: gate on a human dragging the card to "Doing"
+#   - pr.mergeable: combined review + CI wait before merge
 
+workflow: asana-kanban
+start: planning
+
+source:
+  provider: asana
+  filter:
+    project: YOUR_PROJECT_GID   # found in the project URL
+    section: Todo               # poll tasks in this board section
+
+settings:
+  max_concurrent: 3
+  branch_prefix: bot/
+  cleanup_merged: true
+
+states:
+  # Claude explores the codebase and posts a plan as an Asana comment.
+  planning:
+    type: task
+    action: ai.plan
+    params:
+      max_turns: 30
+      max_duration: 15m
+    next: move_to_planned
+    error: notify_failed
+
+  # Slide the card to "Planned" to signal the plan is ready for review.
+  move_to_planned:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: Planned
+    next: await_plan_feedback
+    error: await_plan_feedback
+
+  # Wait for a human to comment on the task.
+  # Approval phrases advance to the coding gate; any other comment
+  # is treated as feedback and loops back to re-plan.
+  # After 24h of silence, move on to wait for the card to reach "Doing".
+  await_plan_feedback:
+    type: wait
+    event: plan.user_replied
+    params:
+      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
+    timeout: 24h
+    timeout_next: await_doing
+    next: check_plan_feedback
+    error: notify_failed
+
+  check_plan_feedback:
+    type: choice
+    choices:
+      - variable: plan_approved
+        equals: true
+        next: await_doing
+      - variable: plan_approved
+        equals: false
+        next: planning          # Feedback → revise and re-post the plan
+    default: planning
+
+  # Gate on a human dragging the card to "Doing" on the board.
+  # This is the explicit signal that the plan is accepted and work should begin.
+  await_doing:
+    type: wait
+    event: asana.in_section
+    params:
+      section: Doing
+    timeout: 7d
+    timeout_next: plan_expired
+    next: coding
+    error: notify_failed
+
+  # Plan accepted — Claude creates a branch and writes the code.
+  coding:
+    type: task
+    action: ai.code
+    params:
+      max_turns: 50
+      max_duration: 30m
+    next: open_pr
+    error: notify_failed
+
+  open_pr:
+    type: task
+    action: github.create_pr
+    params:
+      link_issue: true
+    next: move_to_in_review
+    error: notify_failed
+
+  # Advance the card to "In Review" while the PR is open.
+  move_to_in_review:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: In Review
+    next: await_merge
+    error: await_merge
+
+  # pr.mergeable fires when BOTH review approval AND CI pass.
+  await_merge:
+    type: wait
+    event: pr.mergeable
+    params:
+      require_review: true
+      require_ci: true
+    timeout: 72h
+    timeout_next: review_overdue
+    next: merge
+    error: notify_failed
+
+  merge:
+    type: task
+    action: github.merge
+    params:
+      method: rebase
+      cleanup: true
+    next: move_to_done
+    error: notify_failed
+
+  # Move the card to "Done" — the task is complete.
+  move_to_done:
+    type: task
+    action: asana.move_to_section
+    params:
+      section: Done
+    next: done
+    error: done
+
+  plan_expired:
+    type: task
+    action: asana.comment
+    params:
+      body: "Plan waiting 7 days for the card to move to 'Doing'. Move the card when ready, or remove it from Todo to cancel."
+    next: failed
+    error: failed
+
+  review_overdue:
+    type: task
+    action: github.comment_pr
+    params:
+      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
+    next: notify_failed
+    error: notify_failed
+
+  notify_failed:
+    type: task
+    action: asana.comment
+    params:
+      body: "Unable to complete automatically. Manual intervention required."
+    next: failed
+    error: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> planning
+    planning --> move_to_planned : ai.plan
+    planning --> notify_failed : error
+    move_to_planned --> await_plan_feedback : asana.move_to_section
+    await_plan_feedback --> check_plan_feedback : plan.user_replied
+    await_plan_feedback --> await_doing : timeout (24h)
+    check_plan_feedback --> await_doing : plan_approved is true
+    check_plan_feedback --> planning : plan_approved is false
+    await_doing --> coding : asana.in_section (Doing)
+    await_doing --> plan_expired : timeout (7d)
+    coding --> open_pr : ai.code
+    coding --> notify_failed : error
+    open_pr --> move_to_in_review : github.create_pr
+    open_pr --> notify_failed : error
+    move_to_in_review --> await_merge : asana.move_to_section
+    await_merge --> merge : pr.mergeable
+    await_merge --> review_overdue : timeout (72h)
+    merge --> move_to_done : github.merge
+    move_to_done --> done : asana.move_to_section
+    review_overdue --> notify_failed : github.comment_pr
+    plan_expired --> failed : asana.comment
+    notify_failed --> failed : asana.comment
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
+        </div>
         <div
           style="
             margin-top: 3rem;
