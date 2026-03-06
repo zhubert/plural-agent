@@ -310,19 +310,13 @@ func TestGetBatchPRStates_EmptyList(t *testing.T) {
 
 func TestFetchPRReviewComments_Success(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
+			"number": 1,
 			"reviews": [{
 				"author": {"login": "reviewer1"},
 				"body": "Overall looks good but needs changes",
-				"state": "CHANGES_REQUESTED",
-				"comments": [{
-					"author": {"login": "reviewer1"},
-					"body": "Use a mutex here",
-					"path": "internal/app.go",
-					"line": 42,
-					"url": "https://github.com/repo/pull/1#discussion_r1"
-				}]
+				"state": "CHANGES_REQUESTED"
 			}],
 			"comments": [{
 				"author": {"login": "someone"},
@@ -330,6 +324,15 @@ func TestFetchPRReviewComments_Success(t *testing.T) {
 				"url": "https://github.com/repo/pull/1#issuecomment-1"
 			}]
 		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Stdout: []byte(`[{
+			"body": "Use a mutex here",
+			"path": "internal/app.go",
+			"line": 42,
+			"user": {"login": "reviewer1"},
+			"html_url": "https://github.com/repo/pull/1#discussion_r1"
+		}]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -361,7 +364,7 @@ func TestFetchPRReviewComments_Success(t *testing.T) {
 		t.Errorf("unexpected review body: %s", comments[1].Body)
 	}
 
-	// Inline comment
+	// Inline comment (from REST API)
 	if comments[2].Path != "internal/app.go" {
 		t.Errorf("expected path 'internal/app.go', got '%s'", comments[2].Path)
 	}
@@ -375,7 +378,7 @@ func TestFetchPRReviewComments_Success(t *testing.T) {
 
 func TestFetchPRReviewComments_CLIError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Err: fmt.Errorf("no pull requests found for branch feature-branch"),
 	})
 
@@ -391,7 +394,7 @@ func TestFetchPRReviewComments_CLIError(t *testing.T) {
 
 func TestFetchPRReviewComments_InvalidJSON(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`not valid json`),
 	})
 
@@ -407,7 +410,7 @@ func TestFetchPRReviewComments_InvalidJSON(t *testing.T) {
 
 func TestFetchPRReviewComments_EmptyReviews(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{"reviews": [], "comments": []}`),
 	})
 
@@ -423,7 +426,7 @@ func TestFetchPRReviewComments_EmptyReviews(t *testing.T) {
 
 func TestFetchPRReviewComments_EmptyReviewBody(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
 			"reviews": [{
 				"author": {"login": "reviewer"},
@@ -448,7 +451,7 @@ func TestFetchPRReviewComments_EmptyReviewBody(t *testing.T) {
 
 func TestFetchPRReviewComments_ApprovedReviewBodySkipped(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
 			"reviews": [{
 				"author": {"login": "reviewer"},
@@ -473,22 +476,25 @@ func TestFetchPRReviewComments_ApprovedReviewBodySkipped(t *testing.T) {
 
 func TestFetchPRReviewComments_ApprovedReviewInlineCommentsKept(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
+			"number": 1,
 			"reviews": [{
 				"author": {"login": "reviewer"},
 				"body": "LGTM with a small nit",
-				"state": "APPROVED",
-				"comments": [{
-					"author": {"login": "reviewer"},
-					"body": "Consider renaming this variable",
-					"path": "main.go",
-					"line": 10,
-					"url": "https://github.com/repo/pull/1#discussion_r1"
-				}]
+				"state": "APPROVED"
 			}],
 			"comments": []
 		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Stdout: []byte(`[{
+			"body": "Consider renaming this variable",
+			"path": "main.go",
+			"line": 10,
+			"user": {"login": "reviewer"},
+			"html_url": "https://github.com/repo/pull/1#discussion_r1"
+		}]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -510,7 +516,7 @@ func TestFetchPRReviewComments_ApprovedReviewInlineCommentsKept(t *testing.T) {
 
 func TestFetchPRReviewComments_DismissedReviewBodySkipped(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
 			"reviews": [{
 				"author": {"login": "reviewer"},
@@ -535,30 +541,32 @@ func TestFetchPRReviewComments_DismissedReviewBodySkipped(t *testing.T) {
 
 func TestFetchPRReviewComments_MixedReviewStates(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
+			"number": 1,
 			"reviews": [
 				{
 					"author": {"login": "reviewer1"},
 					"body": "Looks great!",
-					"state": "APPROVED",
-					"comments": []
+					"state": "APPROVED"
 				},
 				{
 					"author": {"login": "reviewer2"},
 					"body": "Please fix the error handling",
-					"state": "CHANGES_REQUESTED",
-					"comments": [{
-						"author": {"login": "reviewer2"},
-						"body": "Missing error check here",
-						"path": "handler.go",
-						"line": 55,
-						"url": "https://github.com/repo/pull/1#discussion_r2"
-					}]
+					"state": "CHANGES_REQUESTED"
 				}
 			],
 			"comments": []
 		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Stdout: []byte(`[{
+			"body": "Missing error check here",
+			"path": "handler.go",
+			"line": 55,
+			"user": {"login": "reviewer2"},
+			"html_url": "https://github.com/repo/pull/1#discussion_r2"
+		}]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -580,16 +588,19 @@ func TestFetchPRReviewComments_MixedReviewStates(t *testing.T) {
 
 func TestFetchPRReviewComments_ReviewBodyOnly(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
 		Stdout: []byte(`{
+			"number": 1,
 			"reviews": [{
 				"author": {"login": "reviewer"},
 				"body": "Please fix the formatting",
-				"state": "CHANGES_REQUESTED",
-				"comments": []
+				"state": "CHANGES_REQUESTED"
 			}],
 			"comments": []
 		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -605,6 +616,72 @@ func TestFetchPRReviewComments_ReviewBodyOnly(t *testing.T) {
 	}
 	if comments[0].Body != "Please fix the formatting" {
 		t.Errorf("unexpected body: %s", comments[0].Body)
+	}
+}
+
+func TestFetchPRReviewComments_InlineAPIFailureNonFatal(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
+		Stdout: []byte(`{
+			"number": 1,
+			"reviews": [{
+				"author": {"login": "reviewer"},
+				"body": "Please fix the formatting",
+				"state": "CHANGES_REQUESTED"
+			}],
+			"comments": []
+		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Err: fmt.Errorf("API rate limit exceeded"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.FetchPRReviewComments(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error (inline API failure should be non-fatal): %v", err)
+	}
+	// Should still return the review body even though inline fetch failed
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment (review body), got %d", len(comments))
+	}
+	if comments[0].Body != "Please fix the formatting" {
+		t.Errorf("unexpected body: %s", comments[0].Body)
+	}
+}
+
+func TestFetchPRReviewComments_InlineCommentNullLine(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "view", "feature-branch", "--json", "reviews,comments,number"}, pexec.MockResponse{
+		Stdout: []byte(`{
+			"number": 1,
+			"reviews": [],
+			"comments": []
+		}`),
+	})
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/1/comments?per_page=100"}, pexec.MockResponse{
+		Stdout: []byte(`[{
+			"body": "This line was deleted",
+			"path": "old_file.go",
+			"line": null,
+			"user": {"login": "reviewer"},
+			"html_url": "https://github.com/repo/pull/1#discussion_r1"
+		}]`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	comments, err := svc.FetchPRReviewComments(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(comments))
+	}
+	if comments[0].Line != 0 {
+		t.Errorf("expected line 0 for null line, got %d", comments[0].Line)
+	}
+	if comments[0].Path != "old_file.go" {
+		t.Errorf("expected path 'old_file.go', got '%s'", comments[0].Path)
 	}
 }
 

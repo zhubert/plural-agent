@@ -315,17 +315,17 @@ type PRReviewComment struct {
 	URL    string // Permalink
 }
 
-// JSON types for gh pr view --json reviews,comments response
+// JSON types for gh pr view --json reviews,comments,number response
 type ghPRReviewsResponse struct {
+	Number   int         `json:"number"`
 	Reviews  []ghReview  `json:"reviews"`
 	Comments []ghComment `json:"comments"`
 }
 
 type ghReview struct {
-	Author   ghAuthor    `json:"author"`
-	Body     string      `json:"body"`
-	State    string      `json:"state"`
-	Comments []ghComment `json:"comments"`
+	Author ghAuthor `json:"author"`
+	Body   string   `json:"body"`
+	State  string   `json:"state"`
 }
 
 type ghComment struct {
@@ -343,8 +343,12 @@ type ghAuthor struct {
 // FetchPRReviewComments fetches review comments from a pull request using the gh CLI.
 // Returns top-level PR comments, review body comments, and inline code review comments
 // as a flattened slice. The repoPath is used as the working directory.
+//
+// Top-level comments and review bodies come from `gh pr view --json`. Inline code
+// review comments (attached to specific lines in the diff) require a separate REST
+// API call because `gh pr view --json reviews` does not include them.
 func (s *GitService) FetchPRReviewComments(ctx context.Context, repoPath, branch string) ([]PRReviewComment, error) {
-	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "reviews,comments")
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "reviews,comments,number")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -368,7 +372,7 @@ func (s *GitService) FetchPRReviewComments(ctx context.Context, repoPath, branch
 		})
 	}
 
-	// Review-level body comments and inline code review comments
+	// Review-level body comments (review.Body text, not inline code comments)
 	for _, review := range response.Reviews {
 		isApproval := review.State == "APPROVED" || review.State == "DISMISSED"
 
@@ -380,22 +384,63 @@ func (s *GitService) FetchPRReviewComments(ctx context.Context, repoPath, branch
 				Body:   review.Body,
 			})
 		}
-		// Always include inline code review comments, even from approval reviews
-		// (reviewer may have approved with nits)
-		for _, c := range review.Comments {
-			if c.Body == "" {
-				continue
-			}
-			comments = append(comments, PRReviewComment{
-				Author: c.Author.Login,
-				Body:   c.Body,
-				Path:   c.Path,
-				Line:   c.Line,
-				URL:    c.URL,
-			})
-		}
 	}
 
+	// Inline code review comments — fetched via REST API because
+	// `gh pr view --json reviews` does not include them.
+	if response.Number > 0 {
+		inlineComments, err := s.fetchInlineReviewComments(ctx, repoPath, response.Number)
+		if err == nil {
+			comments = append(comments, inlineComments...)
+		}
+		// Non-fatal: if the REST API call fails, we still return review bodies
+		// and top-level comments. The caller logs at a higher level.
+	}
+
+	return comments, nil
+}
+
+// fetchInlineReviewComments fetches inline code review comments (comments attached
+// to specific lines in the diff) via the GitHub REST API. These are not included in
+// the `gh pr view --json reviews` output.
+func (s *GitService) fetchInlineReviewComments(ctx context.Context, repoPath string, prNumber int) ([]PRReviewComment, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "api",
+		fmt.Sprintf("repos/:owner/:repo/pulls/%d/comments?per_page=100", prNumber),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gh api pull review comments failed: %w", err)
+	}
+
+	var raw []struct {
+		Body string `json:"body"`
+		Path string `json:"path"`
+		Line *int   `json:"line"` // null when comment is on a deleted line
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse inline review comments: %w", err)
+	}
+
+	var comments []PRReviewComment
+	for _, c := range raw {
+		if c.Body == "" {
+			continue
+		}
+		line := 0
+		if c.Line != nil {
+			line = *c.Line
+		}
+		comments = append(comments, PRReviewComment{
+			Author: c.User.Login,
+			Body:   c.Body,
+			Path:   c.Path,
+			Line:   line,
+			URL:    c.HTMLURL,
+		})
+	}
 	return comments, nil
 }
 

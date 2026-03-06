@@ -2899,23 +2899,26 @@ func TestAddressFeedback_CommentsAddressedMatchesBatchCount(t *testing.T) {
 	// FetchPRReviewComments returns 5 items (1 review body + 4 inline),
 	// but GetBatchPRStatesWithComments would count this as 1 actionable review.
 	reviewJSON := `{
+		"number": 42,
 		"reviews": [{
 			"author": {"login": "reviewer"},
 			"body": "Please fix the duplication",
-			"state": "CHANGES_REQUESTED",
-			"comments": [
-				{"author": {"login": "reviewer"}, "body": "Comment 1", "path": "file.go", "line": 10, "url": "https://example.com/1"},
-				{"author": {"login": "reviewer"}, "body": "Comment 2", "path": "file.go", "line": 20, "url": "https://example.com/2"},
-				{"author": {"login": "reviewer"}, "body": "Comment 3", "path": "file.go", "line": 30, "url": "https://example.com/3"},
-				{"author": {"login": "reviewer"}, "body": "Comment 4", "path": "file.go", "line": 40, "url": "https://example.com/4"}
-			]
+			"state": "CHANGES_REQUESTED"
 		}],
 		"comments": []
 	}`
+	inlineJSON := `[
+		{"body": "Comment 1", "path": "file.go", "line": 10, "user": {"login": "reviewer"}, "html_url": "https://example.com/1"},
+		{"body": "Comment 2", "path": "file.go", "line": 20, "user": {"login": "reviewer"}, "html_url": "https://example.com/2"},
+		{"body": "Comment 3", "path": "file.go", "line": 30, "user": {"login": "reviewer"}, "html_url": "https://example.com/3"},
+		{"body": "Comment 4", "path": "file.go", "line": 40, "user": {"login": "reviewer"}, "html_url": "https://example.com/4"}
+	]`
 
 	mockExec := exec.NewMockExecutor(nil)
-	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments"},
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments,number"},
 		exec.MockResponse{Stdout: []byte(reviewJSON)})
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/42/comments?per_page=100"},
+		exec.MockResponse{Stdout: []byte(inlineJSON)})
 
 	d := testDaemonWithExec(cfg, mockExec)
 
@@ -3552,7 +3555,7 @@ func TestStartFixCI_FormatCommandOverridesStepData(t *testing.T) {
 
 // testPRReviewJSON is a minimal CHANGES_REQUESTED review that passes
 // FilterTranscriptComments so addressFeedback reaches the format_command logic.
-const testPRReviewJSON = `{"reviews":[{"author":{"login":"reviewer1"},"body":"Please address the issue","state":"CHANGES_REQUESTED","comments":[]}],"comments":[]}`
+const testPRReviewJSON = `{"number":42,"reviews":[{"author":{"login":"reviewer1"},"body":"Please address the issue","state":"CHANGES_REQUESTED"}],"comments":[]}`
 
 // TestAddressFeedback_FormatCommandStoredInStepData verifies that when the
 // await_review workflow state has a format_command param, it is stored in
@@ -3563,8 +3566,10 @@ func TestAddressFeedback_FormatCommandStoredInStepData(t *testing.T) {
 	cfg.AddSession(*sess)
 
 	mockExec := exec.NewMockExecutor(nil)
-	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments"},
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments,number"},
 		exec.MockResponse{Stdout: []byte(testPRReviewJSON)})
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/42/comments?per_page=100"},
+		exec.MockResponse{Stdout: []byte(`[]`)})
 
 	d := testDaemonWithExec(cfg, mockExec)
 	d.workflowConfigs = map[string]*workflow.Config{
@@ -3610,8 +3615,10 @@ func TestAddressFeedback_InheritsFormatCommandFromStepData(t *testing.T) {
 	cfg.AddSession(*sess)
 
 	mockExec := exec.NewMockExecutor(nil)
-	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments"},
+	mockExec.AddExactMatch("gh", []string{"pr", "view", "feature-sess-1", "--json", "reviews,comments,number"},
 		exec.MockResponse{Stdout: []byte(testPRReviewJSON)})
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/pulls/42/comments?per_page=100"},
+		exec.MockResponse{Stdout: []byte(`[]`)})
 
 	d := testDaemonWithExec(cfg, mockExec)
 	// Default workflow config — await_review has no format_command param.
@@ -5727,7 +5734,7 @@ func TestFormatAddressReviewPrompt(t *testing.T) {
 
 // testAddressReviewJSON is a minimal CHANGES_REQUESTED review that passes
 // FilterTranscriptComments so startAddressReview reaches the format_command logic.
-const testAddressReviewJSON = `{"reviews":[{"author":{"login":"reviewer1"},"body":"Please fix the issue","state":"CHANGES_REQUESTED","comments":[]}],"comments":[]}`
+const testAddressReviewJSON = `{"number":42,"reviews":[{"author":{"login":"reviewer1"},"body":"Please fix the issue","state":"CHANGES_REQUESTED"}],"comments":[]}`
 
 // TestStartAddressReview_FormatCommandStoredInStepData verifies that when the
 // address_review workflow state has a format_command param, it is stored in
