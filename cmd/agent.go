@@ -22,6 +22,7 @@ import (
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/logger"
 	"github.com/zhubert/erg/internal/manifest"
+	"github.com/zhubert/erg/internal/model"
 	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/workflow"
 )
@@ -638,6 +639,13 @@ func runSingleRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqu
 		}
 		if wfCfg.Settings.MergeMethod != "" {
 			cfgOpts = append(cfgOpts, agentconfig.WithMergeMethod(wfCfg.Settings.MergeMethod))
+		}
+		if len(wfCfg.Settings.MCPServers) > 0 {
+			servers := make([]model.MCPServer, len(wfCfg.Settings.MCPServers))
+			for i, s := range wfCfg.Settings.MCPServers {
+				servers[i] = model.MCPServer{Name: s.Name, Command: s.Command, Args: s.Args}
+			}
+			cfgOpts = append(cfgOpts, agentconfig.WithMCPServers(servers))
 		}
 	}
 	cfg := agentconfig.NewAgentConfig(cfgOpts...)

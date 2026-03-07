@@ -30,14 +30,22 @@ type Config struct {
 
 // SettingsConfig holds agent-level settings that can be specified in the workflow YAML.
 type SettingsConfig struct {
-	ContainerImage string `yaml:"container_image,omitempty"`
-	BranchPrefix   string `yaml:"branch_prefix,omitempty"`
-	MaxConcurrent  int    `yaml:"max_concurrent,omitempty"`
-	CleanupMerged  *bool  `yaml:"cleanup_merged,omitempty"`
-	MaxTurns       int    `yaml:"max_turns,omitempty"`
-	MaxDuration    int    `yaml:"max_duration,omitempty"` // minutes
-	AutoMerge      *bool  `yaml:"auto_merge,omitempty"`
-	MergeMethod    string `yaml:"merge_method,omitempty"`
+	ContainerImage string            `yaml:"container_image,omitempty"`
+	BranchPrefix   string            `yaml:"branch_prefix,omitempty"`
+	MaxConcurrent  int               `yaml:"max_concurrent,omitempty"`
+	CleanupMerged  *bool             `yaml:"cleanup_merged,omitempty"`
+	MaxTurns       int               `yaml:"max_turns,omitempty"`
+	MaxDuration    int               `yaml:"max_duration,omitempty"` // minutes
+	AutoMerge      *bool             `yaml:"auto_merge,omitempty"`
+	MergeMethod    string            `yaml:"merge_method,omitempty"`
+	MCPServers     []MCPServerConfig `yaml:"mcp_servers,omitempty"`
+}
+
+// MCPServerConfig defines an external MCP server to include in Claude Code sessions.
+type MCPServerConfig struct {
+	Name    string   `yaml:"name"`
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args,omitempty"`
 }
 
 // State represents a single node in the workflow graph.

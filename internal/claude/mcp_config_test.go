@@ -223,14 +223,15 @@ func TestCreateMCPConfigLocked_HostSession(t *testing.T) {
 	}
 }
 
-func TestCreateContainerMCPConfig_NoExternalServers(t *testing.T) {
-	// Container MCP config should not include external MCP servers
-	// (not supported in container mode)
+func TestCreateContainerMCPConfig_WithExternalServers(t *testing.T) {
+	// Container MCP config should include external MCP servers when configured.
+	// Commands must be available inside the container image.
 	r := &Runner{
-		sessionID: "test-no-external",
+		sessionID: "test-external-servers",
 		log:       testLogger(),
 		mcpServers: []MCPServer{
-			{Name: "external", Command: "/usr/local/bin/external", Args: []string{"serve"}},
+			{Name: "my-db-tool", Command: "npx", Args: []string{"-y", "@myorg/db-mcp-server"}},
+			{Name: "k8s-context", Command: "/usr/local/bin/kubectl-mcp", Args: []string{"--readonly"}},
 		},
 	}
 
@@ -251,8 +252,31 @@ func TestCreateContainerMCPConfig_NoExternalServers(t *testing.T) {
 	}
 
 	mcpServers := config["mcpServers"].(map[string]any)
-	if _, exists := mcpServers["external"]; exists {
-		t.Error("container MCP config should not include external MCP servers")
+
+	// erg entry must still be present
+	if _, ok := mcpServers["erg"]; !ok {
+		t.Fatal("expected 'erg' server in mcpServers")
+	}
+
+	// External servers must be included
+	dbServer, ok := mcpServers["my-db-tool"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'my-db-tool' server in mcpServers")
+	}
+	if dbServer["command"] != "npx" {
+		t.Errorf("my-db-tool command = %q, want 'npx'", dbServer["command"])
+	}
+	argsRaw, _ := dbServer["args"].([]any)
+	if len(argsRaw) != 2 || argsRaw[0] != "-y" || argsRaw[1] != "@myorg/db-mcp-server" {
+		t.Errorf("my-db-tool args = %v, want [-y @myorg/db-mcp-server]", argsRaw)
+	}
+
+	k8sServer, ok := mcpServers["k8s-context"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'k8s-context' server in mcpServers")
+	}
+	if k8sServer["command"] != "/usr/local/bin/kubectl-mcp" {
+		t.Errorf("k8s-context command = %q, want '/usr/local/bin/kubectl-mcp'", k8sServer["command"])
 	}
 }
 

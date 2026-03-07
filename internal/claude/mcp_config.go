@@ -178,6 +178,14 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 		},
 	}
 
+	// Add external MCP servers (commands must be available inside the container image)
+	for _, server := range r.mcpServers {
+		mcpServers[server.Name] = map[string]any{
+			"command": server.Command,
+			"args":    server.Args,
+		}
+	}
+
 	config := map[string]any{
 		"mcpServers": mcpServers,
 	}

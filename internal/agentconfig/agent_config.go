@@ -31,6 +31,7 @@ type AgentConfig struct {
 	maxDurationMin int
 	maxConcurrent  int
 	mergeMethod    string
+	mcpServers     []model.MCPServer
 
 	asanaProjects map[string]string // repo path → Asana project GID
 	linearTeams   map[string]string // repo path → Linear team ID
@@ -80,6 +81,14 @@ func WithMaxDuration(max int) AgentConfigOption {
 // WithMergeMethod sets the merge method (rebase, squash, or merge).
 func WithMergeMethod(method string) AgentConfigOption {
 	return func(c *AgentConfig) { c.mergeMethod = method }
+}
+
+// WithMCPServers sets the external MCP servers to include in Claude Code sessions.
+func WithMCPServers(servers []model.MCPServer) AgentConfigOption {
+	return func(c *AgentConfig) {
+		c.mcpServers = make([]model.MCPServer, len(servers))
+		copy(c.mcpServers, servers)
+	}
 }
 
 // NewAgentConfig creates a new AgentConfig with defaults, then applies options.
@@ -221,7 +230,12 @@ func (c *AgentConfig) GetAllowedToolsForRepo(_ string) []string {
 }
 
 func (c *AgentConfig) GetMCPServersForRepo(_ string) []model.MCPServer {
-	return nil // Container mode handles MCP internally
+	if len(c.mcpServers) == 0 {
+		return nil
+	}
+	out := make([]model.MCPServer, len(c.mcpServers))
+	copy(out, c.mcpServers)
+	return out
 }
 
 func (c *AgentConfig) AddRepoAllowedTool(_, _ string) bool {

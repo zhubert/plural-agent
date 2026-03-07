@@ -332,6 +332,66 @@ start: s
 			t.Error("cleanup_merged: expected true")
 		}
 	})
+
+	t.Run("mcp_servers parsed from YAML", func(t *testing.T) {
+		yamlStr := `
+settings:
+  mcp_servers:
+    - name: my-db-tool
+      command: npx
+      args: ["-y", "@myorg/db-mcp-server"]
+    - name: k8s-context
+      command: /usr/local/bin/kubectl-mcp
+      args: ["--readonly"]
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings == nil {
+			t.Fatal("expected settings")
+		}
+		if len(cfg.Settings.MCPServers) != 2 {
+			t.Fatalf("mcp_servers: got %d entries, want 2", len(cfg.Settings.MCPServers))
+		}
+		s0 := cfg.Settings.MCPServers[0]
+		if s0.Name != "my-db-tool" {
+			t.Errorf("mcp_servers[0].name: got %q", s0.Name)
+		}
+		if s0.Command != "npx" {
+			t.Errorf("mcp_servers[0].command: got %q", s0.Command)
+		}
+		if len(s0.Args) != 2 || s0.Args[0] != "-y" || s0.Args[1] != "@myorg/db-mcp-server" {
+			t.Errorf("mcp_servers[0].args: got %v", s0.Args)
+		}
+		s1 := cfg.Settings.MCPServers[1]
+		if s1.Name != "k8s-context" {
+			t.Errorf("mcp_servers[1].name: got %q", s1.Name)
+		}
+		if s1.Command != "/usr/local/bin/kubectl-mcp" {
+			t.Errorf("mcp_servers[1].command: got %q", s1.Command)
+		}
+		if len(s1.Args) != 1 || s1.Args[0] != "--readonly" {
+			t.Errorf("mcp_servers[1].args: got %v", s1.Args)
+		}
+	})
+
+	t.Run("mcp_servers omitted is nil slice", func(t *testing.T) {
+		yamlStr := `
+settings:
+  max_concurrent: 2
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if cfg.Settings == nil {
+			t.Fatal("expected settings")
+		}
+		if cfg.Settings.MCPServers != nil {
+			t.Error("mcp_servers: expected nil when omitted")
+		}
+	})
 }
 
 func TestConfigPartialParse(t *testing.T) {

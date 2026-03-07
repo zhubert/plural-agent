@@ -390,22 +390,21 @@ func (sm *SessionManager) ConfigureRunnerDefaults(runner claude.RunnerConfig, se
 			sm.stateManager.StopContainerInit(sessionID)
 			log.Debug("container initialization complete", "sessionID", sessionID)
 		})
-		log.Debug("containerized session, MCP servers not used in container mode")
-	} else {
-		// Load MCP servers for this session's repo (only for non-containerized sessions)
-		mcpServers := sm.config.GetMCPServersForRepo(sess.RepoPath)
-		if len(mcpServers) > 0 {
-			log.Debug("loaded MCP servers", "count", len(mcpServers), "repo", sess.RepoPath)
-			var servers []claude.MCPServer
-			for _, s := range mcpServers {
-				servers = append(servers, claude.MCPServer{
-					Name:    s.Name,
-					Command: s.Command,
-					Args:    s.Args,
-				})
-			}
-			runner.SetMCPServers(servers)
+	}
+
+	// Load MCP servers for this session's repo (works for both containerized and non-containerized)
+	mcpServers := sm.config.GetMCPServersForRepo(sess.RepoPath)
+	if len(mcpServers) > 0 {
+		log.Debug("loaded MCP servers", "count", len(mcpServers), "repo", sess.RepoPath)
+		var servers []claude.MCPServer
+		for _, s := range mcpServers {
+			servers = append(servers, claude.MCPServer{
+				Name:    s.Name,
+				Command: s.Command,
+				Args:    s.Args,
+			})
 		}
+		runner.SetMCPServers(servers)
 	}
 
 }

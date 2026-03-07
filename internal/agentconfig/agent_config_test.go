@@ -70,6 +70,50 @@ func TestNewAgentConfig_Options(t *testing.T) {
 	}
 }
 
+func TestWithMCPServers(t *testing.T) {
+	t.Run("sets servers and GetMCPServersForRepo returns them", func(t *testing.T) {
+		servers := []model.MCPServer{
+			{Name: "my-db", Command: "npx", Args: []string{"-y", "@myorg/db-mcp"}},
+			{Name: "k8s", Command: "/usr/local/bin/kubectl-mcp", Args: []string{"--readonly"}},
+		}
+		c := NewAgentConfig(WithMCPServers(servers))
+
+		got := c.GetMCPServersForRepo("/any/repo")
+		if len(got) != 2 {
+			t.Fatalf("GetMCPServersForRepo: got %d servers, want 2", len(got))
+		}
+		if got[0].Name != "my-db" || got[0].Command != "npx" {
+			t.Errorf("servers[0]: got %+v", got[0])
+		}
+		if got[1].Name != "k8s" || got[1].Command != "/usr/local/bin/kubectl-mcp" {
+			t.Errorf("servers[1]: got %+v", got[1])
+		}
+	})
+
+	t.Run("returns nil when no servers configured", func(t *testing.T) {
+		c := NewAgentConfig()
+		got := c.GetMCPServersForRepo("/any/repo")
+		if got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("returned slice is a copy (no aliasing)", func(t *testing.T) {
+		servers := []model.MCPServer{
+			{Name: "tool", Command: "cmd"},
+		}
+		c := NewAgentConfig(WithMCPServers(servers))
+
+		got := c.GetMCPServersForRepo("/repo")
+		got[0].Name = "mutated"
+
+		got2 := c.GetMCPServersForRepo("/repo")
+		if got2[0].Name != "tool" {
+			t.Errorf("internal state was mutated: got %q, want %q", got2[0].Name, "tool")
+		}
+	})
+}
+
 func TestNewAgentConfig_WorkflowSettingsOptions(t *testing.T) {
 	c := NewAgentConfig(
 		WithMaxTurns(80),

@@ -300,9 +300,18 @@ func Merge(partial, defaults *Config) *Config {
 
 	// Settings: partial wins if present, otherwise keep defaults
 	if partial.Settings != nil {
-		result.Settings = partial.Settings
+		s := *partial.Settings
+		if partial.Settings.MCPServers != nil {
+			s.MCPServers = make([]MCPServerConfig, len(partial.Settings.MCPServers))
+			copy(s.MCPServers, partial.Settings.MCPServers)
+		}
+		result.Settings = &s
 	} else if defaults.Settings != nil {
 		s := *defaults.Settings
+		if defaults.Settings.MCPServers != nil {
+			s.MCPServers = make([]MCPServerConfig, len(defaults.Settings.MCPServers))
+			copy(s.MCPServers, defaults.Settings.MCPServers)
+		}
 		result.Settings = &s
 	}
 

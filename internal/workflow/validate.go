@@ -471,6 +471,21 @@ func validateSettings(s *SettingsConfig) []ValidationError {
 			Message: "max_concurrent must not be negative",
 		})
 	}
+	for i, srv := range s.MCPServers {
+		prefix := fmt.Sprintf("settings.mcp_servers[%d]", i)
+		if srv.Name == "" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".name",
+				Message: "name is required for mcp_servers entries",
+			})
+		}
+		if srv.Command == "" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".command",
+				Message: "command is required for mcp_servers entries",
+			})
+		}
+	}
 	return errs
 }
 

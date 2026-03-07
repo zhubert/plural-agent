@@ -590,4 +590,60 @@ func TestMerge(t *testing.T) {
 			t.Error("merge should deep-copy settings from defaults")
 		}
 	})
+
+	t.Run("partial settings MCPServers is deep copied not shared", func(t *testing.T) {
+		partial := &Config{
+			Workflow: "test",
+			Start:    "s",
+			States:   map[string]*State{"s": {Type: StateTypeSucceed}},
+			Settings: &SettingsConfig{
+				MCPServers: []MCPServerConfig{
+					{Name: "tool", Command: "cmd"},
+				},
+			},
+		}
+		defaults := DefaultWorkflowConfig()
+		result := Merge(partial, defaults)
+
+		if result.Settings == nil {
+			t.Fatal("expected settings in result")
+		}
+		if len(result.Settings.MCPServers) != 1 {
+			t.Fatalf("expected 1 MCP server, got %d", len(result.Settings.MCPServers))
+		}
+
+		// Mutate the result; should not affect partial
+		result.Settings.MCPServers[0].Name = "mutated"
+		if partial.Settings.MCPServers[0].Name != "tool" {
+			t.Error("merge should deep-copy MCPServers from partial settings")
+		}
+	})
+
+	t.Run("default settings MCPServers is deep copied not shared", func(t *testing.T) {
+		defaults := &Config{
+			Workflow: "test",
+			Start:    "s",
+			States:   map[string]*State{"s": {Type: StateTypeSucceed}},
+			Settings: &SettingsConfig{
+				MCPServers: []MCPServerConfig{
+					{Name: "tool", Command: "cmd"},
+				},
+			},
+		}
+		partial := &Config{}
+		result := Merge(partial, defaults)
+
+		if result.Settings == nil {
+			t.Fatal("expected settings in result")
+		}
+		if len(result.Settings.MCPServers) != 1 {
+			t.Fatalf("expected 1 MCP server, got %d", len(result.Settings.MCPServers))
+		}
+
+		// Mutate the result; should not affect defaults
+		result.Settings.MCPServers[0].Name = "mutated"
+		if defaults.Settings.MCPServers[0].Name != "tool" {
+			t.Error("merge should deep-copy MCPServers from default settings")
+		}
+	})
 }
