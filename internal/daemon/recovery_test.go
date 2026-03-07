@@ -171,6 +171,34 @@ func TestDaemon_ReconstructSessions_EmptySessionIDSkipped(t *testing.T) {
 	}
 }
 
+func TestDaemon_ReconstructSessions_MultiRepoUsesStepDataRepoPath(t *testing.T) {
+	cfg := testConfig()
+	d := testDaemon(cfg)
+
+	// Simulate multi-repo mode: state.RepoPath is the daemon ID, not a real path
+	d.state.RepoPath = "multi-8dca39ab3c8f04ae"
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "1"},
+		SessionID:   "sess-1",
+		Branch:      "feature-1",
+		CurrentStep: "await_review",
+		Phase:       "idle",
+		StepData:    map[string]any{"_repo_path": "/actual/repo/path"},
+	})
+
+	d.reconstructSessions()
+
+	sess := cfg.GetSession("sess-1")
+	if sess == nil {
+		t.Fatal("expected sess-1 to be reconstructed")
+	}
+	if sess.RepoPath != "/actual/repo/path" {
+		t.Errorf("expected RepoPath /actual/repo/path, got %s", sess.RepoPath)
+	}
+}
+
 // TestDaemon_RecoverAsyncPending_SetsStateToCoding verifies that when
 // recoverAsyncPending finds an open PR and advances the item to a wait state,
 // it also sets State to WorkItemActive. Without this, the item stays

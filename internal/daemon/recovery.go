@@ -38,9 +38,16 @@ func (d *Daemon) reconstructSessions() {
 			worktreePath = filepath.Join(worktreesDir, item.SessionID)
 		}
 
+		// In multi-repo mode d.state.RepoPath is the daemon ID (e.g. "multi-xxx"),
+		// not a real repo path. Prefer the per-item _repo_path from StepData.
+		repoPath := d.state.RepoPath
+		if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+			repoPath = rp
+		}
+
 		sess := config.Session{
 			ID:            item.SessionID,
-			RepoPath:      d.state.RepoPath,
+			RepoPath:      repoPath,
 			WorkTree:      worktreePath,
 			Branch:        item.Branch,
 			DaemonManaged: true,
