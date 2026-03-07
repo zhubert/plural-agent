@@ -1211,12 +1211,15 @@
             <a href="workflow.html#state-wait" class="sidebar-sublink">wait</a>
             <a href="workflow.html#state-choice" class="sidebar-sublink">choice</a>
             <a href="workflow.html#state-pass" class="sidebar-sublink">pass</a>
+            <a href="workflow.html#state-template" class="sidebar-sublink">template</a>
             <a href="workflow.html#error-handling" class="sidebar-link">Error handling</a>
             <a href="workflow.html#hooks" class="sidebar-link">Hooks</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Reference</span>
             <a href="#cli" class="sidebar-link">CLI commands</a>
+            <a href="#cli-run" class="sidebar-sublink">erg run</a>
+            <a href="#cli-stats" class="sidebar-sublink">erg stats</a>
             <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
             <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
             <a href="actions.html#actions" class="sidebar-link">Actions</a>
@@ -1244,6 +1247,7 @@
             <a href="examples.html#example-ci-gate" class="sidebar-sublink">CI gate</a>
             <a href="examples.html#example-label-tracking" class="sidebar-sublink">Label tracking</a>
             <a href="examples.html#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
+            <a href="examples.html#example-template-composition" class="sidebar-sublink">Template composition</a>
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -1315,6 +1319,91 @@
             <tr>
               <td><code>erg clean</code></td>
               <td>Clear state, lock files, worktrees, auth files, MCP config files, session message files, and log files. Prompts for confirmation unless <code>-y</code> is passed.</td>
+            </tr>
+            <tr>
+              <td><code>erg run --issue 42</code></td>
+              <td>Run the workflow for a single issue synchronously in the foreground, then exit</td>
+            </tr>
+            <tr>
+              <td><code>erg run --issue ENG-123 --repo /path</code></td>
+              <td>Run for a specific issue in a specific repo (accepts GitHub numbers, Asana GIDs, Linear identifiers)</td>
+            </tr>
+            <tr>
+              <td><code>erg run --issue 42 --workflow .erg/custom.yaml</code></td>
+              <td>Run with an explicit workflow config file</td>
+            </tr>
+            <tr>
+              <td><code>erg stats</code></td>
+              <td>Show aggregate session analytics: success rate, cost, time-to-merge, failure analysis, and feedback rounds</td>
+            </tr>
+            <tr>
+              <td><code>erg stats --repo owner/repo</code></td>
+              <td>Show stats for a specific repo</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 id="cli-run">erg run</h3>
+        <p>
+          Executes the full workflow for a single issue synchronously in the foreground.
+          Fetches the issue from the configured provider, runs the workflow in a
+          containerized Claude Code session, and exits when complete. Uses a distinct
+          lock key so it won't conflict with a running daemon on the same repo.
+        </p>
+        <p>
+          Useful for testing workflows, one-off tasks, or CI/CD integration.
+          The <code>--issue</code> flag accepts the native ID format for the
+          configured provider: integer for GitHub, task GID for Asana, or issue
+          identifier (e.g. <code>ENG-123</code>) for Linear.
+        </p>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Flag</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>--issue</code></td>
+              <td>Issue ID to process (required)</td>
+            </tr>
+            <tr>
+              <td><code>--repo</code></td>
+              <td>Repo path (default: current git root)</td>
+            </tr>
+            <tr>
+              <td><code>--workflow</code></td>
+              <td>Path to workflow config file</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 id="cli-stats">erg stats</h3>
+        <p>
+          Displays aggregate performance analytics from the daemon's persisted
+          state. Stats reflect only items still in the state file &mdash; terminal
+          items older than the configured max age (default 7 days) are pruned.
+        </p>
+        <p>The report includes:</p>
+        <ul>
+          <li><strong>Overview</strong> &mdash; total sessions, success rate, average cost per tracked session</li>
+          <li><strong>Time to merge</strong> &mdash; average, min, and max duration from creation to completion</li>
+          <li><strong>Token spend</strong> &mdash; top 10 sessions by cost with token counts</li>
+          <li><strong>Failure analysis</strong> &mdash; sessions grouped by step at failure, common error messages</li>
+          <li><strong>Feedback rounds</strong> &mdash; average and max feedback rounds across sessions</li>
+        </ul>
+        <table class="cli-table">
+          <thead>
+            <tr>
+              <th>Flag</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>--repo</code></td>
+              <td>Repo to show stats for (owner/repo or filesystem path). Default: current repo.</td>
             </tr>
           </tbody>
         </table>
