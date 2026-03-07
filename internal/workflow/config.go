@@ -11,12 +11,13 @@ import (
 type StateType string
 
 const (
-	StateTypeTask    StateType = "task"
-	StateTypeWait    StateType = "wait"
-	StateTypeChoice  StateType = "choice"
-	StateTypePass    StateType = "pass"
-	StateTypeSucceed StateType = "succeed"
-	StateTypeFail    StateType = "fail"
+	StateTypeTask     StateType = "task"
+	StateTypeWait     StateType = "wait"
+	StateTypeChoice   StateType = "choice"
+	StateTypePass     StateType = "pass"
+	StateTypeSucceed  StateType = "succeed"
+	StateTypeFail     StateType = "fail"
+	StateTypeTemplate StateType = "template"
 )
 
 // Config is the top-level workflow configuration.
@@ -61,6 +62,24 @@ type State struct {
 	// state is entered, telling the human what action is required to proceed.
 	// nil = auto-generate from event type; "" = suppress guidance; non-empty = use as-is.
 	Guidance *string `yaml:"guidance,omitempty"`
+	// Template state fields (type: template only).
+	Use   string            `yaml:"use,omitempty"`   // template file path or "builtin:<name>"
+	Exits map[string]string `yaml:"exits,omitempty"` // exit-name → local state name in calling workflow
+}
+
+// TemplateConfig is the top-level structure of a reusable workflow template file.
+type TemplateConfig struct {
+	Template string            `yaml:"template"`
+	Entry    string            `yaml:"entry"`            // single public entry point state name
+	Exits    map[string]string `yaml:"exits"`            // exit-name → internal terminal state name
+	Params   []TemplateParam   `yaml:"params,omitempty"` // parameter definitions with defaults
+	States   map[string]*State `yaml:"states"`
+}
+
+// TemplateParam defines a single configurable parameter in a template.
+type TemplateParam struct {
+	Name    string `yaml:"name"`
+	Default any    `yaml:"default,omitempty"`
 }
 
 // ChoiceRule defines a conditional branch in a choice state.
@@ -265,10 +284,11 @@ var ValidEvents = map[string]bool{
 
 // ValidStateTypes is the set of recognized state types.
 var ValidStateTypes = map[StateType]bool{
-	StateTypeTask:    true,
-	StateTypeWait:    true,
-	StateTypeChoice:  true,
-	StateTypePass:    true,
-	StateTypeSucceed: true,
-	StateTypeFail:    true,
+	StateTypeTask:     true,
+	StateTypeWait:     true,
+	StateTypeChoice:   true,
+	StateTypePass:     true,
+	StateTypeSucceed:  true,
+	StateTypeFail:     true,
+	StateTypeTemplate: true,
 }

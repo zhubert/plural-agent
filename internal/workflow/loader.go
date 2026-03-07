@@ -124,5 +124,15 @@ func LoadAndMergeWithFile(repoPath, workflowFile string) (*Config, error) {
 		return defaults, nil
 	}
 
-	return Merge(cfg, defaults), nil
+	// Merge user config over defaults first so that template expansion and
+	// exit-target validation can see all states (including default-provided
+	// ones like "done" and "failed") without requiring them to be re-declared
+	// in the user workflow.
+	merged := Merge(cfg, defaults)
+	merged, err = ExpandTemplates(merged, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand workflow templates: %w", err)
+	}
+
+	return merged, nil
 }

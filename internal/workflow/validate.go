@@ -72,6 +72,31 @@ func validateState(name string, state *State, allStates map[string]*State) []Val
 	}
 
 	switch state.Type {
+	case StateTypeTemplate:
+		// Template states are expanded before Validate is called in normal usage.
+		// When validating unexpanded configs directly, just verify required fields.
+		if state.Use == "" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".use",
+				Message: "use is required for template states",
+			})
+		}
+		if len(state.Exits) == 0 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".exits",
+				Message: "exits is required for template states",
+			})
+		}
+		// Validate that exit values reference states that exist in the calling config.
+		for exitName, targetState := range state.Exits {
+			if _, ok := allStates[targetState]; !ok {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s.exits.%s", prefix, exitName),
+					Message: fmt.Sprintf("references non-existent state %q", targetState),
+				})
+			}
+		}
+
 	case StateTypeTask:
 		// Task states require action
 		if state.Action == "" {
