@@ -1413,3 +1413,96 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// GetIssue Tests
+// =============================================================================
+
+func TestLinearProvider_GetIssue_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var gqlReq struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		json.Unmarshal(body, &gqlReq)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"id":          "uuid-123",
+					"identifier":  "ENG-42",
+					"title":       "Fix the bug",
+					"description": "Details here",
+					"url":         "https://linear.app/eng/issue/ENG-42",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+	issue, err := p.GetIssue(context.Background(), "/repo", "ENG-42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.ID != "ENG-42" {
+		t.Errorf("expected ID 'ENG-42', got %q", issue.ID)
+	}
+	if issue.Title != "Fix the bug" {
+		t.Errorf("expected title 'Fix the bug', got %q", issue.Title)
+	}
+	if issue.Body != "Details here" {
+		t.Errorf("expected body 'Details here', got %q", issue.Body)
+	}
+	if issue.Source != SourceLinear {
+		t.Errorf("expected SourceLinear, got %q", issue.Source)
+	}
+}
+
+func TestLinearProvider_GetIssue_NoAPIKey(t *testing.T) {
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "")
+
+	p := NewLinearProvider(nil)
+	_, err := p.GetIssue(context.Background(), "/repo", "ENG-42")
+	if err == nil {
+		t.Fatal("expected error without API key, got nil")
+	}
+}
+
+func TestLinearProvider_GetIssue_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Return empty identifier to simulate not found
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"issue": map[string]any{
+					"id":         "",
+					"identifier": "",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origKey := os.Getenv(linearAPIKeyEnvVar)
+	defer os.Setenv(linearAPIKeyEnvVar, origKey)
+	os.Setenv(linearAPIKeyEnvVar, "lin_api_test")
+
+	p := NewLinearProviderWithClient(nil, server.Client(), server.URL)
+	_, err := p.GetIssue(context.Background(), "/repo", "ENG-999")
+	if err == nil {
+		t.Fatal("expected error for not-found issue, got nil")
+	}
+}
+
+func TestLinearProvider_ImplementsIssueGetter(t *testing.T) {
+	var _ IssueGetter = (*LinearProvider)(nil)
+}

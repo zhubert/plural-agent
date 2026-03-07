@@ -152,6 +152,15 @@ type ProviderSectionMover interface {
 	MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error
 }
 
+// IssueGetter extends Provider with single-issue lookup by its native ID.
+// The id format is provider-specific:
+//   - GitHub: issue number as string (e.g. "42")
+//   - Asana: task GID (e.g. "1234567890123")
+//   - Linear: issue identifier (e.g. "ENG-123")
+type IssueGetter interface {
+	GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error)
+}
+
 // ProviderGateChecker extends Provider with operations needed for gate/approval events.
 // Providers that support label checking and comment fetching implement this interface,
 // enabling gate.approved and plan.user_replied events to work across all sources.

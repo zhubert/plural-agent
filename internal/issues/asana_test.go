@@ -1540,3 +1540,84 @@ func TestAsanaProvider_UpdateComment_ServerError(t *testing.T) {
 		t.Fatal("expected error on server error response")
 	}
 }
+
+// =============================================================================
+// GetIssue Tests
+// =============================================================================
+
+func TestAsanaProvider_GetIssue_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tasks/1234567890123" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"gid":           "1234567890123",
+				"name":          "Fix login bug",
+				"notes":         "Users cannot log in",
+				"permalink_url": "https://app.asana.com/0/project/1234567890123",
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	issue, err := p.GetIssue(context.Background(), "/repo", "1234567890123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.ID != "1234567890123" {
+		t.Errorf("expected ID '1234567890123', got %q", issue.ID)
+	}
+	if issue.Title != "Fix login bug" {
+		t.Errorf("expected title 'Fix login bug', got %q", issue.Title)
+	}
+	if issue.Body != "Users cannot log in" {
+		t.Errorf("expected body 'Users cannot log in', got %q", issue.Body)
+	}
+	if issue.Source != SourceAsana {
+		t.Errorf("expected SourceAsana, got %q", issue.Source)
+	}
+}
+
+func TestAsanaProvider_GetIssue_NoPAT(t *testing.T) {
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "")
+
+	p := NewAsanaProvider(nil)
+	_, err := p.GetIssue(context.Background(), "/repo", "1234567890123")
+	if err == nil {
+		t.Fatal("expected error without PAT, got nil")
+	}
+	if !strings.Contains(err.Error(), "ASANA_PAT") {
+		t.Errorf("expected ASANA_PAT mention in error, got %q", err.Error())
+	}
+}
+
+func TestAsanaProvider_GetIssue_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	_, err := p.GetIssue(context.Background(), "/repo", "999")
+	if err == nil {
+		t.Fatal("expected error for 404 response, got nil")
+	}
+}
+
+func TestAsanaProvider_ImplementsIssueGetter(t *testing.T) {
+	var _ IssueGetter = (*AsanaProvider)(nil)
+}

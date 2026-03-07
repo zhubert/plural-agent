@@ -58,6 +58,9 @@ type Daemon struct {
 	reviewPollInterval    time.Duration
 	lastReviewPollAt      time.Time
 
+	// preseededIssue is an issue to inject on the first poll tick (for erg run).
+	preseededIssue *issues.Issue
+
 	// Docker health tracking
 	dockerDown        bool
 	dockerDownLogged  bool
@@ -122,6 +125,12 @@ func WithMergeMethod(method string) Option {
 // by the parent process. The daemon will adopt it instead of acquiring a new one.
 func WithPreacquiredLock(lock *daemonstate.DaemonLock) Option {
 	return func(d *Daemon) { d.lock = lock }
+}
+
+// WithPreseededIssue injects a specific issue to be processed on the first poll
+// tick, bypassing the normal issue-fetch from the provider. Intended for erg run.
+func WithPreseededIssue(issue issues.Issue) Option {
+	return func(d *Daemon) { d.preseededIssue = &issue }
 }
 
 // WithWorkflowFile sets an explicit workflow config file path, overriding the
