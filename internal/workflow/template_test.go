@@ -925,6 +925,301 @@ func TestValidate_TemplateStateMissingExits(t *testing.T) {
 	}
 }
 
+// TestExpandTemplates_NestedTemplateRefsRewritten verifies that state references
+// introduced by nested template expansion are also correctly prefixed when the
+// outer template is inlined into the caller config (comment 2 fix).
+func TestExpandTemplates_NestedTemplateRefsRewritten(t *testing.T) {
+	dir := t.TempDir()
+	innerYAML := `
+template: inner
+entry: inner_step
+exits:
+  done: inner_done
+states:
+  inner_step:
+    type: task
+    action: ai.code
+    next: inner_done
+    error: inner_done
+  inner_done:
+    type: succeed
+`
+	outerYAML := `
+template: outer
+entry: outer_step
+exits:
+  success: outer_done
+  failure: outer_failed
+states:
+  outer_step:
+    type: template
+    use: ".erg/templates/inner.yaml"
+    exits:
+      done: outer_done
+  outer_done:
+    type: succeed
+  outer_failed:
+    type: fail
+`
+	writeTemplateFile(t, dir, ".erg/templates/inner.yaml", innerYAML)
+	writeTemplateFile(t, dir, ".erg/templates/outer.yaml", outerYAML)
+
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  ".erg/templates/outer.yaml",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+
+	result, err := ExpandTemplates(cfg, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The outer template's "outer_step" itself was a template that got expanded
+	// into a pass state pointing to the prefixed inner entry.
+	outerStep := result.States["_t_start_outer_step"]
+	if outerStep == nil {
+		t.Fatal("_t_start_outer_step missing")
+	}
+	if outerStep.Type != StateTypePass {
+		t.Errorf("_t_start_outer_step type: got %q, want pass", outerStep.Type)
+	}
+	// outer_step should now point to the double-prefixed inner entry.
+	wantNext := "_t_start__t_outer_step_inner_step"
+	if outerStep.Next != wantNext {
+		t.Errorf("_t_start_outer_step.next: got %q, want %q", outerStep.Next, wantNext)
+	}
+
+	// The inner step and its exit wiring should exist under the double-prefixed names.
+	if _, ok := result.States["_t_start__t_outer_step_inner_step"]; !ok {
+		t.Error("_t_start__t_outer_step_inner_step missing — nested refs not re-prefixed")
+	}
+	if _, ok := result.States["_t_start__t_outer_step_inner_done"]; !ok {
+		t.Error("_t_start__t_outer_step_inner_done missing — nested refs not re-prefixed")
+	}
+}
+
+// TestExpandTemplates_CanonicalCycleDetection verifies that the same template
+// referenced via different path spellings (e.g. "a.yaml" vs "./a.yaml") is
+// treated as the same template for cycle detection (comment 3 fix).
+func TestExpandTemplates_CanonicalCycleDetection(t *testing.T) {
+	dir := t.TempDir()
+
+	// Template A references template B via a path with "./" prefix.
+	// Template B references template A without the "./" prefix.
+	// Both spellings should canonicalize to the same file → cycle detected.
+	templateA := `
+template: a
+entry: step
+exits:
+  success: done
+  failure: failed
+states:
+  step:
+    type: template
+    use: ".erg/templates/./b.yaml"
+    exits:
+      success: done
+      failure: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	templateB := `
+template: b
+entry: step
+exits:
+  success: done
+  failure: failed
+states:
+  step:
+    type: template
+    use: ".erg/templates/a.yaml"
+    exits:
+      success: done
+      failure: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	writeTemplateFile(t, dir, ".erg/templates/a.yaml", templateA)
+	writeTemplateFile(t, dir, ".erg/templates/b.yaml", templateB)
+
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  ".erg/templates/a.yaml",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+
+	_, err := ExpandTemplates(cfg, dir)
+	if err == nil {
+		t.Fatal("expected error for circular template reference via normalized paths")
+	}
+	if !strings.Contains(err.Error(), "circular") {
+		t.Errorf("expected circular error, got: %v", err)
+	}
+}
+
+// TestExpandTemplates_AbsolutePathRejected verifies that absolute template paths
+// are rejected for security (comment 4 fix).
+func TestExpandTemplates_AbsolutePathRejected(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "/etc/passwd",
+			Exits: map[string]string{"success": "done"},
+		},
+	})
+
+	_, err := ExpandTemplates(cfg, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for absolute template path")
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("expected 'absolute' error, got: %v", err)
+	}
+}
+
+// TestExpandTemplates_PathTraversalRejected verifies that paths escaping the
+// base directory via ".." are rejected (comment 4 fix).
+func TestExpandTemplates_PathTraversalRejected(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "../../etc/passwd",
+			Exits: map[string]string{"success": "done"},
+		},
+	})
+
+	_, err := ExpandTemplates(cfg, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+	if !strings.Contains(err.Error(), "escapes") {
+		t.Errorf("expected 'escapes' error, got: %v", err)
+	}
+}
+
+// TestExpandTemplates_SanitizedPrefixCollision verifies that two template states
+// whose names sanitize to the same identifier (e.g. "a-b" and "a_b") are both
+// expanded without error, each getting a distinct prefix (comment 5 fix).
+func TestExpandTemplates_SanitizedPrefixCollision(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplateFile(t, dir, ".erg/templates/simple.yaml", simpleTemplateYAML)
+
+	// "a-b" and "a_b" both sanitize to "a_b", so the second one would collide
+	// if we used an error rather than a counter.
+	cfg := minimalCfg(map[string]*State{
+		"a-b": {
+			Type: StateTypeTemplate,
+			Use:  ".erg/templates/simple.yaml",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+		"a_b": {
+			Type: StateTypeTemplate,
+			Use:  ".erg/templates/simple.yaml",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "a-b"
+
+	result, err := ExpandTemplates(cfg, dir)
+	if err != nil {
+		t.Fatalf("unexpected error for sanitized prefix collision: %v", err)
+	}
+
+	// Both should produce expanded pass states.
+	ab := result.States["a-b"]
+	if ab == nil || ab.Type != StateTypePass {
+		t.Errorf("a-b should be a pass state after expansion, got %+v", ab)
+	}
+	a_b := result.States["a_b"]
+	if a_b == nil || a_b.Type != StateTypePass {
+		t.Errorf("a_b should be a pass state after expansion, got %+v", a_b)
+	}
+
+	// The two expansions must not clobber each other's prefixed states.
+	if ab.Next == a_b.Next {
+		t.Errorf("both expanded templates point to the same entry %q — prefixes collided", ab.Next)
+	}
+}
+
+// TestLoadAndMerge_TemplateExitsToDefaultStates verifies that after the merge-
+// before-expand fix (comment 6), template exits can reference default-provided
+// states (like "done"/"failed") without having to re-declare them in the user
+// workflow YAML.
+func TestLoadAndMerge_TemplateExitsToDefaultStates(t *testing.T) {
+	dir := t.TempDir()
+	ergDir := dir + "/.erg"
+	if err := os.MkdirAll(ergDir+"/templates", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(ergDir+"/templates/simple.yaml", []byte(simpleTemplateYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Workflow that maps template exits to "done"/"failed" WITHOUT explicitly
+	// declaring those states — they come from the default config via Merge.
+	workflowYAML := `
+workflow: test
+start: impl
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+states:
+  impl:
+    type: template
+    use: ".erg/templates/simple.yaml"
+    exits:
+      success: done
+      failure: failed
+`
+	if err := os.WriteFile(ergDir+"/workflow.yaml", []byte(workflowYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAndMerge(dir)
+	if err != nil {
+		t.Fatalf("LoadAndMerge error: %v", err)
+	}
+
+	// "impl" should be a pass state after expansion.
+	implState := cfg.States["impl"]
+	if implState == nil || implState.Type != StateTypePass {
+		t.Fatalf("impl should be a pass state, got %+v", implState)
+	}
+
+	// Default states "done" and "failed" must be present.
+	if _, ok := cfg.States["done"]; !ok {
+		t.Error("done state missing — default states should be merged before expansion")
+	}
+	if _, ok := cfg.States["failed"]; !ok {
+		t.Error("failed state missing — default states should be merged before expansion")
+	}
+}
+
 func TestValidate_TemplateStateExitBadRef(t *testing.T) {
 	cfg := &Config{
 		Start: "impl",

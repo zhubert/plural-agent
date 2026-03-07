@@ -53,8 +53,16 @@ func expandTemplatesWithVisited(cfg *Config, baseDir string, visiting map[string
 			}
 		}
 
+		// Compute a canonical key for cycle detection so that equivalent paths
+		// (e.g. "tmpl.yaml" vs "./tmpl.yaml") map to the same entry in visiting.
+		// Built-in references are already stable identifiers.
+		canonicalKey := state.Use
+		if !strings.HasPrefix(state.Use, "builtin:") {
+			canonicalKey = filepath.Clean(filepath.Join(baseDir, state.Use))
+		}
+
 		// Circular reference check.
-		if visiting[state.Use] {
+		if visiting[canonicalKey] {
 			return nil, fmt.Errorf("circular template reference: %q is already being expanded", state.Use)
 		}
 
@@ -89,7 +97,7 @@ func expandTemplatesWithVisited(cfg *Config, baseDir string, visiting map[string
 		for k, v := range visiting {
 			newVisiting[k] = v
 		}
-		newVisiting[state.Use] = true
+		newVisiting[canonicalKey] = true
 		expandedTmpl, err := expandTemplatesWithVisited(tmplCfg, baseDir, newVisiting)
 		if err != nil {
 			return nil, fmt.Errorf("in template %q: %w", state.Use, err)
@@ -99,13 +107,23 @@ func expandTemplatesWithVisited(cfg *Config, baseDir string, visiting map[string
 		params := resolveParams(tmpl.Params, state.Params)
 
 		// Generate unique namespace prefix from the local state name.
-		prefix := "_t_" + sanitizeName(name) + "_"
-
-		// Check for namespace collision with existing states.
-		for existingName := range cfg.States {
-			if strings.HasPrefix(existingName, prefix) {
-				return nil, fmt.Errorf("template state %q: namespace prefix %q collides with existing state %q", name, prefix, existingName)
+		// If the sanitized name collides with an already-expanded prefix (e.g.
+		// because two state names like "a-b" and "a_b" sanitize identically),
+		// append a numeric counter until the prefix is free.
+		sanitized := sanitizeName(name)
+		prefix := "_t_" + sanitized + "_"
+		for counter := 1; ; counter++ {
+			collision := false
+			for existingName := range cfg.States {
+				if strings.HasPrefix(existingName, prefix) {
+					collision = true
+					break
+				}
 			}
+			if !collision {
+				break
+			}
+			prefix = fmt.Sprintf("_t_%s%d_", sanitized, counter)
 		}
 
 		// Copy template states into cfg with the prefix applied.
@@ -115,11 +133,12 @@ func expandTemplatesWithVisited(cfg *Config, baseDir string, visiting map[string
 			// Substitute params into string values of state.Params.
 			applyParamSubstitution(cloned, params)
 			// Rewrite all internal state references to use the prefix.
+			// Use expandedTmpl.States (not tmpl.States) so that refs introduced
+			// by nested template expansion (e.g. "_t_inner_step") are also prefixed.
 			rewriteStateRefs(cloned, func(ref string) string {
-				if _, ok := tmpl.States[ref]; ok {
+				if _, ok := expandedTmpl.States[ref]; ok {
 					return prefix + ref
 				}
-				// Also handle refs that were already prefixed by nested expansion.
 				return ref
 			})
 			cfg.States[prefixedName] = cloned
@@ -157,10 +176,16 @@ func loadTemplate(use, baseDir string) (*TemplateConfig, error) {
 		return builtinTemplate(builtinName)
 	}
 
-	// Resolve relative paths against baseDir.
-	path := use
-	if !filepath.IsAbs(use) {
-		path = filepath.Join(baseDir, use)
+	// Reject absolute paths — template paths must be relative to the repo root.
+	if filepath.IsAbs(use) {
+		return nil, fmt.Errorf("absolute template paths are not allowed: %q", use)
+	}
+
+	// Resolve relative path against baseDir and check it stays within baseDir.
+	baseDirClean := filepath.Clean(baseDir)
+	path := filepath.Clean(filepath.Join(baseDirClean, use))
+	if path != baseDirClean && !strings.HasPrefix(path, baseDirClean+string(os.PathSeparator)) {
+		return nil, fmt.Errorf("template path %q escapes the base directory", use)
 	}
 
 	data, err := os.ReadFile(path)
