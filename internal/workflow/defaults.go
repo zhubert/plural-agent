@@ -484,7 +484,7 @@ func ReviewTemplateConfig() *TemplateConfig {
 				Type:   StateTypeTask,
 				Action: "ai.address_review",
 				Params: map[string]any{
-					"max_feedback_rounds": 3,
+					"max_review_rounds": 3,
 				},
 				Next:  "push_review_fix",
 				Error: "review_failed",
