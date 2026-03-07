@@ -80,6 +80,17 @@ func generateMermaid(cfg *Config, compact bool) string {
 			if state.Next != "" {
 				sb.WriteString(fmt.Sprintf("    %s --> %s : pass\n", name, state.Next))
 			}
+
+		case StateTypeTemplate:
+			// Template states appear only in unexpanded configs. Show each mapped exit
+			// as an outgoing edge so the caller's wiring is visible.
+			label := state.Use
+			if label == "" {
+				label = "template"
+			}
+			for exitName, target := range state.Exits {
+				sb.WriteString(fmt.Sprintf("    %s --> %s : %s (%s)\n", name, target, label, exitName))
+			}
 		}
 
 	}

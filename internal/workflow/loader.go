@@ -124,5 +124,11 @@ func LoadAndMergeWithFile(repoPath, workflowFile string) (*Config, error) {
 		return defaults, nil
 	}
 
+	// Expand template states before merging with defaults.
+	cfg, err = ExpandTemplates(cfg, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand workflow templates: %w", err)
+	}
+
 	return Merge(cfg, defaults), nil
 }
