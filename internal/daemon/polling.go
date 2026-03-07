@@ -66,10 +66,17 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 		wfCfg := d.getWorkflowConfig(repoPath)
 		provider := issues.Source(wfCfg.Source.Provider)
 
-		fetchedIssues, err := d.fetchIssuesForProvider(pollCtx, repoPath, wfCfg)
-		if err != nil {
-			log.Debug("failed to fetch issues", "repo", repoPath, "provider", provider, "error", err)
-			continue
+		var fetchedIssues []issues.Issue
+		if d.preseededIssue != nil {
+			fetchedIssues = []issues.Issue{*d.preseededIssue}
+			d.preseededIssue = nil // consume — only inject once
+		} else {
+			var err error
+			fetchedIssues, err = d.fetchIssuesForProvider(pollCtx, repoPath, wfCfg)
+			if err != nil {
+				log.Debug("failed to fetch issues", "repo", repoPath, "provider", provider, "error", err)
+				continue
+			}
 		}
 
 		for _, issue := range fetchedIssues {

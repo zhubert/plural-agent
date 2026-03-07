@@ -3229,3 +3229,61 @@ func TestCheckUserIsCollaborator_NotCollaborator(t *testing.T) {
 		t.Error("expected outsider to not be a collaborator")
 	}
 }
+
+// =============================================================================
+// GetGitHubIssue Tests
+// =============================================================================
+
+func TestGetGitHubIssue_Success(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "number,title,body,url"}, pexec.MockResponse{
+		Stdout: []byte(`{"number":42,"title":"Fix the bug","body":"This is the body","url":"https://github.com/owner/repo/issues/42"}`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	issue, err := svc.GetGitHubIssue(context.Background(), "/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.Number != 42 {
+		t.Errorf("expected number 42, got %d", issue.Number)
+	}
+	if issue.Title != "Fix the bug" {
+		t.Errorf("expected title 'Fix the bug', got %q", issue.Title)
+	}
+	if issue.Body != "This is the body" {
+		t.Errorf("expected body 'This is the body', got %q", issue.Body)
+	}
+	if issue.URL != "https://github.com/owner/repo/issues/42" {
+		t.Errorf("unexpected URL: %q", issue.URL)
+	}
+}
+
+func TestGetGitHubIssue_CLIError(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "99", "--json", "number,title,body,url"}, pexec.MockResponse{
+		Err: fmt.Errorf("issue not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.GetGitHubIssue(context.Background(), "/repo", 99)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "gh issue view failed") {
+		t.Errorf("expected 'gh issue view failed' in error, got %q", err.Error())
+	}
+}
+
+func TestGetGitHubIssue_InvalidJSON(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "1", "--json", "number,title,body,url"}, pexec.MockResponse{
+		Stdout: []byte(`not valid json`),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	_, err := svc.GetGitHubIssue(context.Background(), "/repo", 1)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}

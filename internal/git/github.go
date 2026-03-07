@@ -583,6 +583,24 @@ type GitHubIssue struct {
 	URL    string `json:"url"`
 }
 
+// GetGitHubIssue fetches a single GitHub issue by number using the gh CLI.
+func (s *GitService) GetGitHubIssue(ctx context.Context, repoPath string, number int) (*GitHubIssue, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "issue", "view",
+		fmt.Sprintf("%d", number),
+		"--json", "number,title,body,url",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view failed: %w", err)
+	}
+
+	var issue GitHubIssue
+	if err := json.Unmarshal(output, &issue); err != nil {
+		return nil, fmt.Errorf("failed to parse issue: %w", err)
+	}
+
+	return &issue, nil
+}
+
 // FetchGitHubIssues fetches open issues from a GitHub repository using the gh CLI.
 // The repoPath is used as the working directory to determine which repo to query.
 func (s *GitService) FetchGitHubIssues(ctx context.Context, repoPath string) ([]GitHubIssue, error) {

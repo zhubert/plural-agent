@@ -183,6 +183,46 @@ func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filte
 	return issues, nil
 }
 
+// linearSingleIssueResponse is the GraphQL response for a single issue lookup.
+type linearSingleIssueResponse struct {
+	Data struct {
+		Issue linearIssue `json:"issue"`
+	} `json:"data"`
+}
+
+// GetIssue fetches a single Linear issue by its identifier (e.g. "ENG-123").
+// Implements IssueGetter.
+func (p *LinearProvider) GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error) {
+	query := `query($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    title
+    description
+    url
+  }
+}`
+	var resp linearSingleIssueResponse
+	if err := p.linearGraphQL(ctx, query, map[string]any{"id": id},
+		"Linear API returned 403 Forbidden - check that your LINEAR_API_KEY is valid",
+		&resp); err != nil {
+		return nil, err
+	}
+
+	issue := resp.Data.Issue
+	if issue.Identifier == "" {
+		return nil, fmt.Errorf("Linear issue %q not found", id)
+	}
+
+	return &Issue{
+		ID:     issue.Identifier,
+		Title:  issue.Title,
+		Body:   issue.Description,
+		URL:    issue.URL,
+		Source: SourceLinear,
+	}, nil
+}
+
 // IsConfigured returns true if Linear is configured for the given repo.
 // Requires both LINEAR_API_KEY env var and a team ID mapped to the repo.
 func (p *LinearProvider) IsConfigured(repoPath string) bool {

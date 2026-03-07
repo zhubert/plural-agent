@@ -132,6 +132,26 @@ func (p *GitHubProvider) UpdateComment(ctx context.Context, repoPath string, iss
 	return p.gitService.UpdateIssueComment(ctx, repoPath, id, body)
 }
 
+// GetIssue fetches a single GitHub issue by its ID (issue number as string).
+// Implements IssueGetter.
+func (p *GitHubProvider) GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error) {
+	issueNum, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid GitHub issue ID %q: expected an integer issue number", id)
+	}
+	gh, err := p.gitService.GetGitHubIssue(ctx, repoPath, issueNum)
+	if err != nil {
+		return nil, err
+	}
+	return &Issue{
+		ID:     strconv.Itoa(gh.Number),
+		Title:  gh.Title,
+		Body:   gh.Body,
+		URL:    gh.URL,
+		Source: SourceGitHub,
+	}, nil
+}
+
 // GetIssueNumber returns the issue number as an int (for backwards compatibility).
 // Returns 0 if the ID is not a valid number.
 func GetIssueNumber(issue Issue) int {

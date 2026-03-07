@@ -172,6 +172,41 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 	return issues, nil
 }
 
+// GetIssue fetches a single Asana task by its GID.
+// Implements IssueGetter.
+func (p *AsanaProvider) GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error) {
+	pat := os.Getenv(asanaPATEnvVar)
+	if pat == "" {
+		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	}
+
+	url := fmt.Sprintf("%s/tasks/%s?opt_fields=gid,name,notes,permalink_url", p.apiBase, id)
+
+	type singleTaskResponse struct {
+		Data asanaTask `json:"data"`
+	}
+	var resp singleTaskResponse
+	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
+		"Bearer "+pat, http.StatusOK,
+		"Asana API returned 403 Forbidden - check that your ASANA_PAT has access to this task",
+		"Asana", &resp); err != nil {
+		return nil, err
+	}
+
+	task := resp.Data
+	if task.GID == "" {
+		return nil, fmt.Errorf("Asana task %q not found", id)
+	}
+
+	return &Issue{
+		ID:     task.GID,
+		Title:  task.Name,
+		Body:   task.Notes,
+		URL:    task.Permalink,
+		Source: SourceAsana,
+	}, nil
+}
+
 // IsConfigured returns true if Asana is configured for the given repo.
 // Requires both ASANA_PAT env var and a project GID mapped to the repo.
 func (p *AsanaProvider) IsConfigured(repoPath string) bool {

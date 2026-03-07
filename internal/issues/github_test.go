@@ -252,6 +252,58 @@ func TestGitHubProvider_UpdateComment_InvalidCommentID(t *testing.T) {
 	}
 }
 
+func TestGitHubProvider_GetIssue_Success(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "number,title,body,url"}, exec.MockResponse{
+		Stdout: []byte(`{"number":42,"title":"Fix the bug","body":"This is the body","url":"https://github.com/owner/repo/issues/42"}`),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	issue, err := p.GetIssue(context.Background(), "/repo", "42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.ID != "42" {
+		t.Errorf("expected ID '42', got %q", issue.ID)
+	}
+	if issue.Title != "Fix the bug" {
+		t.Errorf("expected title 'Fix the bug', got %q", issue.Title)
+	}
+	if issue.Source != SourceGitHub {
+		t.Errorf("expected SourceGitHub, got %q", issue.Source)
+	}
+}
+
+func TestGitHubProvider_GetIssue_InvalidID(t *testing.T) {
+	p := NewGitHubProvider(nil)
+
+	_, err := p.GetIssue(context.Background(), "/repo", "ENG-123")
+	if err == nil {
+		t.Fatal("expected error for non-integer ID, got nil")
+	}
+}
+
+func TestGitHubProvider_GetIssue_CLIError(t *testing.T) {
+	mock := exec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"issue", "view", "99", "--json", "number,title,body,url"}, exec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mock)
+	p := NewGitHubProvider(gitSvc)
+
+	_, err := p.GetIssue(context.Background(), "/repo", "99")
+	if err == nil {
+		t.Fatal("expected error from CLI failure, got nil")
+	}
+}
+
+func TestGitHubProvider_ImplementsIssueGetter(t *testing.T) {
+	var _ IssueGetter = (*GitHubProvider)(nil)
+}
+
 func TestGetIssueNumber(t *testing.T) {
 	tests := []struct {
 		name     string
