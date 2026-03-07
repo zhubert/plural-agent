@@ -220,6 +220,332 @@ func DefaultPlanningWorkflowConfig() *Config {
 	return cfg
 }
 
+// --- Modular builtin templates ---
+//
+// These are composable building blocks for workflows. Each encapsulates a
+// self-contained phase with success/failure exits that callers wire to their
+// own states.
+
+// PlanTemplateConfig returns a template for the planning phase:
+// planning → await feedback → check (approved → success, rejected → re-plan loop).
+func PlanTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "plan",
+		Entry:    "planning",
+		Exits: map[string]string{
+			"success": "plan_done",
+			"failure": "plan_failed",
+		},
+		States: map[string]*State{
+			"planning": {
+				Type:   StateTypeTask,
+				Action: "ai.plan",
+				Params: map[string]any{
+					"max_turns":     30,
+					"max_duration":  "15m",
+					"containerized": true,
+				},
+				Next:  "await_plan_feedback",
+				Error: "plan_failed",
+			},
+			"await_plan_feedback": {
+				Type:    StateTypeWait,
+				Event:   "plan.user_replied",
+				Timeout: &Duration{72 * time.Hour},
+				Params: map[string]any{
+					"approval_pattern": `(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)`,
+				},
+				Next:        "check_plan_feedback",
+				TimeoutNext: "plan_expired",
+				Error:       "plan_failed",
+			},
+			"check_plan_feedback": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "plan_approved", Equals: true, Next: "plan_done"},
+					{Variable: "plan_approved", Equals: false, Next: "planning"},
+				},
+				Default: "plan_failed",
+			},
+			"plan_expired": {
+				Type:   StateTypeTask,
+				Action: "github.comment_issue",
+				Params: map[string]any{
+					"body": "Plan has been awaiting feedback for 72 hours. Moving to failed.",
+				},
+				Next:  "plan_failed",
+				Error: "plan_failed",
+			},
+			"plan_done": {
+				Type: StateTypeSucceed,
+			},
+			"plan_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// CodeTemplateConfig returns a template for the AI coding phase.
+func CodeTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "code",
+		Entry:    "coding",
+		Exits: map[string]string{
+			"success": "code_done",
+			"failure": "code_failed",
+		},
+		States: map[string]*State{
+			"coding": {
+				Type:   StateTypeTask,
+				Action: "ai.code",
+				Params: map[string]any{
+					"max_turns":     50,
+					"max_duration":  "30m",
+					"containerized": true,
+				},
+				Next:  "code_done",
+				Error: "code_failed",
+			},
+			"code_done": {
+				Type: StateTypeSucceed,
+			},
+			"code_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// PRTemplateConfig returns a template for creating a pull request.
+func PRTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "pr",
+		Entry:    "open_pr",
+		Exits: map[string]string{
+			"success": "pr_done",
+			"failure": "pr_failed",
+		},
+		States: map[string]*State{
+			"open_pr": {
+				Type:   StateTypeTask,
+				Action: "github.create_pr",
+				Params: map[string]any{
+					"link_issue": true,
+				},
+				Next:  "pr_done",
+				Error: "pr_failed",
+				Retry: []RetryConfig{DefaultRetryConfig()},
+			},
+			"pr_done": {
+				Type: StateTypeSucceed,
+			},
+			"pr_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// CITemplateConfig returns a template for the CI phase:
+// await CI → check result → fix failures / resolve conflicts (bounded loops) → success or failure.
+func CITemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "ci",
+		Entry:    "await_ci",
+		Exits: map[string]string{
+			"success": "ci_done",
+			"failure": "ci_failed",
+		},
+		States: map[string]*State{
+			"await_ci": {
+				Type:    StateTypeWait,
+				Event:   "ci.complete",
+				Timeout: &Duration{2 * time.Hour},
+				Params: map[string]any{
+					"on_failure": "fix",
+				},
+				Next:        "check_ci_result",
+				TimeoutNext: "ci_timed_out",
+				Error:       "ci_failed",
+			},
+			"check_ci_result": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "conflicting", Equals: true, Next: "rebase"},
+					{Variable: "ci_passed", Equals: true, Next: "ci_done"},
+					{Variable: "ci_failed", Equals: true, Next: "fix_ci"},
+				},
+				Default: "ci_failed",
+			},
+			"rebase": {
+				Type:   StateTypeTask,
+				Action: "git.rebase",
+				Params: map[string]any{
+					"max_rebase_rounds": 3,
+				},
+				Next:  "await_ci",
+				Error: "resolve_conflicts",
+				Retry: []RetryConfig{DefaultRetryConfig()},
+			},
+			"resolve_conflicts": {
+				Type:   StateTypeTask,
+				Action: "ai.resolve_conflicts",
+				Params: map[string]any{
+					"max_conflict_rounds": 3,
+				},
+				Next:  "push_conflict_fix",
+				Error: "ci_failed",
+			},
+			"push_conflict_fix": {
+				Type:   StateTypeTask,
+				Action: "github.push",
+				Next:   "await_ci",
+				Error:  "ci_failed",
+				Retry:  []RetryConfig{DefaultRetryConfig()},
+			},
+			"fix_ci": {
+				Type:   StateTypeTask,
+				Action: "ai.fix_ci",
+				Params: map[string]any{
+					"max_ci_fix_rounds": 3,
+				},
+				Next:  "push_ci_fix",
+				Error: "ci_unfixable",
+			},
+			"push_ci_fix": {
+				Type:   StateTypeTask,
+				Action: "github.push",
+				Next:   "await_ci",
+				Error:  "ci_failed",
+				Retry:  []RetryConfig{DefaultRetryConfig()},
+			},
+			"ci_unfixable": {
+				Type:   StateTypeTask,
+				Action: "github.comment_pr",
+				Params: map[string]any{
+					"body": "CI fix exhausted after 3 rounds. Manual intervention required.",
+				},
+				Next:  "ci_failed",
+				Error: "ci_failed",
+			},
+			"ci_timed_out": {
+				Type:   StateTypeTask,
+				Action: "github.comment_pr",
+				Params: map[string]any{
+					"body": "CI has been running for over 2 hours. Manual intervention required.",
+				},
+				Next:  "ci_failed",
+				Error: "ci_failed",
+			},
+			"ci_done": {
+				Type: StateTypeSucceed,
+			},
+			"ci_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// ReviewTemplateConfig returns a template for the review phase:
+// await review → check result → address feedback (bounded loop) → success or failure.
+func ReviewTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "review",
+		Entry:    "await_review",
+		Exits: map[string]string{
+			"success": "review_done",
+			"failure": "review_failed",
+		},
+		States: map[string]*State{
+			"await_review": {
+				Type:    StateTypeWait,
+				Event:   "pr.reviewed",
+				Timeout: &Duration{48 * time.Hour},
+				Params: map[string]any{
+					"auto_address":       true,
+					"max_feedback_rounds": 3,
+				},
+				Next:        "check_review_result",
+				TimeoutNext: "review_overdue",
+				Error:       "review_failed",
+			},
+			"check_review_result": {
+				Type: StateTypeChoice,
+				Choices: []ChoiceRule{
+					{Variable: "review_approved", Equals: true, Next: "review_done"},
+					{Variable: "changes_requested", Equals: true, Next: "address_review"},
+					{Variable: "pr_merged_externally", Equals: true, Next: "review_done"},
+				},
+				Default: "review_failed",
+			},
+			"address_review": {
+				Type:   StateTypeTask,
+				Action: "ai.address_review",
+				Params: map[string]any{
+					"max_feedback_rounds": 3,
+				},
+				Next:  "push_review_fix",
+				Error: "review_failed",
+			},
+			"push_review_fix": {
+				Type:   StateTypeTask,
+				Action: "github.push",
+				Next:   "await_review",
+				Error:  "review_failed",
+				Retry:  []RetryConfig{DefaultRetryConfig()},
+			},
+			"review_overdue": {
+				Type:   StateTypeTask,
+				Action: "github.comment_pr",
+				Params: map[string]any{
+					"body": "PR has been awaiting review for 48 hours. Manual intervention required.",
+				},
+				Next:  "review_failed",
+				Error: "review_failed",
+			},
+			"review_done": {
+				Type: StateTypeSucceed,
+			},
+			"review_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// MergeTemplateConfig returns a template for the merge phase.
+func MergeTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "merge",
+		Entry:    "merge",
+		Exits: map[string]string{
+			"success": "merge_done",
+			"failure": "merge_failed",
+		},
+		States: map[string]*State{
+			"merge": {
+				Type:   StateTypeTask,
+				Action: "github.merge",
+				Params: map[string]any{
+					"method":  "rebase",
+					"cleanup": true,
+				},
+				Next:  "merge_done",
+				Error: "merge_failed",
+				Retry: []RetryConfig{DefaultRetryConfig()},
+			},
+			"merge_done": {
+				Type: StateTypeSucceed,
+			},
+			"merge_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
 // Merge overlays partial onto defaults. States present in partial replace the
 // corresponding default state entirely. States in defaults but not in partial
 // are preserved. Top-level fields (Workflow, Start) use partial if non-empty.

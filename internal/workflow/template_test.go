@@ -500,72 +500,6 @@ func TestExpandTemplates_FileNotFound(t *testing.T) {
 	}
 }
 
-func TestExpandTemplates_BuiltinIssueToMerge(t *testing.T) {
-	cfg := minimalCfg(map[string]*State{
-		"start": {
-			Type: StateTypeTemplate,
-			Use:  "builtin:issue-to-merge",
-			Exits: map[string]string{
-				"success": "done",
-				"failure": "failed",
-			},
-		},
-	})
-	cfg.Start = "start"
-
-	result, err := ExpandTemplates(cfg, t.TempDir())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// "start" should be a pass state pointing to the prefixed entry "coding".
-	startState := result.States["start"]
-	if startState == nil || startState.Type != StateTypePass {
-		t.Fatalf("start state should be a pass state, got %+v", startState)
-	}
-	if startState.Next != "_t_start_coding" {
-		t.Errorf("start.next: got %q, want _t_start_coding", startState.Next)
-	}
-
-	// The prefixed coding state should exist.
-	if _, ok := result.States["_t_start_coding"]; !ok {
-		t.Error("_t_start_coding not found after builtin expansion")
-	}
-
-	// Exit wiring: _t_start_done → done.
-	doneExit := result.States["_t_start_done"]
-	if doneExit == nil || doneExit.Type != StateTypePass || doneExit.Next != "done" {
-		t.Errorf("_t_start_done: expected pass→done, got %+v", doneExit)
-	}
-}
-
-func TestExpandTemplates_BuiltinPlanThenCode(t *testing.T) {
-	cfg := minimalCfg(map[string]*State{
-		"start": {
-			Type: StateTypeTemplate,
-			Use:  "builtin:plan-then-code",
-			Exits: map[string]string{
-				"success": "done",
-				"failure": "failed",
-			},
-		},
-	})
-	cfg.Start = "start"
-
-	result, err := ExpandTemplates(cfg, t.TempDir())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Entry point for plan-then-code is "planning".
-	startState := result.States["start"]
-	if startState == nil || startState.Type != StateTypePass {
-		t.Fatalf("start should be pass state")
-	}
-	if startState.Next != "_t_start_planning" {
-		t.Errorf("start.next: got %q, want _t_start_planning", startState.Next)
-	}
-}
 
 func TestExpandTemplates_UnknownBuiltin(t *testing.T) {
 	cfg := minimalCfg(map[string]*State{
@@ -845,7 +779,7 @@ func TestValidate_TemplateStateValid(t *testing.T) {
 		States: map[string]*State{
 			"impl": {
 				Type: StateTypeTemplate,
-				Use:  "builtin:issue-to-merge",
+				Use:  "builtin:ci",
 				Exits: map[string]string{
 					"success": "done",
 					"failure": "failed",
@@ -905,7 +839,7 @@ func TestValidate_TemplateStateMissingExits(t *testing.T) {
 		States: map[string]*State{
 			"impl": {
 				Type: StateTypeTemplate,
-				Use:  "builtin:issue-to-merge",
+				Use:  "builtin:ci",
 				// No exits.
 			},
 			"done":   {Type: StateTypeSucceed},
@@ -1220,6 +1154,322 @@ states:
 	}
 }
 
+// --- Modular builtin template tests ---
+
+func TestExpandTemplates_BuiltinPlan(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:plan",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// start should be a pass → _t_start_planning
+	startState := result.States["start"]
+	if startState == nil || startState.Type != StateTypePass {
+		t.Fatalf("start should be pass, got %+v", startState)
+	}
+	if startState.Next != "_t_start_planning" {
+		t.Errorf("start.next: got %q, want _t_start_planning", startState.Next)
+	}
+
+	// Planning state should exist.
+	if _, ok := result.States["_t_start_planning"]; !ok {
+		t.Error("_t_start_planning missing")
+	}
+
+	// Feedback loop: check_plan_feedback should route back to planning.
+	check := result.States["_t_start_check_plan_feedback"]
+	if check == nil {
+		t.Fatal("_t_start_check_plan_feedback missing")
+	}
+	// plan_approved=false → planning (loop)
+	foundLoop := false
+	for _, c := range check.Choices {
+		if c.Next == "_t_start_planning" {
+			foundLoop = true
+		}
+	}
+	if !foundLoop {
+		t.Error("check_plan_feedback should loop back to _t_start_planning")
+	}
+
+	// Success exit should wire to caller's "done".
+	exitDone := result.States["_t_start_plan_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("plan_done exit: expected pass→done, got %+v", exitDone)
+	}
+}
+
+func TestExpandTemplates_BuiltinCode(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:code",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	coding := result.States["_t_start_coding"]
+	if coding == nil {
+		t.Fatal("_t_start_coding missing")
+	}
+	if coding.Action != "ai.code" {
+		t.Errorf("coding.action: got %q, want ai.code", coding.Action)
+	}
+}
+
+func TestExpandTemplates_BuiltinPR(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:pr",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pr := result.States["_t_start_open_pr"]
+	if pr == nil {
+		t.Fatal("_t_start_open_pr missing")
+	}
+	if pr.Action != "github.create_pr" {
+		t.Errorf("open_pr.action: got %q, want github.create_pr", pr.Action)
+	}
+	if len(pr.Retry) == 0 {
+		t.Error("open_pr should have retry config")
+	}
+}
+
+func TestExpandTemplates_BuiltinCI(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:ci",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify key states exist.
+	for _, name := range []string{"await_ci", "check_ci_result", "rebase", "fix_ci", "ci_unfixable", "ci_timed_out"} {
+		if _, ok := result.States["_t_start_"+name]; !ok {
+			t.Errorf("_t_start_%s missing", name)
+		}
+	}
+
+	// CI fix loop: fix_ci → push_ci_fix → await_ci
+	pushFix := result.States["_t_start_push_ci_fix"]
+	if pushFix == nil {
+		t.Fatal("_t_start_push_ci_fix missing")
+	}
+	if pushFix.Next != "_t_start_await_ci" {
+		t.Errorf("push_ci_fix.next: got %q, want _t_start_await_ci", pushFix.Next)
+	}
+
+	// Success exit wired to caller's "done".
+	exitDone := result.States["_t_start_ci_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("ci_done exit: expected pass→done, got %+v", exitDone)
+	}
+}
+
+func TestExpandTemplates_BuiltinReview(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:review",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify key states exist.
+	for _, name := range []string{"await_review", "check_review_result", "address_review", "push_review_fix", "review_overdue"} {
+		if _, ok := result.States["_t_start_"+name]; !ok {
+			t.Errorf("_t_start_%s missing", name)
+		}
+	}
+
+	// Review feedback loop: address_review → push_review_fix → await_review
+	pushFix := result.States["_t_start_push_review_fix"]
+	if pushFix == nil {
+		t.Fatal("_t_start_push_review_fix missing")
+	}
+	if pushFix.Next != "_t_start_await_review" {
+		t.Errorf("push_review_fix.next: got %q, want _t_start_await_review", pushFix.Next)
+	}
+}
+
+func TestExpandTemplates_BuiltinMerge(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:merge",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	merge := result.States["_t_start_merge"]
+	if merge == nil {
+		t.Fatal("_t_start_merge missing")
+	}
+	if merge.Action != "github.merge" {
+		t.Errorf("merge.action: got %q, want github.merge", merge.Action)
+	}
+}
+
+// TestExpandTemplates_ModularComposition verifies that multiple modular templates
+// can be composed into a complete workflow (the primary use case).
+func TestExpandTemplates_ModularComposition(t *testing.T) {
+	cfg := &Config{
+		Workflow: "plan-then-code",
+		Start:    "plan",
+		Source: SourceConfig{
+			Provider: "github",
+			Filter:   FilterConfig{Label: "plan"},
+		},
+		States: map[string]*State{
+			"plan": {
+				Type: StateTypeTemplate,
+				Use:  "builtin:plan",
+				Exits: map[string]string{
+					"success": "code",
+					"failure": "notify_failed",
+				},
+			},
+			"code": {
+				Type: StateTypeTemplate,
+				Use:  "builtin:code",
+				Exits: map[string]string{
+					"success": "pr",
+					"failure": "notify_failed",
+				},
+			},
+			"pr": {
+				Type: StateTypeTemplate,
+				Use:  "builtin:pr",
+				Exits: map[string]string{
+					"success": "ci",
+					"failure": "notify_failed",
+				},
+			},
+			"ci": {
+				Type: StateTypeTemplate,
+				Use:  "builtin:ci",
+				Exits: map[string]string{
+					"success": "review",
+					"failure": "notify_failed",
+				},
+			},
+			"review": {
+				Type: StateTypeTemplate,
+				Use:  "builtin:review",
+				Exits: map[string]string{
+					"success": "done",
+					"failure": "notify_failed",
+				},
+			},
+			"notify_failed": {
+				Type:   StateTypeTask,
+				Action: "github.comment_issue",
+				Params: map[string]any{
+					"body": "Task failed. Manual intervention required.",
+				},
+				Next:  "failed",
+				Error: "failed",
+			},
+			"done": {
+				Type: StateTypeSucceed,
+			},
+			"failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All template states should be pass states after expansion.
+	for _, name := range []string{"plan", "code", "pr", "ci", "review"} {
+		s := result.States[name]
+		if s == nil || s.Type != StateTypePass {
+			t.Errorf("%s should be pass state after expansion, got %+v", name, s)
+		}
+	}
+
+	// Non-template states should be preserved.
+	if result.States["notify_failed"] == nil {
+		t.Error("notify_failed should be preserved")
+	}
+	if result.States["done"] == nil {
+		t.Error("done should be preserved")
+	}
+
+	// Validate the expanded config.
+	errs := Validate(result)
+	if len(errs) > 0 {
+		for _, e := range errs {
+			t.Errorf("validation error: %s: %s", e.Field, e.Message)
+		}
+	}
+}
+
 func TestValidate_TemplateStateExitBadRef(t *testing.T) {
 	cfg := &Config{
 		Start: "impl",
@@ -1230,7 +1480,7 @@ func TestValidate_TemplateStateExitBadRef(t *testing.T) {
 		States: map[string]*State{
 			"impl": {
 				Type: StateTypeTemplate,
-				Use:  "builtin:issue-to-merge",
+				Use:  "builtin:ci",
 				Exits: map[string]string{
 					"success": "nonexistent",
 				},

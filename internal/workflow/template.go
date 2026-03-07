@@ -207,30 +207,20 @@ func loadTemplate(use, baseDir string) (*TemplateConfig, error) {
 // builtinTemplate returns a TemplateConfig for a named built-in template.
 func builtinTemplate(name string) (*TemplateConfig, error) {
 	switch name {
-	case "issue-to-merge":
-		cfg := DefaultWorkflowConfig()
-		return &TemplateConfig{
-			Template: "issue-to-merge",
-			Entry:    "coding",
-			Exits: map[string]string{
-				"success": "done",
-				"failure": "failed",
-			},
-			States: cfg.States,
-		}, nil
-	case "plan-then-code":
-		cfg := DefaultPlanningWorkflowConfig()
-		return &TemplateConfig{
-			Template: "plan-then-code",
-			Entry:    "planning",
-			Exits: map[string]string{
-				"success": "done",
-				"failure": "failed",
-			},
-			States: cfg.States,
-		}, nil
+	case "plan":
+		return PlanTemplateConfig(), nil
+	case "code":
+		return CodeTemplateConfig(), nil
+	case "pr":
+		return PRTemplateConfig(), nil
+	case "ci":
+		return CITemplateConfig(), nil
+	case "review":
+		return ReviewTemplateConfig(), nil
+	case "merge":
+		return MergeTemplateConfig(), nil
 	default:
-		return nil, fmt.Errorf("unknown built-in template %q (available: issue-to-merge, plan-then-code)", name)
+		return nil, fmt.Errorf("unknown built-in template %q (available: plan, code, pr, ci, review, merge)", name)
 	}
 }
 

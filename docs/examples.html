@@ -2257,9 +2257,11 @@ stateDiagram-v2
         <h3 id="example-template-composition">Template composition</h3>
         <p>
           Use the <code>template</code> state type to compose workflows from
-          reusable sub-workflows. This example uses
-          <code>builtin:plan-then-code</code> for the core work and wraps it
-          with Slack notifications and issue cleanup.
+          modular built-in templates. Each template encapsulates a self-contained
+          phase (planning, coding, CI, review, etc.) with <code>success</code>
+          and <code>failure</code> exits that you wire to your own states.
+          Skip phases you don't need, reorder them, or add custom states
+          between them.
         </p>
         <div class="example-tabs">
           <div class="tab-bar">
@@ -2276,20 +2278,25 @@ stateDiagram-v2
                 <span class="code-filename">template-composition.yaml</span>
               </div>
               <pre>
-# Template composition — wraps a built-in sub-workflow
-# with notifications and cleanup.
+# Template composition — compose modular templates into a workflow.
 #
-# The "do_work" state expands builtin:plan-then-code inline,
-# adding planning → approval → coding → PR → review → merge.
-# The caller only wires exit ports to local states.
+# Each builtin template handles one phase:
+#   builtin:plan   — planning + feedback loop
+#   builtin:code   — AI coding session
+#   builtin:pr     — create pull request
+#   builtin:ci     — CI + fix failures + resolve conflicts
+#   builtin:review — review + address feedback loop
+#   builtin:merge  — merge + cleanup
+#
+# Wire exits to control flow. Skip templates you don't need.
 
-workflow: template-composition
+workflow: plan-then-code
 start: notify_start
 
 source:
   provider: github
   filter:
-    label: queued
+    label: plan
 
 settings:
   max_concurrent: 2
@@ -2297,37 +2304,56 @@ settings:
   cleanup_merged: true
 
 states:
-  # Notify the team that work is starting.
   notify_start:
     type: task
     action: slack.notify
     params:
       channel: "#engineering"
       message: "Starting work on {{issue_url}}"
-    next: do_work
-    error: do_work
+    next: plan
+    error: plan
 
-  # Embed the full plan-then-code workflow as a template.
-  # All internal states are expanded inline with a namespace prefix.
-  do_work:
+  plan:
     type: template
-    use: builtin:plan-then-code
+    use: builtin:plan
     exits:
-      success: close_issue
+      success: code
       failure: notify_failure
 
-  close_issue:
-    type: task
-    action: github.close_issue
-    next: notify_done
-    error: notify_done
+  code:
+    type: template
+    use: builtin:code
+    exits:
+      success: pr
+      failure: notify_failure
+
+  pr:
+    type: template
+    use: builtin:pr
+    exits:
+      success: ci
+      failure: notify_failure
+
+  ci:
+    type: template
+    use: builtin:ci
+    exits:
+      success: review
+      failure: notify_failure
+
+  review:
+    type: template
+    use: builtin:review
+    exits:
+      success: notify_done
+      failure: notify_failure
 
   notify_done:
     type: task
     action: slack.notify
     params:
       channel: "#engineering"
-      message: "Completed and merged: {{issue_url}}"
+      message: "PR ready: {{issue_url}}"
     next: done
     error: done
 
@@ -2353,20 +2379,45 @@ states:
               <pre class="mermaid">
 stateDiagram-v2
     [*] --> notify_start
-    notify_start --> do_work : slack.notify
-    state do_work {
+    notify_start --> plan : slack.notify
+    state plan {
         [*] --> planning
-        planning --> await_approval : ai.plan
-        await_approval --> coding : approved
-        coding --> push : ai.code
-        push --> create_pr : github.push
-        create_pr --> review : github.create_pr
-        review --> merge : pr.reviewed
-        merge --> [*] : github.merge
+        planning --> await_feedback : ai.plan
+        await_feedback --> planning : rejected
+        await_feedback --> [*] : approved
     }
-    do_work --> close_issue : success
-    do_work --> notify_failure : failure
-    close_issue --> notify_done : github.close_issue
+    plan --> code : success
+    state code {
+        [*] --> coding
+        coding --> [*] : ai.code
+    }
+    code --> pr : success
+    state pr {
+        [*] --> open_pr
+        open_pr --> [*] : github.create_pr
+    }
+    pr --> ci : success
+    state ci {
+        [*] --> await_ci
+        await_ci --> check_result : ci.complete
+        check_result --> fix_ci : ci_failed
+        fix_ci --> await_ci : push
+        check_result --> [*] : ci_passed
+    }
+    ci --> review : success
+    state review {
+        [*] --> await_review
+        await_review --> check_review : pr.reviewed
+        check_review --> address : changes_requested
+        address --> await_review : push
+        check_review --> [*] : approved
+    }
+    review --> notify_done : success
+    plan --> notify_failure : failure
+    code --> notify_failure : failure
+    pr --> notify_failure : failure
+    ci --> notify_failure : failure
+    review --> notify_failure : failure
     notify_done --> done : slack.notify
     notify_failure --> failed : slack.notify
     done --> [*]

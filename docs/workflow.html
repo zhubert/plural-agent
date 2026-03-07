@@ -1683,16 +1683,16 @@
           <div class="code-header">
             <span class="code-filename">template state (using a built-in)</span>
           </div>
-          <pre><span class="ck">do_work:</span>
+          <pre><span class="ck">ci:</span>
   <span class="ck">type:</span> <span class="cs">template</span>
-  <span class="ck">use:</span> <span class="cv">builtin:issue-to-merge</span>
+  <span class="ck">use:</span> <span class="cv">builtin:ci</span>
   <span class="ck">exits:</span>
-    <span class="ck">success:</span> <span class="cv">close_issue</span>
-    <span class="ck">failure:</span> <span class="cv">failed</span></pre>
+    <span class="ck">success:</span> <span class="cv">review</span>
+    <span class="ck">failure:</span> <span class="cv">notify_failed</span></pre>
         </div>
         <p>
           The <code>use</code> field accepts either a built-in reference
-          (<code>builtin:issue-to-merge</code>, <code>builtin:plan-then-code</code>)
+          (e.g. <code>builtin:ci</code>, <code>builtin:review</code>)
           or a relative file path to a template YAML file (e.g.
           <code>.erg/templates/my-template.yaml</code>). The <code>exits</code>
           field maps the template's declared exit ports to local states in the
@@ -1750,21 +1750,55 @@
         </div>
 
         <h4>Built-in templates</h4>
+        <p>
+          Erg ships with modular built-in templates that can be composed to
+          build any workflow. Each has <code>success</code> and
+          <code>failure</code> exits.
+        </p>
         <div class="info-grid">
           <div class="info-card">
-            <h4>builtin:issue-to-merge</h4>
+            <h4>builtin:plan</h4>
             <p>
-              The default direct-coding workflow: code &rarr; push &rarr;
-              create PR &rarr; wait for review &rarr; merge. Exits:
-              <code>success</code>, <code>failure</code>.
+              Planning phase: AI generates a plan &rarr; waits for user
+              feedback &rarr; re-plans on rejection (loop until approved).
+              Includes 72h timeout with expiry notification.
             </p>
           </div>
           <div class="info-card">
-            <h4>builtin:plan-then-code</h4>
+            <h4>builtin:code</h4>
             <p>
-              Planning-first workflow: generate plan &rarr; wait for approval
-              &rarr; code &rarr; push &rarr; create PR &rarr; review &rarr;
-              merge. Exits: <code>success</code>, <code>failure</code>.
+              AI coding session with configurable turns and duration.
+              Runs containerized by default.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>builtin:pr</h4>
+            <p>
+              Creates a pull request linked to the source issue.
+              Includes retry on transient failures.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>builtin:ci</h4>
+            <p>
+              Waits for CI &rarr; fixes failures (bounded loop) &rarr;
+              resolves merge conflicts via rebase or AI. Includes
+              timeout and unfixable notifications.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>builtin:review</h4>
+            <p>
+              Waits for PR review &rarr; addresses feedback (bounded loop).
+              Handles approval, changes-requested, and external merge.
+              Includes 48h timeout notification.
+            </p>
+          </div>
+          <div class="info-card">
+            <h4>builtin:merge</h4>
+            <p>
+              Merges the PR (rebase by default) and cleans up the branch.
+              Includes retry on transient failures.
             </p>
           </div>
         </div>
