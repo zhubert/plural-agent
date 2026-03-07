@@ -347,6 +347,10 @@ func (d *Daemon) loadWorkflowConfigs() {
 			d.logger.Warn("failed to load workflow config", "repo", repoPath, "error", err)
 			continue
 		}
+		if cfg == nil {
+			d.logger.Warn("no .erg/workflow.yaml found — skipping repo (run `erg workflow init` to create one)", "repo", repoPath)
+			continue
+		}
 		d.workflowConfigs[repoPath] = cfg
 
 		// Sync Asana project GID from workflow config into the config store so
@@ -414,21 +418,34 @@ func (d *Daemon) getWorkflowFileForRepo(repoPath string) string {
 	return d.workflowFile
 }
 
-// getWorkflowConfig returns the workflow config for a repo, or defaults.
+// getWorkflowConfig returns the workflow config for a repo.
+// The repo must have a loaded config — if missing, this logs an error and
+// returns a minimal config to avoid panics, but the repo will not function.
 func (d *Daemon) getWorkflowConfig(repoPath string) *workflow.Config {
 	if cfg, ok := d.workflowConfigs[repoPath]; ok {
 		return cfg
 	}
-	return workflow.DefaultWorkflowConfig()
+	d.logger.Error("no workflow config loaded for repo — add .erg/workflow.yaml", "repo", repoPath)
+	return &workflow.Config{
+		States: map[string]*workflow.State{
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
 }
 
-// getEngine returns the workflow engine for a repo, or creates one with defaults.
+// getEngine returns the workflow engine for a repo.
+// The repo must have a loaded engine — if missing, this logs an error and
+// returns a minimal engine to avoid panics, but the repo will not function.
 func (d *Daemon) getEngine(repoPath string) *workflow.Engine {
 	if engine, ok := d.engines[repoPath]; ok {
 		return engine
 	}
-	// Create a default engine on the fly
-	cfg := workflow.DefaultWorkflowConfig()
+	d.logger.Error("no workflow engine loaded for repo — add .erg/workflow.yaml", "repo", repoPath)
+	cfg := &workflow.Config{
+		States: map[string]*workflow.State{
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
 	registry := d.buildActionRegistry()
 	checker := newEventChecker(d)
 	return workflow.NewEngine(cfg, registry, checker, d.logger)

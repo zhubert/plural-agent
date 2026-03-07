@@ -162,14 +162,8 @@ func TestLoadAndMerge_NoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg == nil {
-		t.Fatal("expected default config")
-	}
-	if cfg.Source.Provider != "github" {
-		t.Errorf("expected default provider github, got %q", cfg.Source.Provider)
-	}
-	if cfg.Start != "coding" {
-		t.Errorf("expected default start coding, got %q", cfg.Start)
+	if cfg != nil {
+		t.Fatal("expected nil config when no workflow file exists")
 	}
 }
 
@@ -360,19 +354,15 @@ states:
 	}
 }
 
-func TestLoadAndMergeWithFile_EmptyPathFallsBackToDefault(t *testing.T) {
-	// With an empty workflowFile, LoadAndMergeWithFile behaves like LoadAndMerge.
+func TestLoadAndMergeWithFile_EmptyPathNoFile(t *testing.T) {
+	// With an empty workflowFile and no .erg/workflow.yaml, returns nil.
 	dir := t.TempDir()
 	cfg, err := LoadAndMergeWithFile(dir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg == nil {
-		t.Fatal("expected default config")
-	}
-	// Should return the default provider (github)
-	if cfg.Source.Provider != "github" {
-		t.Errorf("expected default provider github, got %q", cfg.Source.Provider)
+	if cfg != nil {
+		t.Fatal("expected nil config when no workflow file exists")
 	}
 }
 
@@ -415,13 +405,11 @@ states:
 		t.Errorf("merge method: got %q", mp.String("method", ""))
 	}
 
-	// Defaults filled in — coding state from defaults
-	coding := cfg.States["coding"]
-	if coding == nil {
-		t.Fatal("expected coding state from defaults")
+	// Terminal states provided by base
+	if cfg.States["done"] == nil {
+		t.Fatal("expected done state from base")
 	}
-	cp := NewParamHelper(coding.Params)
-	if cp.Int("max_turns", 0) != 50 {
-		t.Error("expected default max_turns of 50")
+	if cfg.States["failed"] == nil {
+		t.Fatal("expected failed state from base")
 	}
 }

@@ -96,15 +96,16 @@ func LoadFile(filePath string) (*Config, error) {
 	return &cfg, nil
 }
 
-// LoadAndMerge loads the workflow config and merges with defaults.
-// If no workflow file exists, returns the default config.
+// LoadAndMerge loads the workflow config from .erg/workflow.yaml.
+// Returns nil, nil if no workflow file exists.
 func LoadAndMerge(repoPath string) (*Config, error) {
 	return LoadAndMergeWithFile(repoPath, "")
 }
 
-// LoadAndMergeWithFile loads the workflow config and merges with defaults.
+// LoadAndMergeWithFile loads the workflow config.
 // If workflowFile is non-empty, it is used as the explicit path to the config
 // file instead of the default <repoPath>/.erg/workflow.yaml.
+// Returns nil, nil if no workflow file exists.
 func LoadAndMergeWithFile(repoPath, workflowFile string) (*Config, error) {
 	var (
 		cfg *Config
@@ -118,17 +119,18 @@ func LoadAndMergeWithFile(repoPath, workflowFile string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	defaults := DefaultWorkflowConfig()
 	if cfg == nil {
-		return defaults, nil
+		return nil, nil
 	}
 
-	// Merge user config over defaults first so that template expansion and
-	// exit-target validation can see all states (including default-provided
-	// ones like "done" and "failed") without requiring them to be re-declared
-	// in the user workflow.
-	merged := Merge(cfg, defaults)
+	// Provide minimal terminal states so users don't have to redeclare them.
+	base := &Config{
+		States: map[string]*State{
+			"done":   {Type: StateTypeSucceed},
+			"failed": {Type: StateTypeFail},
+		},
+	}
+	merged := Merge(cfg, base)
 	merged, err = ExpandTemplates(merged, repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to expand workflow templates: %w", err)

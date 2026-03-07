@@ -125,6 +125,9 @@ func daemonize(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("error loading workflow config for %s: %w", entry.Path, err)
 			}
+			if wfCfg == nil {
+				return fmt.Errorf("no workflow config found for %s — run `erg workflow init` to create .erg/workflow.yaml", entry.Path)
+			}
 			if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 				detected := container.Detect(ctx, entry.Path)
 				buildLogger.Info("auto-detected languages", "languages", detected, "repo", entry.Path)
@@ -158,6 +161,9 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 		if err != nil {
 			return fmt.Errorf("error loading workflow config: %w", err)
+		}
+		if wfCfg == nil {
+			return fmt.Errorf("no workflow config found — run `erg workflow init` to create .erg/workflow.yaml")
 		}
 
 		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
@@ -400,6 +406,9 @@ func runForeground(_ *cobra.Command, _ []string) error {
 			if err != nil {
 				return fmt.Errorf("error loading workflow config for %s: %w", entry.Path, err)
 			}
+			if wfCfg == nil {
+				return fmt.Errorf("no workflow config found for %s — run `erg workflow init` to create .erg/workflow.yaml", entry.Path)
+			}
 			if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 				detected := container.Detect(ctx, entry.Path)
 				buildLogger.Info("auto-detected languages", "languages", detected, "repo", entry.Path)
@@ -433,6 +442,9 @@ func runForeground(_ *cobra.Command, _ []string) error {
 		wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 		if err != nil {
 			return fmt.Errorf("error loading workflow config: %w", err)
+		}
+		if wfCfg == nil {
+			return fmt.Errorf("no workflow config found — run `erg workflow init` to create .erg/workflow.yaml")
 		}
 
 		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
@@ -523,6 +535,9 @@ func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqui
 		if err != nil {
 			return fmt.Errorf("error loading workflow config for %s: %w", entry.Path, err)
 		}
+		if wfCfg == nil {
+			return fmt.Errorf("no workflow config found for %s — run `erg workflow init` to create .erg/workflow.yaml", entry.Path)
+		}
 
 		if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {
 			detected := container.Detect(ctx, entry.Path)
@@ -599,6 +614,9 @@ func runSingleRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	wfCfg, err := workflow.LoadAndMergeWithFile(agentRepo, agentWorkflowFile)
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
+	}
+	if wfCfg == nil {
+		return fmt.Errorf("no workflow config found — run `erg workflow init` to create .erg/workflow.yaml")
 	}
 
 	// Auto-detect container image if not set (should be cached from parent)

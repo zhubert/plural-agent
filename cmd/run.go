@@ -96,6 +96,9 @@ func runIssue(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("error loading workflow config: %w", err)
 	}
+	if wfCfg == nil {
+		return fmt.Errorf("no workflow config found — run `erg workflow init` to create .erg/workflow.yaml")
+	}
 
 	// Ensure container image
 	if wfCfg.Settings == nil || wfCfg.Settings.ContainerImage == "" {

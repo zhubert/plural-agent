@@ -56,6 +56,7 @@ func testDaemon(cfg *config.Config) *Daemon {
 	d.sessionMgr.SetSkipMessageLoad(true)
 	d.state = daemonstate.NewDaemonState("/test/repo")
 	d.dockerHealthCheck = func(context.Context) error { return nil } // tests assume Docker is available
+	installTestWorkflow(d)
 	return d
 }
 
@@ -70,7 +71,24 @@ func testDaemonWithExec(cfg *config.Config, mockExec *exec.MockExecutor) *Daemon
 	d.sessionMgr.SetSkipMessageLoad(true)
 	d.state = daemonstate.NewDaemonState("/test/repo")
 	d.dockerHealthCheck = func(context.Context) error { return nil } // tests assume Docker is available
+	installTestWorkflow(d)
 	return d
+}
+
+// installTestWorkflow sets up a workflow config and engine for /test/repo
+// using DefaultWorkflowConfig so tests have a complete state graph.
+func installTestWorkflow(d *Daemon) {
+	wfCfg := workflow.DefaultWorkflowConfig()
+	if d.workflowConfigs == nil {
+		d.workflowConfigs = make(map[string]*workflow.Config)
+	}
+	if d.engines == nil {
+		d.engines = make(map[string]*workflow.Engine)
+	}
+	d.workflowConfigs["/test/repo"] = wfCfg
+	reg := d.buildActionRegistry()
+	checker := newEventChecker(d)
+	d.engines["/test/repo"] = workflow.NewEngine(wfCfg, reg, checker, d.logger)
 }
 
 // newMockDoneWorker creates a SessionWorker that is already done.
@@ -1945,8 +1963,6 @@ func TestDaemon_ProcessIdleSyncItems_ExecutesMerge(t *testing.T) {
 		it.State = daemonstate.WorkItemActive
 	})
 	d.state.AdvanceWorkItem("item-1", "merge", "idle")
-
-	d.loadWorkflowConfigs()
 
 	d.processIdleSyncItems(context.Background())
 
