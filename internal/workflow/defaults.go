@@ -295,6 +295,9 @@ func CodeTemplateConfig() *TemplateConfig {
 			"success": "code_done",
 			"failure": "code_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "simplify", Default: false},
+		},
 		States: map[string]*State{
 			"coding": {
 				Type:   StateTypeTask,
@@ -303,6 +306,7 @@ func CodeTemplateConfig() *TemplateConfig {
 					"max_turns":     50,
 					"max_duration":  "30m",
 					"containerized": true,
+					"simplify":      "{{simplify}}",
 				},
 				Next:  "code_done",
 				Error: "code_failed",
@@ -357,6 +361,9 @@ func CITemplateConfig() *TemplateConfig {
 			"success": "ci_done",
 			"failure": "ci_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "simplify", Default: false},
+		},
 		States: map[string]*State{
 			"await_ci": {
 				Type:    StateTypeWait,
@@ -393,6 +400,7 @@ func CITemplateConfig() *TemplateConfig {
 				Action: "ai.resolve_conflicts",
 				Params: map[string]any{
 					"max_conflict_rounds": 3,
+					"simplify":            "{{simplify}}",
 				},
 				Next:  "push_conflict_fix",
 				Error: "ci_failed",
@@ -409,6 +417,7 @@ func CITemplateConfig() *TemplateConfig {
 				Action: "ai.fix_ci",
 				Params: map[string]any{
 					"max_ci_fix_rounds": 3,
+					"simplify":          "{{simplify}}",
 				},
 				Next:  "push_ci_fix",
 				Error: "ci_unfixable",
@@ -458,13 +467,16 @@ func ReviewTemplateConfig() *TemplateConfig {
 			"success": "review_done",
 			"failure": "review_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "simplify", Default: false},
+		},
 		States: map[string]*State{
 			"await_review": {
 				Type:    StateTypeWait,
 				Event:   "pr.reviewed",
 				Timeout: &Duration{48 * time.Hour},
 				Params: map[string]any{
-					"auto_address":       true,
+					"auto_address":        true,
 					"max_feedback_rounds": 3,
 				},
 				Next:        "check_review_result",
@@ -485,6 +497,7 @@ func ReviewTemplateConfig() *TemplateConfig {
 				Action: "ai.address_review",
 				Params: map[string]any{
 					"max_review_rounds": 3,
+					"simplify":          "{{simplify}}",
 				},
 				Next:  "push_review_fix",
 				Error: "review_failed",

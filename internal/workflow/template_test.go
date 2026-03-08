@@ -178,8 +178,9 @@ states:
 		t.Fatal("_t_start_coding missing")
 	}
 	p := NewParamHelper(codingState.Params)
-	if p.String("max_turns", "") != "25" {
-		t.Errorf("max_turns param substitution: got %q, want 25", p.String("max_turns", ""))
+	// Whole-value placeholders preserve the typed value from the override.
+	if p.Int("max_turns", 0) != 25 {
+		t.Errorf("max_turns param substitution: got %v, want 25", p.Raw("max_turns"))
 	}
 	if p.String("method", "") != "squash" {
 		t.Errorf("method param substitution: got %q, want squash", p.String("method", ""))
@@ -237,6 +238,98 @@ states:
 	if p.String("label", "") != "default_value" {
 		t.Errorf("default param: got %q, want default_value", p.String("label", ""))
 	}
+}
+
+func TestExpandTemplates_TypedParamSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	templateYAML := `
+template: typed
+entry: step
+exits:
+  success: done
+  failure: failed
+params:
+  - name: simplify
+    default: false
+  - name: count
+    default: 10
+states:
+  step:
+    type: task
+    action: ai.code
+    params:
+      simplify: "{{simplify}}"
+      count: "{{count}}"
+      label: "prefix-{{count}}-suffix"
+    next: done
+    error: failed
+  done:
+    type: succeed
+  failed:
+    type: fail
+`
+	writeTemplateFile(t, dir, ".erg/templates/typed.yaml", templateYAML)
+
+	t.Run("bool override preserved as typed value", func(t *testing.T) {
+		cfg := minimalCfg(map[string]*State{
+			"start": {
+				Type:   StateTypeTemplate,
+				Use:    ".erg/templates/typed.yaml",
+				Params: map[string]any{"simplify": true},
+				Exits:  map[string]string{"success": "done", "failure": "failed"},
+			},
+		})
+		result, err := ExpandTemplates(cfg, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		p := NewParamHelper(result.States["_t_start_step"].Params)
+		if p.Bool("simplify", false) != true {
+			t.Errorf("expected simplify=true (bool), got %v (%T)", p.Raw("simplify"), p.Raw("simplify"))
+		}
+	})
+
+	t.Run("default bool preserved as typed value", func(t *testing.T) {
+		cfg := minimalCfg(map[string]*State{
+			"start": {
+				Type:  StateTypeTemplate,
+				Use:   ".erg/templates/typed.yaml",
+				Exits: map[string]string{"success": "done", "failure": "failed"},
+			},
+		})
+		result, err := ExpandTemplates(cfg, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		p := NewParamHelper(result.States["_t_start_step"].Params)
+		if p.Bool("simplify", true) != false {
+			t.Errorf("expected simplify=false (default), got %v (%T)", p.Raw("simplify"), p.Raw("simplify"))
+		}
+	})
+
+	t.Run("embedded placeholder still does string substitution", func(t *testing.T) {
+		cfg := minimalCfg(map[string]*State{
+			"start": {
+				Type:   StateTypeTemplate,
+				Use:    ".erg/templates/typed.yaml",
+				Params: map[string]any{"count": 42},
+				Exits:  map[string]string{"success": "done", "failure": "failed"},
+			},
+		})
+		result, err := ExpandTemplates(cfg, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		p := NewParamHelper(result.States["_t_start_step"].Params)
+		// Whole-value placeholder: typed int preserved
+		if p.Int("count", 0) != 42 {
+			t.Errorf("expected count=42 (int), got %v (%T)", p.Raw("count"), p.Raw("count"))
+		}
+		// Embedded placeholder: string substitution
+		if p.String("label", "") != "prefix-42-suffix" {
+			t.Errorf("expected label=prefix-42-suffix, got %q", p.String("label", ""))
+		}
+	})
 }
 
 func TestExpandTemplates_StateNamespacing(t *testing.T) {
@@ -467,8 +560,8 @@ func TestExpandTemplates_CallerMapsUndeclaredExit(t *testing.T) {
 			Type: StateTypeTemplate,
 			Use:  ".erg/templates/simple.yaml",
 			Exits: map[string]string{
-				"success":     "done",
-				"undeclared":  "done", // template doesn't declare this exit
+				"success":    "done",
+				"undeclared": "done", // template doesn't declare this exit
 			},
 		},
 	})
@@ -485,8 +578,8 @@ func TestExpandTemplates_CallerMapsUndeclaredExit(t *testing.T) {
 func TestExpandTemplates_FileNotFound(t *testing.T) {
 	cfg := minimalCfg(map[string]*State{
 		"start": {
-			Type: StateTypeTemplate,
-			Use:  ".erg/templates/nonexistent.yaml",
+			Type:  StateTypeTemplate,
+			Use:   ".erg/templates/nonexistent.yaml",
 			Exits: map[string]string{"success": "done"},
 		},
 	})
@@ -500,12 +593,11 @@ func TestExpandTemplates_FileNotFound(t *testing.T) {
 	}
 }
 
-
 func TestExpandTemplates_UnknownBuiltin(t *testing.T) {
 	cfg := minimalCfg(map[string]*State{
 		"start": {
-			Type: StateTypeTemplate,
-			Use:  "builtin:nonexistent",
+			Type:  StateTypeTemplate,
+			Use:   "builtin:nonexistent",
 			Exits: map[string]string{"success": "done"},
 		},
 	})
@@ -1011,8 +1103,8 @@ states:
 func TestExpandTemplates_AbsolutePathRejected(t *testing.T) {
 	cfg := minimalCfg(map[string]*State{
 		"start": {
-			Type: StateTypeTemplate,
-			Use:  "/etc/passwd",
+			Type:  StateTypeTemplate,
+			Use:   "/etc/passwd",
 			Exits: map[string]string{"success": "done"},
 		},
 	})
@@ -1031,8 +1123,8 @@ func TestExpandTemplates_AbsolutePathRejected(t *testing.T) {
 func TestExpandTemplates_PathTraversalRejected(t *testing.T) {
 	cfg := minimalCfg(map[string]*State{
 		"start": {
-			Type: StateTypeTemplate,
-			Use:  "../../etc/passwd",
+			Type:  StateTypeTemplate,
+			Use:   "../../etc/passwd",
 			Exits: map[string]string{"success": "done"},
 		},
 	})
@@ -1235,6 +1327,110 @@ func TestExpandTemplates_BuiltinCode(t *testing.T) {
 	}
 	if coding.Action != "ai.code" {
 		t.Errorf("coding.action: got %q, want ai.code", coding.Action)
+	}
+}
+
+func TestExpandTemplates_BuiltinCodeSimplify(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:code",
+			Params: map[string]any{
+				"simplify": true,
+			},
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	coding := result.States["_t_start_coding"]
+	if coding == nil {
+		t.Fatal("_t_start_coding missing")
+	}
+	p := NewParamHelper(coding.Params)
+	if p.Bool("simplify", false) != true {
+		t.Errorf("simplify: got %v (%T), want true (bool)", p.Raw("simplify"), p.Raw("simplify"))
+	}
+}
+
+func TestExpandTemplates_BuiltinCISimplify(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:ci",
+			Params: map[string]any{
+				"simplify": true,
+			},
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check ai.fix_ci state
+	fixCI := result.States["_t_start_fix_ci"]
+	if fixCI == nil {
+		t.Fatal("_t_start_fix_ci missing")
+	}
+	p := NewParamHelper(fixCI.Params)
+	if p.Bool("simplify", false) != true {
+		t.Errorf("fix_ci simplify: got %v (%T), want true (bool)", p.Raw("simplify"), p.Raw("simplify"))
+	}
+
+	// Check ai.resolve_conflicts state
+	rc := result.States["_t_start_resolve_conflicts"]
+	if rc == nil {
+		t.Fatal("_t_start_resolve_conflicts missing")
+	}
+	p = NewParamHelper(rc.Params)
+	if p.Bool("simplify", false) != true {
+		t.Errorf("resolve_conflicts simplify: got %v (%T), want true (bool)", p.Raw("simplify"), p.Raw("simplify"))
+	}
+}
+
+func TestExpandTemplates_BuiltinReviewSimplify(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:review",
+			Params: map[string]any{
+				"simplify": true,
+			},
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ar := result.States["_t_start_address_review"]
+	if ar == nil {
+		t.Fatal("_t_start_address_review missing")
+	}
+	p := NewParamHelper(ar.Params)
+	if p.Bool("simplify", false) != true {
+		t.Errorf("address_review simplify: got %v (%T), want true (bool)", p.Raw("simplify"), p.Raw("simplify"))
 	}
 }
 
