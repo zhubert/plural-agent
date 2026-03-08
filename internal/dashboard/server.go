@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,7 +63,9 @@ func (s *Server) Run(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		srv.Shutdown(context.Background())
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		srv.Shutdown(shutdownCtx)
 	}()
 
 	s.log.Info("dashboard server started", "addr", ln.Addr().String())
@@ -133,6 +136,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionID")
+	if strings.ContainsAny(sessionID, "/\\") || strings.Contains(sessionID, "..") {
+		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		return
+	}
 	tailN := 200
 	if t := r.URL.Query().Get("tail"); t != "" {
 		if n, err := strconv.Atoi(t); err == nil && n > 0 {

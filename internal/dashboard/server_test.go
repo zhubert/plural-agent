@@ -104,6 +104,35 @@ func TestHandleLogs_NoSession(t *testing.T) {
 	}
 }
 
+func TestHandleLogs_PathTraversal(t *testing.T) {
+	srv := New("localhost:0")
+
+	tests := []struct {
+		name      string
+		sessionID string
+	}{
+		{"dot-dot-slash", "../../etc/passwd"},
+		{"slash", "foo/bar"},
+		{"backslash", "foo\\bar"},
+		{"dot-dot-only", ".."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/logs/x", nil)
+			req.SetPathValue("sessionID", tt.sessionID)
+			w := httptest.NewRecorder()
+
+			srv.handleLogs(w, req)
+
+			resp := w.Result()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400 for session ID %q, got %d", tt.sessionID, resp.StatusCode)
+			}
+		})
+	}
+}
+
 func TestBroadcast(t *testing.T) {
 	srv := New("localhost:0")
 

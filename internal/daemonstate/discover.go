@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/zhubert/erg/internal/paths"
@@ -30,7 +31,10 @@ func DiscoverRunning() ([]RunningDaemon, error) {
 		if err != nil {
 			continue
 		}
-		pid, alive := ReadLockStatus(key)
+		// Read the lock file directly instead of going through
+		// ReadLockStatus, which would re-hash the key and miss
+		// daemons whose state file couldn't be read.
+		pid, alive := readLockFile(lockPath)
 		if alive {
 			result = append(result, RunningDaemon{Key: key, PID: pid})
 		}
@@ -65,4 +69,17 @@ func RepoKeyFromLock(lockPath string) (string, error) {
 		return hash, nil
 	}
 	return partial.RepoPath, nil
+}
+
+// readLockFile reads a PID from a lock file path and checks if it's alive.
+func readLockFile(lockPath string) (pid int, running bool) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return 0, false
+	}
+	p, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false
+	}
+	return p, processAlive(p)
 }

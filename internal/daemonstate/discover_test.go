@@ -78,6 +78,38 @@ func TestDiscoverRunning_NoDaemons(t *testing.T) {
 	}
 }
 
+func TestReadLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("valid lock file with dead PID", func(t *testing.T) {
+		lockPath := filepath.Join(tmpDir, "test.lock")
+		os.WriteFile(lockPath, []byte("99999999"), 0o644)
+		pid, alive := readLockFile(lockPath)
+		if pid != 99999999 {
+			t.Errorf("expected pid 99999999, got %d", pid)
+		}
+		if alive {
+			t.Error("expected dead process")
+		}
+	})
+
+	t.Run("missing lock file", func(t *testing.T) {
+		pid, alive := readLockFile(filepath.Join(tmpDir, "nonexistent.lock"))
+		if pid != 0 || alive {
+			t.Error("expected 0/false for missing file")
+		}
+	})
+
+	t.Run("invalid content", func(t *testing.T) {
+		lockPath := filepath.Join(tmpDir, "bad.lock")
+		os.WriteFile(lockPath, []byte("not-a-pid"), 0o644)
+		pid, alive := readLockFile(lockPath)
+		if pid != 0 || alive {
+			t.Error("expected 0/false for invalid content")
+		}
+	})
+}
+
 func TestDiscoverRunning_StaleLock(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
