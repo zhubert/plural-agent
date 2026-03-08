@@ -164,7 +164,7 @@
     transition: border-color 0.15s, background 0.15s;
     cursor: pointer;
   }
-  .work-item:hover {
+  .work-item:hover, .work-item.js-hovered {
     border-color: var(--accent-border);
     background: var(--bg-card-hover);
   }
@@ -527,6 +527,7 @@
   let expandedItems = new Set();
   let messagePanelOpen = new Set(); // item IDs with message panel open
   let logCache = {};
+  let hoveredItemId = null;
   let es = null;
   let controlEnabled = false; // set after capabilities fetch
 
@@ -701,7 +702,7 @@
       btn.addEventListener('click', () => closeMessagePanel(btn.dataset.ctrlCancel));
     });
 
-    // Attach click handlers
+    // Attach click handlers and hover tracking
     content.querySelectorAll('.work-item[data-id]').forEach(el => {
       el.addEventListener('click', (e) => {
         if (e.target.tagName === 'A') return;
@@ -717,6 +718,22 @@
         }
         render();
       });
+
+      // Restore hover class across re-renders to prevent flicker
+      if (el.dataset.id === hoveredItemId) el.classList.add('js-hovered');
+      el.addEventListener('mouseenter', () => {
+        hoveredItemId = el.dataset.id;
+        el.classList.add('js-hovered');
+      });
+      el.addEventListener('mouseleave', () => {
+        hoveredItemId = null;
+        el.classList.remove('js-hovered');
+      });
+    });
+
+    // Pin log viewers to bottom after each render
+    content.querySelectorAll('.log-viewer').forEach(lv => {
+      lv.scrollTop = lv.scrollHeight;
     });
   }
 
