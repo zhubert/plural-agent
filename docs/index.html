@@ -14,6 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="sim-dashboard.css" />
     <style>
       :root {
         --bg: #141416;
@@ -197,7 +198,7 @@
       .main {
         flex: 1;
         min-width: 0;
-        max-width: 820px;
+        max-width: 920px;
         padding: 2.5rem 3rem 4rem;
       }
 
@@ -1102,6 +1103,7 @@
             <a href="cli.html#cli" class="sidebar-link">CLI commands</a>
             <a href="cli.html#cli-run" class="sidebar-sublink">erg run</a>
             <a href="cli.html#cli-stats" class="sidebar-sublink">erg stats</a>
+            <a href="dashboard.html#dashboard" class="sidebar-link">Dashboard</a>
             <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
             <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
             <a href="actions.html#actions" class="sidebar-link">Actions</a>
@@ -1228,6 +1230,28 @@
             </div>
           </li>
         </ol>
+
+        <!-- ============ LIVE DASHBOARD SIMULATION ============ -->
+        <div class="sim-wrap" style="margin: 2rem 0 2.5rem;">
+          <div class="sim-label">live dashboard preview</div>
+          <div class="sim-header">
+            <div class="sim-header-left">
+              <h3><span>erg</span> dashboard</h3>
+            </div>
+            <div class="sim-conn">
+              <div class="sim-conn-dot"></div>
+              <span>connected</span>
+            </div>
+          </div>
+          <div class="sim-body">
+            <div class="sim-summary" id="simSummary"></div>
+            <div id="simContent"></div>
+          </div>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-dim); text-align: center; margin-top: -1.5rem; margin-bottom: 2rem;">
+          Monitor all your agents in real time. <a href="dashboard.html#dashboard">Learn more &rarr;</a>
+        </p>
+        <!-- ============ END SIMULATION ============ -->
 
         <!-- Installation -->
         <h2 id="install">Installation</h2>
@@ -1415,6 +1439,7 @@
         });
       });
     </script>
+    <script src="sim-dashboard.js"></script>
   </body>
 </html>
 

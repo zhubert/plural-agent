@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Workflow configuration — erg</title>
+    <title>Dashboard — erg</title>
     <meta
       name="description"
       content="erg — workflow-driven autonomous coding daemon for Claude Code."
@@ -14,6 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="sim-dashboard.css" />
     <style>
       :root {
         --bg: #141416;
@@ -197,7 +198,7 @@
       .main {
         flex: 1;
         min-width: 0;
-        max-width: 820px;
+        max-width: 920px;
         padding: 2.5rem 3rem 4rem;
       }
 
@@ -1174,7 +1175,6 @@
         }
       }
     </style>
-    <script src="./mermaid.min.js"></script>
   </head>
   <body>
     <div class="mobile-header">
@@ -1204,24 +1204,26 @@
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Workflow</span>
-            <a href="#workflow" class="sidebar-link">Configuration</a>
-            <a href="#settings" class="sidebar-sublink">settings</a>
-            <a href="#source-filter" class="sidebar-sublink">source.filter</a>
-            <a href="#states" class="sidebar-link">State types</a>
-            <a href="#state-task" class="sidebar-sublink">task</a>
-            <a href="#state-wait" class="sidebar-sublink">wait</a>
-            <a href="#state-choice" class="sidebar-sublink">choice</a>
-            <a href="#state-pass" class="sidebar-sublink">pass</a>
-            <a href="#state-template" class="sidebar-sublink">template</a>
-            <a href="#error-handling" class="sidebar-link">Error handling</a>
-            <a href="#hooks" class="sidebar-link">Hooks</a>
+            <a href="workflow.html#workflow" class="sidebar-link">Configuration</a>
+            <a href="workflow.html#settings" class="sidebar-sublink">settings</a>
+            <a href="workflow.html#source-filter" class="sidebar-sublink">source.filter</a>
+            <a href="workflow.html#states" class="sidebar-link">State types</a>
+            <a href="workflow.html#state-task" class="sidebar-sublink">task</a>
+            <a href="workflow.html#state-wait" class="sidebar-sublink">wait</a>
+            <a href="workflow.html#state-choice" class="sidebar-sublink">choice</a>
+            <a href="workflow.html#state-pass" class="sidebar-sublink">pass</a>
+            <a href="workflow.html#state-template" class="sidebar-sublink">template</a>
+            <a href="workflow.html#error-handling" class="sidebar-link">Error handling</a>
+            <a href="workflow.html#hooks" class="sidebar-link">Hooks</a>
           </li>
           <li class="sidebar-section">
             <span class="sidebar-section-title">Reference</span>
             <a href="cli.html#cli" class="sidebar-link">CLI commands</a>
             <a href="cli.html#cli-run" class="sidebar-sublink">erg run</a>
             <a href="cli.html#cli-stats" class="sidebar-sublink">erg stats</a>
-            <a href="dashboard.html#dashboard" class="sidebar-link">Dashboard</a>
+            <a href="#dashboard" class="sidebar-link active">Dashboard</a>
+            <a href="#dashboard-features" class="sidebar-sublink">Features</a>
+            <a href="#dashboard-api" class="sidebar-sublink">API</a>
             <a href="multi-repo.html#multi-repo" class="sidebar-link">Multi-repo</a>
             <a href="multi-repo.html#services" class="sidebar-link">Brew services</a>
             <a href="actions.html#actions" class="sidebar-link">Actions</a>
@@ -1260,607 +1262,123 @@
 
       <!-- Content -->
       <main class="main">
-        <!-- Workflow configuration -->
-        <h2 id="workflow">Workflow configuration</h2>
+        <h2 id="dashboard">Dashboard</h2>
         <p>
-          A workflow is a directed flowchart that routes each issue from the
-          first commit to a merged PR. You define <em>states</em> (nodes), the
-          actions or events that drive each state, and the transitions between
-          them. Run <code>erg configure</code> inside your repo to scaffold
-          a starting point, or omit the file entirely to use the built-in
-          defaults.
-        </p>
-        <p>
-          The <code>settings</code> block controls daemon-level behaviour:
-          concurrency limits, branch naming, merge strategy, and session
-          constraints. The <code>source</code> block selects the issue provider
-          and filter. The <code>states</code> block is the flowchart itself.
+          The erg dashboard provides a real-time web interface for monitoring all
+          running daemons and their work items. It uses Server-Sent Events (SSE)
+          for live streaming updates.
         </p>
 
-        <h3>Pipeline overview</h3>
-        <p
-          style="
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-bottom: 0.5rem;
-          "
-        >
-          The recommended workflow begins with a planning step — Claude posts an
-          implementation plan for human approval before writing any code.
-        </p>
-        <div class="state-flow">
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-task">planning</div>
-              <span class="sf-type">ai.plan</span>
+        <!-- ============ LIVE SIMULATION ============ -->
+        <div class="sim-wrap" style="margin: 1.5rem 0 2rem;">
+          <div class="sim-label">live simulation</div>
+          <div class="sim-header">
+            <div class="sim-header-left">
+              <h3><span>erg</span> dashboard</h3>
             </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-wait">await_plan</div>
-              <span class="sf-type">plan.user_replied</span>
+            <div class="sim-conn">
+              <div class="sim-conn-dot"></div>
+              <span>connected</span>
             </div>
-            <span class="sf-arrow">&rarr;</span>
           </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-task">coding</div>
-              <span class="sf-type">ai.code</span>
-            </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-task">open_pr</div>
-              <span class="sf-type">github.create_pr</span>
-            </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-step">
-            <div class="sf-node">
-              <div class="sf-box sf-wait">await_merge</div>
-              <span class="sf-type">pr.mergeable</span>
-            </div>
-            <span class="sf-arrow">&rarr;</span>
-          </div>
-          <div class="sf-node">
-            <div class="sf-box sf-done">done</div>
-            <span class="sf-type">succeed</span>
+          <div class="sim-body">
+            <div class="sim-summary" id="simSummary"></div>
+            <div id="simContent"></div>
           </div>
         </div>
-        <p class="state-note">
-          <code>plan.user_replied</code> loops back for re-planning on feedback
-          &middot; <code>retry</code> with exponential backoff &middot;
-          <code>timeout</code> enforced on wait states
-        </p>
+        <!-- ============ END SIMULATION ============ -->
 
-        <h3>Example config</h3>
+        <p>Start the dashboard:</p>
         <div class="code-block">
           <div class="code-header">
-            <span class="code-filename">.erg/workflow.yaml</span>
+            <span class="code-filename">terminal</span>
           </div>
-          <pre><span class="ck">source:</span>
-  <span class="ck">provider:</span> <span class="cv">github</span>            <span class="cc"># github | asana | linear</span>
-  <span class="ck">filter:</span>
-    <span class="ck">label:</span> <span class="cv">queued</span>              <span class="cc"># GitHub/Linear: issue label; Asana: tag name (optional when section is set)</span>
-    <span class="ck">section:</span> <span class="cv">Todo</span>             <span class="cc"># Asana only: poll tasks in this board section instead of by tag</span>
-
-<span class="ck">states:</span>
-  <span class="ck">coding:</span>
-    <span class="ck">type:</span> <span class="cs">task</span>
-    <span class="ck">action:</span> <span class="ca">ai.code</span>
-    <span class="ck">params:</span>
-      <span class="ck">max_turns:</span> <span class="cv">50</span>
-      <span class="ck">max_duration:</span> <span class="cv">30m</span>
-      <span class="ck">system_prompt:</span> <span class="cv">file:.erg/prompt.md</span>
-    <span class="ck">before:</span>                        <span class="cc"># runs before step; failure blocks</span>
-      <span class="cv">- run: "make deps"</span>
-    <span class="ck">after:</span>                         <span class="cc"># runs after; fire-and-forget</span>
-      <span class="cv">- run: "make lint"</span>
-    <span class="ck">retry:</span>                         <span class="cc"># retry with exponential backoff</span>
-      - <span class="ck">max_attempts:</span> <span class="cv">3</span>
-        <span class="ck">interval:</span> <span class="cv">30s</span>
-        <span class="ck">backoff_rate:</span> <span class="cv">2.0</span>
-    <span class="ck">next:</span> <span class="cv">open_pr</span>
-    <span class="ck">error:</span> <span class="cv">failed</span>
-
-  <span class="ck">await_review:</span>
-    <span class="ck">type:</span> <span class="cs">wait</span>
-    <span class="ck">event:</span> <span class="ca">pr.reviewed</span>
-    <span class="ck">timeout:</span> <span class="cv">48h</span>                  <span class="cc"># enforced at runtime</span>
-    <span class="ck">timeout_next:</span> <span class="cv">nudge_reviewers</span>  <span class="cc"># dedicated timeout edge</span>
-    <span class="ck">params:</span>
-      <span class="ck">auto_address:</span> <span class="cv">true</span>
-      <span class="ck">max_feedback_rounds:</span> <span class="cv">3</span>
-
-  <span class="ck">merge:</span>
-    <span class="ck">type:</span> <span class="cs">task</span>
-    <span class="ck">action:</span> <span class="ca">github.merge</span>
-    <span class="ck">params:</span>
-      <span class="ck">method:</span> <span class="cv">squash</span>            <span class="cc"># rebase | squash | merge</span></pre>
+          <pre><span class="ck">erg</span> dashboard              <span class="cc"># Start on default port 21122</span>
+<span class="ck">erg</span> dashboard --port 8080  <span class="cc"># Start on custom port</span></pre>
         </div>
 
-
-        <h3 id="settings">settings block reference</h3>
-        <p>
-          The optional <code>settings</code> block at the top level of
-          <code>workflow.yaml</code> controls daemon-level behaviour for the
-          repo. All fields are optional — omit any field to use the default.
-        </p>
         <table class="cli-table">
           <thead>
             <tr>
-              <th>Field</th>
-              <th>Type</th>
-              <th>Default</th>
+              <th>Flag</th>
               <th>Description</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td><code>max_concurrent</code></td>
-              <td>int</td>
-              <td>3</td>
-              <td>Maximum number of sessions running simultaneously for this repo.</td>
-            </tr>
-            <tr>
-              <td><code>branch_prefix</code></td>
-              <td>string</td>
-              <td><em>none</em></td>
-              <td>Prefix applied to auto-generated branch names (e.g. <code>bot/</code>).</td>
-            </tr>
-            <tr>
-              <td><code>cleanup_merged</code></td>
-              <td>bool</td>
-              <td>false</td>
-              <td>Delete the branch and worktree automatically after a PR is merged or closed.</td>
-            </tr>
-            <tr>
-              <td><code>max_turns</code></td>
-              <td>int</td>
-              <td>50</td>
-              <td>Maximum autonomous turns per AI session before the session is stopped.</td>
-            </tr>
-            <tr>
-              <td><code>max_duration</code></td>
-              <td>int (minutes)</td>
-              <td>30</td>
-              <td>Maximum wall-clock time in minutes for a single AI session.</td>
-            </tr>
-            <tr>
-              <td><code>auto_merge</code></td>
-              <td>bool</td>
-              <td>false</td>
-              <td>Automatically merge the PR once CI passes and all required approvals are met.</td>
-            </tr>
-            <tr>
-              <td><code>merge_method</code></td>
-              <td>string</td>
-              <td>rebase</td>
-              <td>Merge strategy when auto-merging: <code>rebase</code>, <code>squash</code>, or <code>merge</code>.</td>
-            </tr>
-            <tr>
-              <td><code>container_image</code></td>
-              <td>string</td>
-              <td><em>built-in</em></td>
-              <td>Custom Docker image to use for containerized Claude sessions.</td>
+              <td><code>--port</code></td>
+              <td>Port for the dashboard server (default: 21122)</td>
             </tr>
           </tbody>
         </table>
 
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">settings example</span>
-          </div>
-          <pre><span class="ck">settings:</span>
-  <span class="ck">max_concurrent:</span> <span class="cv">3</span>          <span class="cc"># max parallel sessions</span>
-  <span class="ck">branch_prefix:</span> <span class="cv">bot/</span>        <span class="cc"># all branches start with bot/</span>
-  <span class="ck">cleanup_merged:</span> <span class="cv">true</span>       <span class="cc"># delete branch/worktree after merge</span>
-  <span class="ck">max_turns:</span> <span class="cv">50</span>              <span class="cc"># stop session after 50 turns</span>
-  <span class="ck">max_duration:</span> <span class="cv">30</span>           <span class="cc"># stop session after 30 minutes</span>
-  <span class="ck">auto_merge:</span> <span class="cv">true</span>           <span class="cc"># merge automatically when CI passes</span>
-  <span class="ck">merge_method:</span> <span class="cv">squash</span>       <span class="cc"># rebase | squash | merge</span></pre>
-        </div>
+        <h3 id="dashboard-features">Features</h3>
+        <ul>
+          <li>
+            <strong>Summary bar</strong> &mdash; aggregate counts across all
+            daemons: daemon count, active/queued/completed/failed items, total
+            spend, and token usage
+          </li>
+          <li>
+            <strong>Per-daemon sections</strong> &mdash; each running daemon gets
+            its own section showing repo name, PID, uptime, slot count, and cost
+          </li>
+          <li>
+            <strong>Work item cards</strong> &mdash; each work item displays its
+            issue reference, current workflow step, phase, age, cost, and feedback
+            rounds. Cards are color-coded by state: orange border for active,
+            green for completed, red for failed, gray for queued
+          </li>
+          <li>
+            <strong>Live session logs</strong> &mdash; click any work item card
+            to expand it and view the live session log. Tool calls are shown in
+            cyan, text output in gray. Logs auto-refresh every 3 seconds
+          </li>
+          <li>
+            <strong>PR links</strong> &mdash; completed items show clickable
+            links to their pull requests
+          </li>
+          <li>
+            <strong>Error display</strong> &mdash; failed items show the error
+            message inline
+          </li>
+          <li>
+            <strong>Connection status</strong> &mdash; header indicator shows
+            whether the SSE connection is live
+          </li>
+        </ul>
 
-        <h3 id="source-filter">source.filter keys</h3>
+        <h3 id="dashboard-api">API</h3>
         <p>
-          The <code>filter</code> block under <code>source</code> controls which
-          issues or tasks erg picks up. Available keys depend on the provider.
+          The dashboard exposes a small HTTP API that can be used for custom
+          integrations or scripting.
         </p>
         <table class="cli-table">
           <thead>
             <tr>
-              <th>Key</th>
-              <th>Provider</th>
+              <th>Endpoint</th>
               <th>Description</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td><code>label</code></td>
-              <td>GitHub, Asana, Linear</td>
-              <td>
-                GitHub and Linear: issue label to poll. Asana: tag name to
-                filter by. Optional for Asana when <code>section</code> is set —
-                use it to narrow within a section if needed.
-              </td>
+              <td><code>GET /</code></td>
+              <td>Serves the embedded dashboard UI</td>
             </tr>
             <tr>
-              <td><code>project</code></td>
-              <td>Asana</td>
-              <td>
-                Asana project GID. Required for all Asana workflows. Found in
-                the project URL:
-                <code>app.asana.com/0/<strong>{gid}</strong>/list</code>.
-              </td>
+              <td><code>GET /api/state</code></td>
+              <td>Returns current state as JSON (one-shot)</td>
             </tr>
             <tr>
-              <td><code>section</code></td>
-              <td>Asana</td>
-              <td>
-                Board section name to poll. When set, erg fetches tasks from
-                that specific section rather than the whole project, enabling
-                kanban-style workflows where section position — not tags —
-                drives the lifecycle. Matched case-insensitively. If
-                <code>label</code> is also set, it is applied as an additional
-                tag filter on top of the section results.
-              </td>
+              <td><code>GET /api/events</code></td>
+              <td>SSE stream &mdash; pushes state JSON on every change (polled every 1.5s)</td>
             </tr>
             <tr>
-              <td><code>team</code></td>
-              <td>Linear</td>
-              <td>Linear team ID. Required for Linear workflows.</td>
+              <td><code>GET /api/logs/{sessionID}?tail=N</code></td>
+              <td>Returns parsed session log lines (default tail=200). Each line has a type (<code>"text"</code> or <code>"tool"</code>) and text content</td>
             </tr>
           </tbody>
         </table>
-
-        <!-- State types -->
-        <h3 id="states">State types</h3>
-        <p>
-          Each state in the workflow has a type that determines its behavior.
-        </p>
-        <table class="cli-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>task</code></td>
-              <td>
-                Execute an action (e.g. <code>ai.code</code>,
-                <code>github.merge</code>)
-              </td>
-            </tr>
-            <tr>
-              <td><code>wait</code></td>
-              <td>
-                Poll for an event with an enforced timeout (e.g.
-                <code>pr.reviewed</code>, <code>ci.complete</code>)
-              </td>
-            </tr>
-            <tr>
-              <td><code>choice</code></td>
-              <td>
-                Evaluate rules against step data for conditional branching
-              </td>
-            </tr>
-            <tr>
-              <td><code>pass</code></td>
-              <td>Inject data for downstream states to read</td>
-            </tr>
-            <tr>
-              <td><code>succeed</code></td>
-              <td>Terminal state &mdash; marks the work item as complete</td>
-            </tr>
-            <tr>
-              <td><code>fail</code></td>
-              <td>Terminal state &mdash; marks the work item as failed</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3 id="state-task">task</h3>
-        <p>
-          A <code>task</code> state executes a registered action and then
-          transitions to <code>next</code> on success or <code>error</code> on
-          failure. Every action that calls an external API (GitHub, Asana,
-          Linear, git remotes) should define a <code>retry</code> block. Network
-          failures are transient — without retry, a momentary outage permanently
-          fails the work item.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">retry example</span>
-          </div>
-          <pre><span class="ck">open_pr:</span>
-  <span class="ck">type:</span> <span class="cs">task</span>
-  <span class="ck">action:</span> <span class="ca">github.create_pr</span>
-  <span class="ck">retry:</span>
-    - <span class="ck">max_attempts:</span> <span class="cv">3</span>
-      <span class="ck">interval:</span> <span class="cv">15s</span>
-      <span class="ck">backoff_rate:</span> <span class="cv">2.0</span>   <span class="cc"># waits 15s, 30s, 60s</span>
-  <span class="ck">next:</span> <span class="cv">await_review</span>
-  <span class="ck">error:</span> <span class="cv">failed</span></pre>
-        </div>
-        <p>
-          Use <code>catch</code> to route specific error types to recovery
-          states instead of the generic <code>error</code> edge. Use
-          <code>before</code> hooks to run setup scripts (blocking) and
-          <code>after</code> hooks for teardown (fire-and-forget).
-        </p>
-
-        <h3 id="state-wait">wait</h3>
-        <p>
-          A <code>wait</code> state polls for an external event on each daemon
-          tick. It does not advance until the event fires. Always set a
-          <code>timeout</code> to prevent indefinite waits &mdash; use
-          <code>timeout_next</code> to route the timeout to a dedicated state
-          (e.g. post a comment) rather than the generic <code>error</code> edge.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">wait example</span>
-          </div>
-          <pre><span class="ck">await_review:</span>
-  <span class="ck">type:</span> <span class="cs">wait</span>
-  <span class="ck">event:</span> <span class="ca">pr.reviewed</span>
-  <span class="ck">timeout:</span> <span class="cv">72h</span>
-  <span class="ck">timeout_next:</span> <span class="cv">nudge_reviewers</span>
-  <span class="ck">params:</span>
-    <span class="ck">auto_address:</span> <span class="cv">true</span>          <span class="cc"># Claude addresses feedback while waiting</span>
-    <span class="ck">max_feedback_rounds:</span> <span class="cv">3</span>
-  <span class="ck">next:</span> <span class="cv">merge</span>
-  <span class="ck">error:</span> <span class="cv">failed</span></pre>
-        </div>
-        <p>
-          The <code>pr.mergeable</code> event is a shorthand that combines
-          <code>pr.reviewed</code> and <code>ci.complete</code> into a single
-          wait state. Use it for simple pipelines where you want both conditions
-          satisfied before proceeding.
-        </p>
-
-        <h3 id="state-choice">choice</h3>
-        <p>
-          A <code>choice</code> state reads values from the accumulated step
-          data and branches to different states based on rules. Each rule
-          specifies a <code>variable</code>, an <code>equals</code> value, and a
-          <code>next</code> state. The <code>default</code> route fires when no
-          rule matches.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">choice example</span>
-          </div>
-          <pre><span class="ck">check_ci:</span>
-  <span class="ck">type:</span> <span class="cs">choice</span>
-  <span class="ck">choices:</span>
-    - <span class="ck">variable:</span> <span class="cv">ci_passed</span>
-      <span class="ck">equals:</span> <span class="cv">true</span>
-      <span class="ck">next:</span> <span class="cv">request_reviewer</span>
-    - <span class="ck">variable:</span> <span class="cv">ci_failed</span>
-      <span class="ck">equals:</span> <span class="cv">true</span>
-      <span class="ck">next:</span> <span class="cv">fix_ci</span>
-  <span class="ck">default:</span> <span class="cv">failed</span></pre>
-        </div>
-        <p>
-          Choice states are the branching points of your flowchart. Combine them
-          with <code>pass</code> states to make decisions on injected
-          configuration flags, or with CI/review wait states to route on
-          outcomes.
-        </p>
-
-        <h3 id="state-pass">pass</h3>
-        <p>
-          A <code>pass</code> state injects static data into the workflow
-          context and immediately transitions to <code>next</code>. Use it at
-          the start of a workflow to set configuration flags that downstream
-          <code>choice</code> states can inspect.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">pass example</span>
-          </div>
-          <pre><span class="ck">configure:</span>
-  <span class="ck">type:</span> <span class="cs">pass</span>
-  <span class="ck">data:</span>
-    <span class="ck">close_issue_on_merge:</span> <span class="cv">true</span>
-    <span class="ck">max_ci_fix_rounds:</span> <span class="cv">3</span>
-  <span class="ck">next:</span> <span class="cv">coding</span></pre>
-        </div>
-
-        <!-- Template -->
-        <h3 id="state-template">template</h3>
-        <p>
-          A <code>template</code> state embeds a reusable sub-workflow inline.
-          At load time, template states are expanded: each template's internal
-          states are copied into the calling workflow with a unique namespace
-          prefix, and exit ports are wired to the caller's mapped local states.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">template state (using a built-in)</span>
-          </div>
-          <pre><span class="ck">ci:</span>
-  <span class="ck">type:</span> <span class="cs">template</span>
-  <span class="ck">use:</span> <span class="cv">builtin:ci</span>
-  <span class="ck">exits:</span>
-    <span class="ck">success:</span> <span class="cv">review</span>
-    <span class="ck">failure:</span> <span class="cv">notify_failed</span></pre>
-        </div>
-        <p>
-          The <code>use</code> field accepts either a built-in reference
-          (e.g. <code>builtin:ci</code>, <code>builtin:review</code>)
-          or a relative file path to a template YAML file (e.g.
-          <code>.erg/templates/my-template.yaml</code>). The <code>exits</code>
-          field maps the template's declared exit ports to local states in the
-          calling workflow.
-        </p>
-
-        <h4>Template file structure</h4>
-        <p>
-          A template file defines a self-contained workflow fragment with a
-          single entry point and named exit ports.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">.erg/templates/code-review-merge.yaml</span>
-          </div>
-          <pre><span class="ck">template:</span> <span class="cv">code-review-merge</span>
-<span class="ck">entry:</span> <span class="cv">coding</span>
-<span class="ck">exits:</span>
-  <span class="ck">success:</span> <span class="cv">done</span>      <span class="cc"># internal terminal state</span>
-  <span class="ck">failure:</span> <span class="cv">failed</span>    <span class="cc"># internal terminal state</span>
-<span class="ck">params:</span>
-  <span class="cv">- name: max_rounds</span>
-    <span class="ck">default:</span> <span class="cv">3</span>
-<span class="ck">states:</span>
-  <span class="ck">coding:</span>
-    <span class="ck">type:</span> <span class="cs">task</span>
-    <span class="ck">action:</span> <span class="cv">ai.code</span>
-    <span class="ck">next:</span> <span class="cv">push</span>
-  <span class="cc"># ... more states ...</span>
-  <span class="ck">done:</span>
-    <span class="ck">type:</span> <span class="cs">succeed</span>
-  <span class="ck">failed:</span>
-    <span class="ck">type:</span> <span class="cs">fail</span></pre>
-        </div>
-
-        <h4>Parameters</h4>
-        <p>
-          Templates can declare parameters with defaults. Callers override them
-          via the <code>params</code> field. Inside template states,
-          <code>{{param_name}}</code> placeholders in string values are
-          substituted with the resolved parameter value.
-        </p>
-        <div class="code-block">
-          <div class="code-header">
-            <span class="code-filename">caller with params</span>
-          </div>
-          <pre><span class="ck">do_work:</span>
-  <span class="ck">type:</span> <span class="cs">template</span>
-  <span class="ck">use:</span> <span class="cv">.erg/templates/code-review-merge.yaml</span>
-  <span class="ck">params:</span>
-    <span class="ck">max_rounds:</span> <span class="cv">5</span>
-  <span class="ck">exits:</span>
-    <span class="ck">success:</span> <span class="cv">close_issue</span>
-    <span class="ck">failure:</span> <span class="cv">notify_slack</span></pre>
-        </div>
-
-        <h4>Built-in templates</h4>
-        <p>
-          Erg ships with modular built-in templates that can be composed to
-          build any workflow. Each has <code>success</code> and
-          <code>failure</code> exits.
-        </p>
-        <div class="info-grid">
-          <div class="info-card">
-            <h4>builtin:plan</h4>
-            <p>
-              Planning phase: AI generates a plan &rarr; waits for user
-              feedback &rarr; re-plans on rejection (loop until approved).
-              Includes 72h timeout with expiry notification.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>builtin:code</h4>
-            <p>
-              AI coding session with preset turn and duration limits.
-              Runs containerized by default.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>builtin:pr</h4>
-            <p>
-              Creates a pull request linked to the source issue.
-              Includes retry on transient failures.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>builtin:ci</h4>
-            <p>
-              Waits for CI &rarr; fixes failures (bounded loop) &rarr;
-              resolves merge conflicts via rebase or AI. Includes
-              timeout and unfixable notifications.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>builtin:review</h4>
-            <p>
-              Waits for PR review &rarr; addresses feedback (bounded loop).
-              Handles approval, changes-requested, and external merge.
-              Includes 48h timeout notification.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>builtin:merge</h4>
-            <p>
-              Merges the PR (rebase by default) and cleans up the branch.
-              Includes retry on transient failures.
-            </p>
-          </div>
-        </div>
-
-        <p>
-          Templates can be nested (a template can reference another template)
-          and circular references are automatically detected. Template file
-          paths must be relative to the repo root &mdash; absolute paths are
-          rejected.
-        </p>
-
-        <!-- Error handling -->
-        <h3 id="error-handling">Error handling</h3>
-        <div class="info-grid">
-          <div class="info-card">
-            <h4>retry</h4>
-            <p>
-              Task states support <code>retry</code> with configurable
-              <code>max_attempts</code>, <code>interval</code>, and exponential
-              <code>backoff_rate</code>.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>catch</h4>
-            <p>
-              Route specific errors to recovery states with
-              <code>catch</code> blocks. Match by error type or message pattern.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>timeout</h4>
-            <p>
-              Wait states enforce <code>timeout</code> durations at runtime.
-              <code>timeout_next</code> provides a dedicated transition edge.
-            </p>
-          </div>
-          <div class="info-card">
-            <h4>error state</h4>
-            <p>
-              Every task state can define an <code>error</code> transition for
-              unrecoverable failures. Defaults to the
-              <code>failed</code> terminal state.
-            </p>
-          </div>
-        </div>
-
-        <!-- Hooks -->
-        <h3 id="hooks">Hooks</h3>
-        <p>
-          <code>before</code> hooks run before step execution &mdash; if they
-          fail, the step is blocked. <code>after</code> hooks run after
-          completion and are fire-and-forget.
-        </p>
-        <p>
-          Hooks receive the following environment variables:
-          <code>$ERG_BRANCH</code>, <code>$ERG_PR_URL</code>,
-          <code>$ERG_ISSUE_URL</code>, <code>$ERG_REPO_PATH</code>,
-          <code>$ERG_SESSION_ID</code>, <code>$ERG_ISSUE_ID</code>,
-          <code>$ERG_ISSUE_TITLE</code>, <code>$ERG_WORKTREE</code>, and
-          <code>$ERG_PROVIDER</code>.
-        </p>
 
         <div
           style="
@@ -1889,37 +1407,6 @@
     </div>
 
     <script>
-      mermaid.initialize({ startOnLoad: false, theme: "dark" });
-
-      function switchTab(btn, tab) {
-        var tabs = btn.closest(".example-tabs");
-        tabs.querySelectorAll(".tab-btn").forEach(function (b) {
-          b.classList.remove("active");
-        });
-        btn.classList.add("active");
-        tabs.querySelectorAll("[data-panel]").forEach(function (p) {
-          p.style.display = "none";
-        });
-        var panel = tabs.querySelector('[data-panel="' + tab + '"]');
-        if (panel) panel.style.display = "";
-        if (tab === "diagram" && !tabs.dataset.rendered) {
-          tabs.dataset.rendered = "1";
-          var el = tabs.querySelector(".mermaid");
-          if (el) mermaid.run({ nodes: [el] });
-        }
-      }
-
-      function copyCmd(btn, cmd) {
-        navigator.clipboard.writeText(cmd).then(function () {
-          btn.textContent = "copied";
-          btn.classList.add("copied");
-          setTimeout(function () {
-            btn.textContent = "copy";
-            btn.classList.remove("copied");
-          }, 2000);
-        });
-      }
-
       function toggleSidebar() {
         document.getElementById("sidebar").classList.toggle("open");
         document.getElementById("sidebarOverlay").classList.toggle("open");
@@ -1983,6 +1470,6 @@
         });
       });
     </script>
+    <script src="sim-dashboard.js"></script>
   </body>
 </html>
-
