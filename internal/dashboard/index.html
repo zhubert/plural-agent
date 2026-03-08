@@ -691,13 +691,17 @@
     }
 
     // Detach existing log viewers before DOM replacement so they survive re-render.
-    // Map: work-item data-id -> {element, wasAtBottom}
+    // Map: work-item data-id -> {element, wasAtBottom, session}
     const savedLogViewers = new Map();
     content.querySelectorAll('.log-container[data-id]').forEach(container => {
       const lv = container.querySelector('.log-viewer');
       if (!lv) return;
       container.removeChild(lv);
-      savedLogViewers.set(container.dataset.id, { element: lv, wasAtBottom: isAtBottom(lv) });
+      savedLogViewers.set(container.dataset.id, {
+        element: lv,
+        wasAtBottom: isAtBottom(lv),
+        session: container.dataset.session,
+      });
     });
 
     let html = '';
@@ -709,14 +713,18 @@
     // Re-attach saved log viewers or populate new containers from cache
     content.querySelectorAll('.log-container[data-id]').forEach(container => {
       const saved = savedLogViewers.get(container.dataset.id);
-      if (saved) {
+      const sid = container.dataset.session;
+      // Only re-attach if the session hasn't changed (e.g. after retry)
+      if (saved && saved.session && saved.session === sid) {
         container.appendChild(saved.element);
         if (saved.wasAtBottom) {
           saved.element.scrollTop = saved.element.scrollHeight;
         }
       } else {
-        // Newly expanded — populate from cache if available
-        const sid = container.dataset.session;
+        // New viewer needed — session changed or newly expanded
+        if (saved && saved.session !== sid) {
+          delete logCache[saved.session];
+        }
         if (sid && logCache[sid]) {
           updateLogViewer(container, 0, logCache[sid]);
         } else if (sid) {
