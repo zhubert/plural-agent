@@ -157,3 +157,57 @@
 .sim-item.st-active.pulsing {
   animation: sim-pulse 2s ease-in-out infinite;
 }
+/* Control buttons */
+.sim-ctrl-btns {
+  display: flex; gap: 0.35rem; margin-top: 0.45rem;
+  flex-wrap: wrap; align-items: center;
+}
+.sim-ctrl-btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.58rem; font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0.18rem 0.5rem;
+  border-radius: 3px; border: 1px solid transparent;
+  cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.sim-ctrl-btn:active { transform: scale(0.97); }
+.sim-ctrl-btn.stop {
+  background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); color: #f87171;
+}
+.sim-ctrl-btn.stop:hover { background: rgba(248,113,113,0.2); }
+.sim-ctrl-btn.retry {
+  background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: var(--yellow);
+}
+.sim-ctrl-btn.retry:hover { background: rgba(251,191,36,0.2); }
+.sim-ctrl-btn.message, .sim-ctrl-btn.send {
+  background: rgba(34,211,238,0.1); border-color: rgba(34,211,238,0.3); color: var(--cyan);
+}
+.sim-ctrl-btn.message:hover, .sim-ctrl-btn.send:hover { background: rgba(34,211,238,0.2); }
+.sim-ctrl-btn.cancel {
+  background: rgba(113,113,122,0.1); border-color: rgba(113,113,122,0.2); color: var(--text-dim);
+}
+.sim-ctrl-btn.cancel:hover { background: rgba(113,113,122,0.2); }
+.sim-flash {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.56rem; padding: 0.08rem 0.3rem;
+  border-radius: 2px; animation: sim-fade-out 2s forwards;
+}
+.sim-flash.ok { color: var(--green); }
+.sim-flash.err { color: #f87171; }
+@keyframes sim-fade-out {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* Message panel */
+.sim-msg-panel {
+  margin-top: 0.35rem; display: flex; gap: 0.35rem; align-items: flex-start;
+}
+.sim-msg-panel textarea {
+  flex: 1; font-family: "IBM Plex Mono", monospace; font-size: 0.62rem;
+  background: var(--bg-code); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); padding: 0.3rem 0.45rem;
+  resize: vertical; min-height: 48px; outline: none;
+}
+.sim-msg-panel textarea:focus { border-color: var(--cyan); }
+.sim-msg-panel-actions { display: flex; flex-direction: column; gap: 0.25rem; }

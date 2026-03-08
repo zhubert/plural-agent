@@ -87,12 +87,20 @@
     { at: 12, fn: function() {
       setItem('fe-45', { state: 'active', step: 'coding', phase: 'sync', age: '2m' });
     }},
-    { at: 14, fn: function() { streamLog('fe-45', 2); } },
-    { at: 16, fn: function() { streamLog('fe-45', 2); tickCost('fe-45', 0.04); } },
-    { at: 18, fn: function() {
-      setItem('fe-42', { state: 'completed', step: 'done', phase: 'idle', pr: '#207', age: '6m' });
+    { at: 14, fn: function() {
+      streamLog('fe-45', 2);
+      // Demo: simulate clicking Stop on fe-42
+      setItem('fe-42', { state: 'failed', step: 'stopped', phase: 'idle' });
+      simFlash('fe-42', 'stop', true, 'stopped');
     }},
-    { at: 20, fn: function() { streamLog('fe-45', 2); tickCost('fe-45', 0.03); } },
+    { at: 16, fn: function() { streamLog('fe-45', 2); tickCost('fe-45', 0.04); } },
+    { at: 18, fn: function() { tickCost('fe-45', 0.02); } },
+    { at: 20, fn: function() {
+      streamLog('fe-45', 2); tickCost('fe-45', 0.03);
+      // Demo: simulate clicking Retry on fe-42
+      setItem('fe-42', { state: 'active', step: 'coding', phase: 'sync', error: null, logs: [], logIdx: 0, age: '6m' });
+      simFlash('fe-42', 'retry', true, 'queued');
+    }},
     { at: 22, fn: function() {
       setItem('api-12', { state: 'active', step: 'coding', phase: 'sync', error: null, age: '24m' });
     }},
@@ -114,6 +122,8 @@
   var elapsed = 0;
   var timelineIdx = 0;
   var expandedId = 'fe-42'; // Start with #42 expanded to show logs
+  var msgPanelOpen = null;  // item id with message panel open
+  var flashData = {};       // id -> {action, text, ok}
 
   function findItem(id) {
     for (var d = 0; d < state.daemons.length; d++) {
@@ -158,6 +168,8 @@
     state.daemons[1].items[0] = { id: 'api-17', title: '#17 Add rate limiting middleware', state: 'active', step: 'wait_for_ci', phase: 'async_pending', cost: 0.62, age: '7m', feedback: 0, pr: '#89', logs: [], logIdx: 8 };
     state.daemons[1].items[1] = { id: 'api-12', title: '#12 Refactor auth token refresh logic', state: 'failed', step: 'coding', phase: 'idle', cost: 0.25, age: '22m', feedback: 0, error: 'go test: FAIL TestRefreshExpired \u2014 context deadline exceeded' };
     expandedId = 'fe-42';
+    msgPanelOpen = null;
+    flashData = {};
   }
 
   // Compute daemon-level totals from items (derived, not stored)
@@ -217,6 +229,7 @@
       card.setAttribute('aria-expanded', expandedId === card.dataset.id ? 'true' : 'false');
       card.addEventListener('click', function(e) {
         if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+        if (e.target.closest('.sim-ctrl-btns, .sim-msg-panel')) return;
         expandedId = (expandedId === card.dataset.id) ? null : card.dataset.id;
         render();
       });
@@ -228,6 +241,35 @@
         }
       });
     });
+    // Wire control button handlers
+    el.querySelectorAll('[data-sim-stop]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) { e.stopPropagation(); simStop(btn.dataset.simStop); });
+    });
+    el.querySelectorAll('[data-sim-retry]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) { e.stopPropagation(); simRetry(btn.dataset.simRetry); });
+    });
+    el.querySelectorAll('[data-sim-open]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) { e.stopPropagation(); simOpenMsg(btn.dataset.simOpen); });
+    });
+    el.querySelectorAll('[data-sim-send]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) { e.stopPropagation(); simSendMsg(btn.dataset.simSend); });
+    });
+    el.querySelectorAll('[data-sim-cancel]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) { e.stopPropagation(); simCancelMsg(btn.dataset.simCancel); });
+    });
+    // Apply pending flashes (after re-render we re-trigger the animation)
+    for (var fid in flashData) {
+      var fd = flashData[fid];
+      var flashEl = document.getElementById('sim-flash-' + fid + '-' + fd.action);
+      if (flashEl) {
+        flashEl.textContent = fd.ok ? ('✓ ' + fd.text) : ('✗ ' + fd.text);
+        flashEl.className = 'sim-flash ' + (fd.ok ? 'ok' : 'err');
+        flashEl.style.animation = 'none';
+        (function(el) {
+          requestAnimationFrame(function() { el.style.animation = ''; });
+        })(flashEl);
+      }
+    }
     // Auto-scroll log viewers to bottom
     el.querySelectorAll('.sim-logs').forEach(function(lv) {
       lv.scrollTop = lv.scrollHeight;
@@ -270,6 +312,30 @@
     html += '</div>';
     if (item.pr) html += '<div class="sim-item-pr"><button type="button" class="sim-item-pr-link">PR ' + esc(item.pr) + '</button></div>';
     if (item.error) html += '<div class="sim-item-error">' + esc(item.error) + '</div>';
+    // Control buttons
+    var isActive = item.state === 'active';
+    var isFailed = item.state === 'failed';
+    var hasLogs = !!item.logs;
+    var isMsgOpen = msgPanelOpen === item.id;
+    var ctrlBtns = '';
+    if (isActive) ctrlBtns += '<button class="sim-ctrl-btn stop" data-sim-stop="' + esc(item.id) + '">Stop</button>';
+    if (isFailed) ctrlBtns += '<button class="sim-ctrl-btn retry" data-sim-retry="' + esc(item.id) + '">Retry</button>';
+    if (isActive && hasLogs && !isMsgOpen) ctrlBtns += '<button class="sim-ctrl-btn message" data-sim-open="' + esc(item.id) + '">Send Message</button>';
+    var flashSpans = '';
+    if (isActive) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-stop"></span>';
+    if (isFailed) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-retry"></span>';
+    if (isActive && hasLogs) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-message"></span>';
+    if (ctrlBtns || isMsgOpen) {
+      html += '<div class="sim-ctrl-btns">' + ctrlBtns + flashSpans + '</div>';
+    }
+    if (isMsgOpen) {
+      html += '<div class="sim-msg-panel">' +
+        '<textarea id="sim-ta-' + esc(item.id) + '" placeholder="Message to inject into the running session…" rows="3"></textarea>' +
+        '<div class="sim-msg-panel-actions">' +
+          '<button class="sim-ctrl-btn send" data-sim-send="' + esc(item.id) + '">Send</button>' +
+          '<button class="sim-ctrl-btn cancel" data-sim-cancel="' + esc(item.id) + '">Cancel</button>' +
+        '</div></div>';
+    }
     if (isExp && item.logs && item.logs.length > 0) {
       html += '<div class="sim-logs">';
       for (var l = 0; l < item.logs.length; l++) {
@@ -279,6 +345,46 @@
     }
     html += '</div>';
     return html;
+  }
+
+  // Simulated control action handlers
+
+  function simFlash(id, action, ok, text) {
+    flashData[id] = { action: action, ok: ok, text: text };
+    // Clear flash after animation completes
+    setTimeout(function() {
+      if (flashData[id] && flashData[id].action === action) delete flashData[id];
+    }, 2200);
+  }
+
+  function simStop(id) {
+    setItem(id, { state: 'failed', step: 'stopped', phase: 'idle' });
+    simFlash(id, 'stop', true, 'stopped');
+    render();
+  }
+
+  function simRetry(id) {
+    setItem(id, { state: 'active', step: 'coding', phase: 'sync', error: null, logs: [], logIdx: 0 });
+    simFlash(id, 'retry', true, 'queued');
+    render();
+  }
+
+  function simOpenMsg(id) {
+    msgPanelOpen = id;
+    render();
+    var ta = document.getElementById('sim-ta-' + id);
+    if (ta) ta.focus();
+  }
+
+  function simCancelMsg(id) {
+    msgPanelOpen = null;
+    render();
+  }
+
+  function simSendMsg(id) {
+    msgPanelOpen = null;
+    simFlash(id, 'message', true, 'sent');
+    render();
   }
 
   // Initial render, then tick every 1.5s
