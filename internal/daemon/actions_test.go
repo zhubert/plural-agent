@@ -30,10 +30,10 @@ import (
 // trackingRunner wraps MockRunner to track Set* calls for configureRunner tests.
 type trackingRunner struct {
 	*claude.MockRunner
-	containerized      bool
-	containerImage     string
-	hostToolsEnabled   bool
-	systemPrompt       string
+	containerized    bool
+	containerImage   string
+	hostToolsEnabled bool
+	systemPrompt     string
 }
 
 func newTrackingRunner(id string) *trackingRunner {
@@ -424,6 +424,22 @@ func TestConfigureRunner_ToolOverride(t *testing.T) {
 	for _, forbidden := range []string{"Edit", "Write", "Bash", "NotebookEdit"} {
 		if slices.Contains(tools, forbidden) {
 			t.Errorf("planning tool override should not include %q", forbidden)
+		}
+	}
+}
+
+func TestPlanningSession_DisallowsMutationTools(t *testing.T) {
+	// Verify that planning sessions set disallowed tools to prevent Claude from
+	// using mutation tools even through meta-tools like Agent.
+	runner := claude.NewMockRunner("plan-session", false, nil)
+
+	// Simulate what startPlanning does
+	runner.SetDisallowedTools(claude.ToolSetPlanningDeny)
+
+	disallowed := runner.GetDisallowedTools()
+	for _, tool := range []string{"Edit", "Write", "Bash", "Agent", "NotebookEdit", "TodoWrite"} {
+		if !slices.Contains(disallowed, tool) {
+			t.Errorf("planning session should disallow %q", tool)
 		}
 	}
 }

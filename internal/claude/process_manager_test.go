@@ -1196,6 +1196,46 @@ func TestBuildCommandArgs_Containerized_NoMCPConfig(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_DisallowedTools(t *testing.T) {
+	config := ProcessConfig{
+		SessionID:       "plan-session",
+		WorkingDir:      "/tmp/worktree",
+		SessionStarted:  false,
+		MCPConfigPath:   "/tmp/mcp.json",
+		AllowedTools:    ComposeTools(ToolSetReadOnly, ToolSetWeb),
+		DisallowedTools: ToolSetPlanningDeny,
+		Containerized:   true,
+		ContainerImage:  "my-image",
+	}
+
+	args := BuildCommandArgs(config)
+
+	// Verify each disallowed tool has a --disallowedTools flag
+	for _, tool := range ToolSetPlanningDeny {
+		found := false
+		for i, arg := range args {
+			if arg == "--disallowedTools" && i+1 < len(args) && args[i+1] == tool {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing --disallowedTools %s", tool)
+		}
+	}
+
+	// Count --disallowedTools flags — should match
+	count := 0
+	for _, arg := range args {
+		if arg == "--disallowedTools" {
+			count++
+		}
+	}
+	if count != len(ToolSetPlanningDeny) {
+		t.Errorf("expected %d --disallowedTools flags, got %d", len(ToolSetPlanningDeny), count)
+	}
+}
+
 func TestBuildCommandArgs_Containerized_ResumedSession(t *testing.T) {
 	config := ProcessConfig{
 		SessionID:      "container-session-uuid",

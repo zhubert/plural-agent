@@ -146,10 +146,14 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 	}
 
 	// Start worker with read-only tools — planning sessions must not modify code.
+	// Disallowed tools are removed from Claude's context entirely so they cannot
+	// be used even through meta-tools like Agent.
 	planningTools := claude.ComposeTools(
 		claude.ToolSetReadOnly,
 		claude.ToolSetWeb,
 	)
+	runner := d.sessionMgr.GetOrCreateRunner(sess)
+	runner.SetDisallowedTools(claude.ToolSetPlanningDeny)
 	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, planningPrompt, planningTools)
 	w.SetPlanningMode(true)
 	maxTurns := params.Int("max_turns", 0)

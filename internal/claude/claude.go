@@ -146,16 +146,17 @@ func GetDisplayContent(blocks []ContentBlock) string {
 // to send a request without blocking, while still limiting how many can queue up.
 // Only one request of each type can be pending at a time.
 type Runner struct {
-	sessionID      string
-	workingDir     string
-	repoPath       string // Main repository path (for containerized worktree support)
-	messages       []Message
-	sessionStarted bool // tracks if session has been created
-	mu             sync.RWMutex
-	allowedTools   []string          // Pre-allowed tools for this session
-	socketServer   *mcp.SocketServer // Socket server for MCP communication (persistent)
-	mcpConfigPath  string            // Path to MCP config file (persistent)
-	serverRunning  bool              // Whether the socket server is running
+	sessionID       string
+	workingDir      string
+	repoPath        string // Main repository path (for containerized worktree support)
+	messages        []Message
+	sessionStarted  bool // tracks if session has been created
+	mu              sync.RWMutex
+	allowedTools    []string          // Pre-allowed tools for this session
+	disallowedTools []string          // Tools removed from Claude's context entirely
+	socketServer    *mcp.SocketServer // Socket server for MCP communication (persistent)
+	mcpConfigPath   string            // Path to MCP config file (persistent)
+	serverRunning   bool              // Whether the socket server is running
 
 	// Session-scoped logger with sessionID pre-attached
 	log *slog.Logger
@@ -273,6 +274,16 @@ func (r *Runner) AddAllowedTool(tool string) {
 		return
 	}
 	r.allowedTools = append(r.allowedTools, tool)
+}
+
+// SetDisallowedTools sets tools to be removed from Claude's context entirely.
+// Unlike allowed tools (which control auto-approval), disallowed tools are
+// completely unavailable — Claude cannot use them even through meta-tools like Agent.
+func (r *Runner) SetDisallowedTools(tools []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disallowedTools = make([]string, len(tools))
+	copy(r.disallowedTools, tools)
 }
 
 // SetForkFromSession sets the parent session ID to fork from.
@@ -413,19 +424,21 @@ func (r *Runner) ensureProcessRunning() error {
 	}
 
 	config := ProcessConfig{
-		SessionID:              r.sessionID,
-		WorkingDir:             r.workingDir,
-		RepoPath:               r.repoPath,
-		SessionStarted:         r.sessionStarted,
-		AllowedTools:           make([]string, len(r.allowedTools)),
-		MCPConfigPath:          r.mcpConfigPath,
-		ForkFromSessionID:      r.forkFromSessionID,
-		Containerized:          r.containerized,
-		ContainerImage:         r.containerImage,
-		ContainerMCPPort:       containerMCPPort,
-		SystemPrompt:           r.systemPrompt,
+		SessionID:         r.sessionID,
+		WorkingDir:        r.workingDir,
+		RepoPath:          r.repoPath,
+		SessionStarted:    r.sessionStarted,
+		AllowedTools:      make([]string, len(r.allowedTools)),
+		DisallowedTools:   make([]string, len(r.disallowedTools)),
+		MCPConfigPath:     r.mcpConfigPath,
+		ForkFromSessionID: r.forkFromSessionID,
+		Containerized:     r.containerized,
+		ContainerImage:    r.containerImage,
+		ContainerMCPPort:  containerMCPPort,
+		SystemPrompt:      r.systemPrompt,
 	}
 	copy(config.AllowedTools, r.allowedTools)
+	copy(config.DisallowedTools, r.disallowedTools)
 
 	r.processManager = NewProcessManager(config, r.createProcessCallbacks(), r.log)
 

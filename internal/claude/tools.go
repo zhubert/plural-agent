@@ -50,6 +50,18 @@ var ToolSetProductivity = []string{
 	"Task",
 }
 
+// ToolSetPlanningDeny contains tools that must be blocked during planning sessions.
+// These are removed from Claude's context entirely via --disallowedTools so they
+// cannot be used even through meta-tools like Agent.
+var ToolSetPlanningDeny = []string{
+	"Edit",
+	"Write",
+	"Bash",
+	"Agent",
+	"NotebookEdit",
+	"TodoWrite",
+}
+
 // ComposeTools merges multiple tool sets into a single deduplicated slice.
 // Order is preserved (first occurrence wins).
 func ComposeTools(sets ...[]string) []string {

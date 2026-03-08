@@ -122,3 +122,20 @@ func TestToolSetReadOnly_IsSubsetOfBase(t *testing.T) {
 		}
 	}
 }
+
+func TestToolSetPlanningDeny_BlocksMutationAndMetaTools(t *testing.T) {
+	expected := []string{"Edit", "Write", "Bash", "Agent", "NotebookEdit", "TodoWrite"}
+	for _, tool := range expected {
+		if !slices.Contains(ToolSetPlanningDeny, tool) {
+			t.Errorf("ToolSetPlanningDeny should contain %q", tool)
+		}
+	}
+}
+
+func TestToolSetPlanningDeny_NoOverlapWithReadOnly(t *testing.T) {
+	for _, tool := range ToolSetPlanningDeny {
+		if slices.Contains(ToolSetReadOnly, tool) {
+			t.Errorf("ToolSetPlanningDeny and ToolSetReadOnly should not overlap on %q", tool)
+		}
+	}
+}

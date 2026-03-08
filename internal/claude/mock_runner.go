@@ -18,12 +18,13 @@ type MockRunner struct {
 	mu sync.RWMutex
 
 	// State
-	sessionID      string
-	sessionStarted bool
-	isStreaming    bool
-	messages       []Message
-	allowedTools   []string
-	mcpServers     []MCPServer
+	sessionID       string
+	sessionStarted  bool
+	isStreaming     bool
+	messages        []Message
+	allowedTools    []string
+	disallowedTools []string
+	mcpServers      []MCPServer
 
 	// Response queue - chunks queued by tests to be returned by Send/SendContent
 	responseQueue []ResponseChunk
@@ -343,6 +344,14 @@ func (m *MockRunner) AddAllowedTool(tool string) {
 	}
 }
 
+// SetDisallowedTools implements RunnerConfig.
+func (m *MockRunner) SetDisallowedTools(tools []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.disallowedTools = make([]string, len(tools))
+	copy(m.disallowedTools, tools)
+}
+
 // SetMCPServers implements RunnerConfig.
 func (m *MockRunner) SetMCPServers(servers []MCPServer) {
 	m.mu.Lock()
@@ -645,6 +654,15 @@ func (m *MockRunner) GetAllowedTools() []string {
 	defer m.mu.RUnlock()
 	tools := make([]string, len(m.allowedTools))
 	copy(tools, m.allowedTools)
+	return tools
+}
+
+// GetDisallowedTools returns a copy of the disallowed tools list.
+func (m *MockRunner) GetDisallowedTools() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	tools := make([]string, len(m.disallowedTools))
+	copy(tools, m.disallowedTools)
 	return tools
 }
 

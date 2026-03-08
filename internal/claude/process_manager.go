@@ -66,6 +66,7 @@ type ProcessConfig struct {
 	RepoPath                string // Main repository path (for containerized worktree support)
 	SessionStarted          bool
 	AllowedTools            []string
+	DisallowedTools         []string
 	MCPConfigPath           string
 	ForkFromSessionID       string        // When set, uses --resume <parentID> --fork-session to inherit parent conversation
 	Containerized           bool          // When true, wraps Claude CLI in a container
@@ -284,6 +285,13 @@ func BuildCommandArgs(config ProcessConfig) []string {
 		for _, tool := range config.AllowedTools {
 			args = append(args, "--allowedTools", tool)
 		}
+	}
+
+	// Remove disallowed tools from Claude's context entirely.
+	// Unlike allowedTools (which control auto-approval), disallowed tools are
+	// completely unavailable — Claude cannot use them even through meta-tools.
+	for _, tool := range config.DisallowedTools {
+		args = append(args, "--disallowedTools", tool)
 	}
 
 	return args

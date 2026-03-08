@@ -12,6 +12,7 @@ import (
 type RunnerConfig interface {
 	SetAllowedTools(tools []string)
 	AddAllowedTool(tool string)
+	SetDisallowedTools(tools []string)
 	SetMCPServers(servers []MCPServer)
 	SetForkFromSession(parentSessionID string)
 	SetContainerized(containerized bool, image string)
