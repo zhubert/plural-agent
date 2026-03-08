@@ -395,6 +395,111 @@
   .work-item.state-active.phase-async_pending {
     animation: pulse-border 2s ease-in-out infinite;
   }
+
+  /* Control buttons */
+  .control-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .ctrl-btn {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .ctrl-btn:active { transform: scale(0.97); }
+  .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ctrl-btn.stop {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: rgba(248, 113, 113, 0.3);
+    color: var(--red);
+  }
+  .ctrl-btn.stop:hover:not(:disabled) {
+    background: rgba(248, 113, 113, 0.2);
+  }
+  .ctrl-btn.retry {
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.3);
+    color: var(--yellow);
+  }
+  .ctrl-btn.retry:hover:not(:disabled) {
+    background: rgba(251, 191, 36, 0.2);
+  }
+  .ctrl-btn.message {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: rgba(34, 211, 238, 0.3);
+    color: var(--cyan);
+  }
+  .ctrl-btn.message:hover:not(:disabled) {
+    background: rgba(34, 211, 238, 0.2);
+  }
+  .ctrl-btn.send {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: rgba(34, 211, 238, 0.3);
+    color: var(--cyan);
+  }
+  .ctrl-btn.send:hover:not(:disabled) {
+    background: rgba(34, 211, 238, 0.2);
+  }
+  .ctrl-btn.cancel {
+    background: rgba(113, 113, 122, 0.1);
+    border-color: rgba(113, 113, 122, 0.2);
+    color: var(--text-dim);
+  }
+  .ctrl-btn.cancel:hover:not(:disabled) {
+    background: rgba(113, 113, 122, 0.2);
+  }
+  .ctrl-flash {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    animation: fade-out 2s forwards;
+  }
+  .ctrl-flash.ok { color: var(--green); }
+  .ctrl-flash.err { color: var(--red); }
+  @keyframes fade-out {
+    0%, 60% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Send-message panel */
+  .message-panel {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  .message-panel textarea {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    resize: vertical;
+    min-height: 60px;
+    outline: none;
+  }
+  .message-panel textarea:focus {
+    border-color: var(--cyan);
+  }
+  .message-panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
 </style>
 </head>
 <body>
@@ -420,8 +525,10 @@
 
   let state = null;
   let expandedItems = new Set();
+  let messagePanelOpen = new Set(); // item IDs with message panel open
   let logCache = {};
   let es = null;
+  let controlEnabled = false; // set after capabilities fetch
 
   function connect() {
     if (es) es.close();
@@ -581,6 +688,8 @@
     content.querySelectorAll('.work-item[data-id]').forEach(el => {
       el.addEventListener('click', (e) => {
         if (e.target.tagName === 'A') return;
+        // Ignore clicks inside the control area (buttons handle their own events)
+        if (e.target.closest('.control-buttons, .message-panel')) return;
         const id = el.dataset.id;
         const sid = el.dataset.session;
         if (expandedItems.has(id)) {
@@ -634,6 +743,7 @@
 
   function renderWorkItem(item) {
     const isExpanded = expandedItems.has(item.id);
+    const msgOpen = messagePanelOpen.has(item.id);
     const label = issueLabel(item);
     const phase = item.phase || 'idle';
     const step = item.current_step || '\u2014';
@@ -654,6 +764,48 @@
 
     if (item.error_message) {
       extraHtml += `<div class="item-error">${escapeHtml(item.error_message)}</div>`;
+    }
+
+    // Control buttons (only shown when dashboard has control access)
+    let ctrlHtml = '';
+    if (controlEnabled) {
+      const id = escapeHtml(item.id);
+      const isActive = item.state === 'active';
+      const isFailed = item.state === 'failed' || item.state === 'completed';
+      const hasSession = !!item.session_id;
+
+      let buttons = '';
+      if (isActive) {
+        buttons += `<button class="ctrl-btn stop" data-ctrl-stop="${id}" onclick="event.stopPropagation();stopItem('${id}')">Stop</button>`;
+      }
+      if (isFailed) {
+        buttons += `<button class="ctrl-btn retry" data-ctrl-retry="${id}" onclick="event.stopPropagation();retryItem('${id}')">Retry</button>`;
+      }
+      if (isActive && hasSession && !msgOpen) {
+        buttons += `<button class="ctrl-btn message" onclick="event.stopPropagation();openMessagePanel('${id}')">Send Message</button>`;
+      }
+
+      // Flash placeholders for result feedback
+      const flashIds = [];
+      if (isActive) flashIds.push('stop');
+      if (isFailed) flashIds.push('retry');
+      if (isActive && hasSession) flashIds.push('message');
+      const flashHtml = flashIds.map(a => `<span class="ctrl-flash" id="flash-${id}-${a}"></span>`).join('');
+
+      if (buttons || msgOpen) {
+        ctrlHtml = `<div class="control-buttons" onclick="event.stopPropagation()">${buttons}${flashHtml}</div>`;
+      }
+
+      if (msgOpen) {
+        ctrlHtml += `
+          <div class="message-panel" onclick="event.stopPropagation()">
+            <textarea id="msg-ta-${id}" placeholder="Message to inject into the running session…" rows="3"></textarea>
+            <div class="message-panel-actions">
+              <button class="ctrl-btn send" data-ctrl-send="${id}" onclick="sendMessage('${id}')">Send</button>
+              <button class="ctrl-btn cancel" onclick="closeMessagePanel('${id}')">Cancel</button>
+            </div>
+          </div>`;
+      }
     }
 
     let logHtml = '';
@@ -698,6 +850,7 @@
           </div>` : ''}
         </div>
         ${extraHtml}
+        ${ctrlHtml}
         ${logHtml}
       </div>
     `;
@@ -743,7 +896,98 @@
     }
   }, 3000);
 
+  // Fetch capabilities to determine whether control buttons are available.
+  async function fetchCapabilities() {
+    try {
+      const resp = await fetch('/api/capabilities');
+      if (resp.ok) {
+        const caps = await resp.json();
+        controlEnabled = !!caps.control;
+      }
+    } catch(e) {
+      controlEnabled = false;
+    }
+  }
+
+  // Control actions
+
+  async function stopItem(itemID) {
+    const btn = document.querySelector(`[data-ctrl-stop="${CSS.escape(itemID)}"]`);
+    if (btn) btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/workitems/${encodeURIComponent(itemID)}/stop`, {method: 'POST'});
+      flashResult(itemID, 'stop', resp.ok, resp.ok ? 'stopped' : await resp.text());
+    } catch(e) {
+      flashResult(itemID, 'stop', false, 'request failed');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function retryItem(itemID) {
+    const btn = document.querySelector(`[data-ctrl-retry="${CSS.escape(itemID)}"]`);
+    if (btn) btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/workitems/${encodeURIComponent(itemID)}/retry`, {method: 'POST'});
+      flashResult(itemID, 'retry', resp.ok, resp.ok ? 'queued' : await resp.text());
+    } catch(e) {
+      flashResult(itemID, 'retry', false, 'request failed');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function openMessagePanel(itemID) {
+    messagePanelOpen.add(itemID);
+    render();
+    const ta = document.getElementById(`msg-ta-${CSS.escape(itemID)}`);
+    if (ta) ta.focus();
+  }
+
+  function closeMessagePanel(itemID) {
+    messagePanelOpen.delete(itemID);
+    render();
+  }
+
+  async function sendMessage(itemID) {
+    const ta = document.getElementById(`msg-ta-${CSS.escape(itemID)}`);
+    if (!ta) return;
+    const msg = ta.value.trim();
+    if (!msg) return;
+    const btn = document.querySelector(`[data-ctrl-send="${CSS.escape(itemID)}"]`);
+    if (btn) btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/workitems/${encodeURIComponent(itemID)}/message`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg}),
+      });
+      if (resp.ok) {
+        messagePanelOpen.delete(itemID);
+        flashResult(itemID, 'message', true, 'sent');
+        render();
+      } else {
+        flashResult(itemID, 'message', false, await resp.text());
+      }
+    } catch(e) {
+      flashResult(itemID, 'message', false, 'request failed');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function flashResult(itemID, action, ok, text) {
+    const el = document.getElementById(`flash-${CSS.escape(itemID)}-${action}`);
+    if (!el) return;
+    el.textContent = ok ? ('✓ ' + text) : ('✗ ' + text.slice(0, 60));
+    el.className = 'ctrl-flash ' + (ok ? 'ok' : 'err');
+    // Remove and re-add to restart animation
+    el.style.animation = 'none';
+    requestAnimationFrame(() => { el.style.animation = ''; });
+  }
+
   // Start
+  fetchCapabilities();
   connect();
 })();
 </script>

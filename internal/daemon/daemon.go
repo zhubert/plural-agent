@@ -9,6 +9,7 @@ import (
 
 	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/erg/internal/claude"
+	"github.com/zhubert/erg/internal/dashboard"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
@@ -62,6 +63,10 @@ type Daemon struct {
 
 	// preseededIssue is an issue to inject on the first poll tick (for erg run).
 	preseededIssue *issues.Issue
+
+	// dashboardAddr, when set, causes the daemon to start an embedded dashboard
+	// server with itself as the SessionController so that control buttons work.
+	dashboardAddr string
 
 	// Docker health tracking
 	dockerDown        bool
@@ -160,6 +165,13 @@ func WithDaemonID(id string) Option {
 	return func(d *Daemon) { d.daemonID = id }
 }
 
+// WithDashboard starts an embedded dashboard server at addr alongside the daemon.
+// The dashboard will have full control access (stop, retry, send-message).
+// When addr is empty the embedded dashboard is disabled.
+func WithDashboard(addr string) Option {
+	return func(d *Daemon) { d.dashboardAddr = addr }
+}
+
 // New creates a new daemon.
 func New(cfg agentconfig.Config, gitSvc *git.GitService, sessSvc *session.SessionService, registry *issues.ProviderRegistry, logger *slog.Logger, opts ...Option) *Daemon {
 	d := &Daemon{
@@ -231,6 +243,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.state.ResetSpend()
 	if err := d.state.Save(); err != nil {
 		d.logger.Warn("failed to save state after resetting spend", "error", err)
+	}
+
+	// Start embedded dashboard server if configured.
+	if d.dashboardAddr != "" {
+		dashSrv := dashboard.New(d.dashboardAddr, dashboard.WithController(d))
+		go func() {
+			if err := dashSrv.Run(ctx); err != nil {
+				d.logger.Warn("embedded dashboard stopped", "addr", d.dashboardAddr, "error", err)
+			}
+		}()
+		d.logger.Info("embedded dashboard started", "addr", d.dashboardAddr)
 	}
 
 	// Load workflow configs for all repos

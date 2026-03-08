@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,24 +23,49 @@ import (
 //go:embed index.html
 var indexHTML embed.FS
 
+// SessionController allows the dashboard to issue commands to running sessions.
+// No authentication is applied — the dashboard is a local-only tool.
+type SessionController interface {
+	// StopSession cancels the running worker for the given work item ID.
+	StopSession(itemID string) error
+	// RetryWorkItem resets a failed/completed work item back to queued state.
+	RetryWorkItem(itemID string) error
+	// SendMessage injects a message into an active session's next turn.
+	SendMessage(itemID, message string) error
+}
+
+// ServerOption configures a Server.
+type ServerOption func(*Server)
+
+// WithController attaches a SessionController, enabling the control endpoints.
+// When no controller is set the POST endpoints return 503.
+func WithController(c SessionController) ServerOption {
+	return func(s *Server) { s.controller = c }
+}
+
 // Server is the dashboard HTTP server with SSE support.
 type Server struct {
-	addr     string
-	log      *slog.Logger
-	pollRate time.Duration
+	addr       string
+	log        *slog.Logger
+	pollRate   time.Duration
+	controller SessionController // nil = read-only mode
 
 	mu      sync.RWMutex
 	clients map[chan []byte]struct{}
 }
 
 // New creates a new dashboard server.
-func New(addr string) *Server {
-	return &Server{
+func New(addr string, opts ...ServerOption) *Server {
+	s := &Server{
 		addr:     addr,
 		log:      logger.Get(),
 		pollRate: 1500 * time.Millisecond,
 		clients:  make(map[chan []byte]struct{}),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Run starts the HTTP server and background poller. Blocks until ctx is cancelled.
@@ -49,6 +75,10 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/state", s.handleState)
 	mux.HandleFunc("GET /api/events", s.handleSSE)
 	mux.HandleFunc("GET /api/logs/{sessionID}", s.handleLogs)
+	mux.HandleFunc("GET /api/capabilities", s.handleCapabilities)
+	mux.HandleFunc("POST /api/workitems/{itemID}/stop", s.handleStop)
+	mux.HandleFunc("POST /api/workitems/{itemID}/retry", s.handleRetry)
+	mux.HandleFunc("POST /api/workitems/{itemID}/message", s.handleMessage)
 
 	srv := &http.Server{
 		Addr:    s.addr,
@@ -160,6 +190,66 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(lines)
+}
+
+func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"control": s.controller != nil})
+}
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	if s.controller == nil {
+		http.Error(w, "control not available", http.StatusServiceUnavailable)
+		return
+	}
+	itemID := r.PathValue("itemID")
+	if err := s.controller.StopSession(itemID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
+	if s.controller == nil {
+		http.Error(w, "control not available", http.StatusServiceUnavailable)
+		return
+	}
+	itemID := r.PathValue("itemID")
+	if err := s.controller.RetryWorkItem(itemID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// messageRequest is the body for the send-message endpoint.
+type messageRequest struct {
+	Message string `json:"message"`
+}
+
+func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
+	if s.controller == nil {
+		http.Error(w, "control not available", http.StatusServiceUnavailable)
+		return
+	}
+	itemID := r.PathValue("itemID")
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	var req messageRequest
+	if err := json.Unmarshal(body, &req); err != nil || req.Message == "" {
+		http.Error(w, "invalid request: message field required", http.StatusBadRequest)
+		return
+	}
+	if err := s.controller.SendMessage(itemID, req.Message); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) addClient(ch chan []byte) {

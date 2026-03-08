@@ -9,11 +9,12 @@ import (
 )
 
 var (
-	startRepo         string
-	startForeground   bool
-	startOnce         bool
-	startWorkflowFile string
-	startConfigFile   string
+	startRepo          string
+	startForeground    bool
+	startOnce          bool
+	startWorkflowFile  string
+	startConfigFile    string
+	startDashboardAddr string
 )
 
 var startCmd = &cobra.Command{
@@ -47,6 +48,7 @@ func init() {
 	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
 	startCmd.Flags().StringVar(&startWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
 	startCmd.Flags().StringVar(&startConfigFile, "config", "", "Path to config file for multi-repo mode")
+	startCmd.Flags().StringVar(&startDashboardAddr, "dashboard-addr", "", "Start an embedded dashboard server at this address (e.g. localhost:21122)")
 	rootCmd.AddCommand(startCmd)
 }
 
@@ -71,6 +73,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	agentOnce = startOnce
 	agentWorkflowFile = startWorkflowFile
 	agentConfigFile = startConfigFile
+	agentDashboardAddr = startDashboardAddr
 
 	// --once implies foreground
 	if agentOnce {

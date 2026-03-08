@@ -1,14 +1,39 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+// mockController is a SessionController implementation for tests.
+type mockController struct {
+	stopErr   error
+	retryErr  error
+	msgErr    error
+	stopCalls []string
+	retryCalls []string
+	msgCalls  []struct{ itemID, msg string }
+}
+
+func (m *mockController) StopSession(itemID string) error {
+	m.stopCalls = append(m.stopCalls, itemID)
+	return m.stopErr
+}
+func (m *mockController) RetryWorkItem(itemID string) error {
+	m.retryCalls = append(m.retryCalls, itemID)
+	return m.retryErr
+}
+func (m *mockController) SendMessage(itemID, message string) error {
+	m.msgCalls = append(m.msgCalls, struct{ itemID, msg string }{itemID, message})
+	return m.msgErr
+}
 
 func TestHandleIndex(t *testing.T) {
 	srv := New("localhost:0")
@@ -190,4 +215,181 @@ func TestBroadcast_SlowClient(t *testing.T) {
 	}
 
 	srv.removeClient(ch)
+}
+
+// ---- SessionController / control endpoints ----
+
+func TestHandleCapabilities_NoController(t *testing.T) {
+	srv := New("localhost:0")
+	req := httptest.NewRequest("GET", "/api/capabilities", nil)
+	w := httptest.NewRecorder()
+	srv.handleCapabilities(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var caps map[string]bool
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		t.Fatalf("failed to decode capabilities: %v", err)
+	}
+	if caps["control"] {
+		t.Error("expected control=false with no controller")
+	}
+}
+
+func TestHandleCapabilities_WithController(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	req := httptest.NewRequest("GET", "/api/capabilities", nil)
+	w := httptest.NewRecorder()
+	srv.handleCapabilities(w, req)
+
+	var caps map[string]bool
+	json.NewDecoder(w.Result().Body).Decode(&caps)
+	if !caps["control"] {
+		t.Error("expected control=true with controller set")
+	}
+}
+
+func TestHandleStop_NoController(t *testing.T) {
+	srv := New("localhost:0")
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/stop", nil)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleStop(w, req)
+
+	if w.Result().StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleStop_Success(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/stop", nil)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleStop(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+	if len(ctrl.stopCalls) != 1 || ctrl.stopCalls[0] != "item-1" {
+		t.Errorf("expected StopSession(item-1), got %v", ctrl.stopCalls)
+	}
+}
+
+func TestHandleStop_ControllerError(t *testing.T) {
+	ctrl := &mockController{stopErr: fmt.Errorf("worker not found")}
+	srv := New("localhost:0", WithController(ctrl))
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/stop", nil)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleStop(w, req)
+
+	if w.Result().StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleRetry_NoController(t *testing.T) {
+	srv := New("localhost:0")
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/retry", nil)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleRetry(w, req)
+
+	if w.Result().StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleRetry_Success(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	req := httptest.NewRequest("POST", "/api/workitems/item-2/retry", nil)
+	req.SetPathValue("itemID", "item-2")
+	w := httptest.NewRecorder()
+	srv.handleRetry(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+	if len(ctrl.retryCalls) != 1 || ctrl.retryCalls[0] != "item-2" {
+		t.Errorf("expected RetryWorkItem(item-2), got %v", ctrl.retryCalls)
+	}
+}
+
+func TestHandleMessage_NoController(t *testing.T) {
+	srv := New("localhost:0")
+	body := bytes.NewBufferString(`{"message":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/message", body)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	if w.Result().StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleMessage_Success(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	body := bytes.NewBufferString(`{"message":"do the thing"}`)
+	req := httptest.NewRequest("POST", "/api/workitems/item-3/message", body)
+	req.SetPathValue("itemID", "item-3")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+	if len(ctrl.msgCalls) != 1 || ctrl.msgCalls[0].itemID != "item-3" || ctrl.msgCalls[0].msg != "do the thing" {
+		t.Errorf("unexpected msgCalls: %v", ctrl.msgCalls)
+	}
+}
+
+func TestHandleMessage_EmptyMessage(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	body := bytes.NewBufferString(`{"message":""}`)
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/message", body)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty message, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleMessage_InvalidJSON(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	body := bytes.NewBufferString(`not json`)
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/message", body)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid JSON, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestNew_WithController(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	if srv.controller == nil {
+		t.Error("expected controller to be set")
+	}
+}
+
+func TestNew_NoController(t *testing.T) {
+	srv := New("localhost:0")
+	if srv.controller != nil {
+		t.Error("expected controller to be nil by default")
+	}
 }

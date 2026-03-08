@@ -219,7 +219,7 @@ func TestRuntimeStartHint_ColimaNotInstalled(t *testing.T) {
 // ---- buildDaemonArgs ----
 
 func TestBuildDaemonArgs_Basic(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", false, "", "")
+	args := buildDaemonArgs("owner/repo", false, "", "", "")
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
@@ -232,7 +232,7 @@ func TestBuildDaemonArgs_Basic(t *testing.T) {
 }
 
 func TestBuildDaemonArgs_WithOnce(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", true, "", "")
+	args := buildDaemonArgs("owner/repo", true, "", "", "")
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
 	}
@@ -244,14 +244,14 @@ func TestBuildDaemonArgs_WithOnce(t *testing.T) {
 
 func TestBuildDaemonArgs_HiddenFlagAppended(t *testing.T) {
 	// Verify --_daemon is always the first arg
-	args := buildDaemonArgs("/path/to/repo", false, "", "")
+	args := buildDaemonArgs("/path/to/repo", false, "", "", "")
 	if args[0] != "--_daemon" {
 		t.Errorf("expected '--_daemon' as first arg, got %q", args[0])
 	}
 }
 
 func TestBuildDaemonArgs_WithWorkflowFile(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", false, "/custom/workflow.yaml", "")
+	args := buildDaemonArgs("owner/repo", false, "/custom/workflow.yaml", "", "")
 	if !slices.Contains(args, "--workflow") {
 		t.Errorf("expected '--workflow' in args: %v", args)
 	}
@@ -266,14 +266,14 @@ func TestBuildDaemonArgs_WithWorkflowFile(t *testing.T) {
 
 func TestBuildDaemonArgs_NoWorkflowFile(t *testing.T) {
 	// When workflowFile is empty, --workflow should not appear in args.
-	args := buildDaemonArgs("owner/repo", false, "", "")
+	args := buildDaemonArgs("owner/repo", false, "", "", "")
 	if slices.Contains(args, "--workflow") {
 		t.Errorf("expected no '--workflow' in args when empty: %v", args)
 	}
 }
 
 func TestBuildDaemonArgs_WithConfigFile(t *testing.T) {
-	args := buildDaemonArgs("", false, "", "/path/to/config.yaml")
+	args := buildDaemonArgs("", false, "", "/path/to/config.yaml", "")
 	if slices.Contains(args, "--repo") {
 		t.Errorf("expected no '--repo' when config file is set: %v", args)
 	}
@@ -286,6 +286,27 @@ func TestBuildDaemonArgs_WithConfigFile(t *testing.T) {
 	}
 	if args[idx+1] != "/path/to/config.yaml" {
 		t.Errorf("expected '/path/to/config.yaml', got %q", args[idx+1])
+	}
+}
+
+func TestBuildDaemonArgs_WithDashboardAddr(t *testing.T) {
+	args := buildDaemonArgs("owner/repo", false, "", "", "localhost:21122")
+	if !slices.Contains(args, "--dashboard-addr") {
+		t.Errorf("expected '--dashboard-addr' in args: %v", args)
+	}
+	idx := slices.Index(args, "--dashboard-addr")
+	if idx < 0 || idx+1 >= len(args) {
+		t.Fatalf("--dashboard-addr flag has no value in args: %v", args)
+	}
+	if args[idx+1] != "localhost:21122" {
+		t.Errorf("expected 'localhost:21122', got %q", args[idx+1])
+	}
+}
+
+func TestBuildDaemonArgs_NoDashboardAddr(t *testing.T) {
+	args := buildDaemonArgs("owner/repo", false, "", "", "")
+	if slices.Contains(args, "--dashboard-addr") {
+		t.Errorf("expected no '--dashboard-addr' in args when empty: %v", args)
 	}
 }
 

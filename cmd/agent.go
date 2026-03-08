@@ -27,12 +27,13 @@ import (
 )
 
 var (
-	agentOnce         bool
-	agentRepo         string
-	agentForeground   bool
-	agentDaemonMode   bool   // hidden --_daemon flag for re-exec child
-	agentWorkflowFile string // optional explicit workflow config file path
-	agentConfigFile   string // optional config file for multi-repo mode
+	agentOnce          bool
+	agentRepo          string
+	agentForeground    bool
+	agentDaemonMode    bool   // hidden --_daemon flag for re-exec child
+	agentWorkflowFile  string // optional explicit workflow config file path
+	agentConfigFile    string // optional config file for multi-repo mode
+	agentDashboardAddr string // optional embedded dashboard address
 )
 
 // osExecutable is the function used to resolve the current binary path.
@@ -46,10 +47,12 @@ func init() {
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
 	rootCmd.Flags().StringVar(&agentWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
 	rootCmd.Flags().StringVar(&agentConfigFile, "config", "", "Path to config file for multi-repo mode")
-	rootCmd.Flags().MarkHidden("_daemon") //nolint:errcheck
-	rootCmd.Flags().MarkHidden("once")    //nolint:errcheck
-	rootCmd.Flags().MarkHidden("repo")    //nolint:errcheck
-	rootCmd.Flags().MarkHidden("config")  //nolint:errcheck
+	rootCmd.Flags().StringVar(&agentDashboardAddr, "dashboard-addr", "", "Start an embedded dashboard server at this address (e.g. localhost:21122)")
+	rootCmd.Flags().MarkHidden("_daemon")       //nolint:errcheck
+	rootCmd.Flags().MarkHidden("once")          //nolint:errcheck
+	rootCmd.Flags().MarkHidden("repo")          //nolint:errcheck
+	rootCmd.Flags().MarkHidden("config")        //nolint:errcheck
+	rootCmd.Flags().MarkHidden("dashboard-addr") //nolint:errcheck
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -203,7 +206,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Build args for re-exec
-	childArgs := buildDaemonArgs(agentRepo, agentOnce, agentWorkflowFile, agentConfigFile)
+	childArgs := buildDaemonArgs(agentRepo, agentOnce, agentWorkflowFile, agentConfigFile, agentDashboardAddr)
 
 	// Re-exec self with --_daemon
 	self, err := osExecutable()
@@ -259,7 +262,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 }
 
 // buildDaemonArgs constructs the args slice for the re-exec'd child process.
-func buildDaemonArgs(repo string, once bool, workflowFile, configFile string) []string {
+func buildDaemonArgs(repo string, once bool, workflowFile, configFile, dashboardAddr string) []string {
 	args := []string{"--_daemon"}
 	if configFile != "" {
 		args = append(args, "--config", configFile)
@@ -271,6 +274,9 @@ func buildDaemonArgs(repo string, once bool, workflowFile, configFile string) []
 	}
 	if workflowFile != "" {
 		args = append(args, "--workflow", workflowFile)
+	}
+	if dashboardAddr != "" {
+		args = append(args, "--dashboard-addr", dashboardAddr)
 	}
 	return args
 }
@@ -596,6 +602,9 @@ func runMultiRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqui
 	if len(preacquiredLock) > 0 && preacquiredLock[0] != nil {
 		opts = append(opts, daemon.WithPreacquiredLock(preacquiredLock[0]))
 	}
+	if agentDashboardAddr != "" {
+		opts = append(opts, daemon.WithDashboard(agentDashboardAddr))
+	}
 
 	sessSvc := session.NewSessionService()
 	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, daemonLogger, opts...)
@@ -686,6 +695,9 @@ func runSingleRepoDaemon(ctx context.Context, daemonLogger *slog.Logger, preacqu
 	}
 	if agentWorkflowFile != "" {
 		opts = append(opts, daemon.WithWorkflowFile(agentWorkflowFile))
+	}
+	if agentDashboardAddr != "" {
+		opts = append(opts, daemon.WithDashboard(agentDashboardAddr))
 	}
 
 	d := daemon.New(cfg, gitSvc, sessSvc, issueRegistry, daemonLogger, opts...)
