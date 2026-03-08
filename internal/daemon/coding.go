@@ -152,6 +152,10 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 		claude.ToolSetReadOnly,
 		claude.ToolSetWeb,
 	)
+	// Set disallowed tools before createWorkerWithPrompt, which calls
+	// GetOrCreateRunner again (returning the same cached instance) and
+	// configures allowed tools. Disallowed tools are a separate concern
+	// not handled by configureRunner.
 	runner := d.sessionMgr.GetOrCreateRunner(sess)
 	runner.SetDisallowedTools(claude.ToolSetPlanningDeny)
 	w := d.createWorkerWithPrompt(ctx, item, sess, initialMsg, planningPrompt, planningTools)

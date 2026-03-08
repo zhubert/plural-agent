@@ -8228,23 +8228,22 @@ func TestPlanningAction_Execute_NoRepo(t *testing.T) {
 	}
 }
 
-func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
+// setupPlanningTest creates a daemon configured for planning tests with
+// standard git mock responses. Returns the daemon and work item.
+func setupPlanningTest(t *testing.T) (*Daemon, *daemonstate.WorkItem) {
+	t.Helper()
 	cfg := testConfig()
 	cfg.Repos = []string{"/test/repo"}
 
 	mockExec := exec.NewMockExecutor(nil)
-	// FetchOrigin: remote get-url + fetch
 	mockExec.AddPrefixMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
 		Stdout: []byte("https://github.com/owner/repo.git\n"),
 	})
 	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
-	// GetDefaultBranch (symbolic-ref)
 	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
 		Stdout: []byte("refs/remotes/origin/main\n"),
 	})
-	// Check if origin/main exists
 	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
-	// worktree add
 	mockExec.AddPrefixMatch("git", []string{"worktree", "add"}, exec.MockResponse{})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -8256,14 +8255,18 @@ func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
 
 	item := &daemonstate.WorkItem{
 		ID:       "work-1",
-		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Implement feature"},
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Plan feature"},
 		StepData: map[string]any{},
 	}
 	d.state.AddWorkItem(item)
 
-	ctx := t.Context()
+	return d, item
+}
 
-	err := d.startPlanning(ctx, *item)
+func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
+	d, item := setupPlanningTest(t)
+
+	err := d.startPlanning(t.Context(), *item)
 	if err != nil {
 		t.Fatalf("startPlanning failed: %v", err)
 	}
@@ -8281,7 +8284,7 @@ func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
 	}
 
 	// Verify a session was recorded in config
-	sessions := cfg.GetSessions()
+	sessions := d.config.GetSessions()
 	if len(sessions) == 0 {
 		t.Fatal("expected a session to be recorded in config")
 	}
@@ -8308,30 +8311,10 @@ func TestStartPlanning_CreatesWorktreeSession(t *testing.T) {
 	if sess.ID != updatedItem.SessionID {
 		t.Errorf("config session ID %q does not match item.SessionID %q", sess.ID, updatedItem.SessionID)
 	}
-
 }
 
 func TestStartPlanning_DisallowsMutationTools(t *testing.T) {
-	cfg := testConfig()
-	cfg.Repos = []string{"/test/repo"}
-
-	mockExec := exec.NewMockExecutor(nil)
-	mockExec.AddPrefixMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
-		Stdout: []byte("https://github.com/owner/repo.git\n"),
-	})
-	mockExec.AddPrefixMatch("git", []string{"fetch", "origin"}, exec.MockResponse{})
-	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
-		Stdout: []byte("refs/remotes/origin/main\n"),
-	})
-	mockExec.AddPrefixMatch("git", []string{"rev-parse", "--verify", "origin/main"}, exec.MockResponse{})
-	mockExec.AddPrefixMatch("git", []string{"worktree", "add"}, exec.MockResponse{})
-
-	gitSvc := git.NewGitServiceWithExecutor(mockExec)
-	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
-	d := testDaemonWithExec(cfg, mockExec)
-	d.gitService = gitSvc
-	d.sessionService = sessSvc
-	d.repoFilter = "/test/repo"
+	d, item := setupPlanningTest(t)
 
 	// Inject a mock runner factory so we can inspect configuration
 	var capturedRunner *claude.MockRunner
@@ -8339,13 +8322,6 @@ func TestStartPlanning_DisallowsMutationTools(t *testing.T) {
 		capturedRunner = claude.NewMockRunner(sessionID, sessionStarted, initialMessages)
 		return capturedRunner
 	})
-
-	item := &daemonstate.WorkItem{
-		ID:       "work-1",
-		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Plan feature"},
-		StepData: map[string]any{},
-	}
-	d.state.AddWorkItem(item)
 
 	err := d.startPlanning(t.Context(), *item)
 	if err != nil {
