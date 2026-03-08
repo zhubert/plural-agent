@@ -528,9 +528,18 @@
   let messagePanelOpen = new Set(); // item IDs with message panel open
   let logCache = {};
   let hoveredItemId = null;
-  let logLineCount = {}; // sessionID -> number of lines currently rendered in the log viewer
   let es = null;
   let controlEnabled = false; // set after capabilities fetch
+
+  const SCROLL_THRESHOLD = 50; // px from bottom to consider "at bottom"
+
+  function isAtBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
+  }
+
+  function logPlaceholder(message) {
+    return `<div class="log-viewer"><div class="log-loading">${escapeHtml(message)}</div></div>`;
+  }
 
   function connect() {
     if (es) es.close();
@@ -687,10 +696,8 @@
     content.querySelectorAll('.log-container[data-id]').forEach(container => {
       const lv = container.querySelector('.log-viewer');
       if (!lv) return;
-      const threshold = 50;
-      const wasAtBottom = lv.scrollHeight - lv.scrollTop - lv.clientHeight <= threshold;
       container.removeChild(lv);
-      savedLogViewers.set(container.dataset.id, { element: lv, wasAtBottom });
+      savedLogViewers.set(container.dataset.id, { element: lv, wasAtBottom: isAtBottom(lv) });
     });
 
     let html = '';
@@ -711,11 +718,11 @@
         // Newly expanded — populate from cache if available
         const sid = container.dataset.session;
         if (sid && logCache[sid]) {
-          updateLogViewer(container, logCache[sid]);
+          updateLogViewer(container, 0, logCache[sid]);
         } else if (sid) {
-          container.innerHTML = '<div class="log-viewer"><div class="log-loading">Loading logs...</div></div>';
+          container.innerHTML = logPlaceholder('Loading logs...');
         } else {
-          container.innerHTML = '<div class="log-viewer"><div class="log-loading">No session yet</div></div>';
+          container.innerHTML = logPlaceholder('No session yet');
         }
       }
     });
@@ -747,7 +754,7 @@
         const sid = el.dataset.session;
         if (expandedItems.has(id)) {
           expandedItems.delete(id);
-          if (sid) delete logLineCount[sid];
+          if (sid) delete logCache[sid];
         } else {
           expandedItems.add(id);
           if (sid) loadLogs(sid, id);
@@ -933,21 +940,19 @@
 
   // Update a log viewer in-place, appending only new lines.
   // Creates the log-viewer element inside the container if it doesn't exist yet.
-  function updateLogViewer(container, lines) {
-    const sessionID = container.dataset.session;
+  // Derives "previously rendered count" from logCache to avoid redundant state.
+  function updateLogViewer(container, prevCacheLen, lines) {
     let lv = container.querySelector('.log-viewer');
 
     if (!lines || lines.length === 0) {
       if (!lv) {
-        container.innerHTML = '<div class="log-viewer"><div class="log-loading">No output yet</div></div>';
+        container.innerHTML = logPlaceholder('No output yet');
       }
       return;
     }
 
-    const prevCount = logLineCount[sessionID] || 0;
-
-    if (!lv) {
-      // First render — create log-viewer with all lines
+    // If no existing viewer, or line count decreased (log rotation), do a full render
+    if (!lv || lines.length < prevCacheLen) {
       let html = '<div class="log-viewer">';
       for (const line of lines) {
         html += renderLogLine(line);
@@ -955,28 +960,21 @@
       html += '</div>';
       container.innerHTML = html;
       lv = container.querySelector('.log-viewer');
-      logLineCount[sessionID] = lines.length;
-      // Pin to bottom on first render
       lv.scrollTop = lv.scrollHeight;
       return;
     }
 
-    if (lines.length <= prevCount) return; // no new lines
+    if (lines.length <= prevCacheLen) return; // no new lines
 
-    // Check if user has scrolled up before appending
-    const threshold = 50;
-    const wasAtBottom = lv.scrollHeight - lv.scrollTop - lv.clientHeight <= threshold;
+    const wasAtBottom = isAtBottom(lv);
 
     // Append only new lines
-    const newLines = lines.slice(prevCount);
     let fragment = '';
-    for (const line of newLines) {
+    for (const line of lines.slice(prevCacheLen)) {
       fragment += renderLogLine(line);
     }
     lv.insertAdjacentHTML('beforeend', fragment);
-    logLineCount[sessionID] = lines.length;
 
-    // Only auto-scroll if user was already at the bottom
     if (wasAtBottom) {
       lv.scrollTop = lv.scrollHeight;
     }
@@ -987,11 +985,12 @@
       const resp = await fetch(`/api/logs/${encodeURIComponent(sessionID)}?tail=200`);
       if (resp.ok) {
         const lines = await resp.json();
+        const prevLen = logCache[sessionID]?.length || 0;
         logCache[sessionID] = lines;
         // Update the log viewer in-place instead of re-rendering everything
         const container = document.querySelector(`.log-container[data-id="${CSS.escape(itemID)}"]`);
         if (container) {
-          updateLogViewer(container, lines);
+          updateLogViewer(container, prevLen, lines);
         }
       }
     } catch(e) {
