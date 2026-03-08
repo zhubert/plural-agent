@@ -44,7 +44,7 @@ tail -f ~/.erg/logs/stream-*.log    # Raw Claude stream messages (per-session)
 
 ```
 main.go              Entry point, calls cmd.Execute()
-cmd/                  CLI commands (Cobra): configure, start, stop, status, clean, mcp-server
+cmd/                  CLI commands (Cobra): configure, start, stop, status, clean, run, stats, dashboard, mcp-server
 internal/
   paths/              Path resolution, XDG support (leaf)
   exec/               Command execution + MockExecutor (leaf)
@@ -66,6 +66,8 @@ internal/
   worker/             SessionWorker — manages a single session's lifecycle
   workflow/           Workflow engine, config, validation, and visualization
   daemon/             Persistent orchestrator: polling, actions, events, recovery
+  dashboard/          Live web dashboard server with SSE support
+  sanitize/           Prompt injection defense: strips hidden/invisible content, wraps untrusted data
 ```
 
 Import hierarchy (no cycles):
