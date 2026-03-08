@@ -210,12 +210,22 @@
       html += renderDaemon(state.daemons[d]);
     }
     el.innerHTML = html;
-    // Attach click handlers
+    // Attach click and keyboard handlers with accessibility attributes
     el.querySelectorAll('.sim-item[data-id]').forEach(function(card) {
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-expanded', expandedId === card.dataset.id ? 'true' : 'false');
       card.addEventListener('click', function(e) {
-        if (e.target.tagName === 'A') return;
+        if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
         expandedId = (expandedId === card.dataset.id) ? null : card.dataset.id;
         render();
+      });
+      card.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          expandedId = (expandedId === card.dataset.id) ? null : card.dataset.id;
+          render();
+        }
       });
     });
     // Auto-scroll log viewers to bottom
@@ -258,7 +268,7 @@
     if (item.cost > 0) html += '<span><span class="ml">cost</span> <span class="mv">' + formatCost(item.cost) + '</span></span>';
     if (item.feedback > 0) html += '<span><span class="ml">feedback</span> <span class="mv">' + item.feedback + ' rounds</span></span>';
     html += '</div>';
-    if (item.pr) html += '<div class="sim-item-pr"><a href="javascript:void(0)">PR ' + esc(item.pr) + '</a></div>';
+    if (item.pr) html += '<div class="sim-item-pr"><button type="button" class="sim-item-pr-link">PR ' + esc(item.pr) + '</button></div>';
     if (item.error) html += '<div class="sim-item-error">' + esc(item.error) + '</div>';
     if (isExp && item.logs && item.logs.length > 0) {
       html += '<div class="sim-logs">';
