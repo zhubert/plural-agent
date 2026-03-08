@@ -134,8 +134,9 @@ type streamLogMsg struct {
 
 // LogLine represents a single parsed log line for display.
 type LogLine struct {
-	Type string `json:"type"` // "text" or "tool"
-	Text string `json:"text"`
+	Type string `json:"type"`          // "text" or "tool"
+	Text string `json:"text"`          // tool arg/description, or text body
+	Name string `json:"name,omitempty"` // tool name (tool lines only)
 }
 
 // ReadSessionLog reads and parses the stream log for a session.
@@ -179,11 +180,7 @@ func ReadSessionLog(sessionID string, tailN int) ([]LogLine, error) {
 				}
 			case "tool_use":
 				desc := toolDesc(c.Name, c.Input)
-				if desc != "" {
-					lines = append(lines, LogLine{Type: "tool", Text: fmt.Sprintf("%s: %s", c.Name, desc)})
-				} else {
-					lines = append(lines, LogLine{Type: "tool", Text: c.Name})
-				}
+				lines = append(lines, LogLine{Type: "tool", Name: c.Name, Text: desc})
 			}
 		}
 	}

@@ -147,8 +147,39 @@ func TestReadSessionLog_WithFile(t *testing.T) {
 	if lines[1].Type != "text" || lines[1].Text != "Second line" {
 		t.Errorf("line 1: %+v", lines[1])
 	}
-	if lines[2].Type != "tool" || lines[2].Text != "Read: bar.go" {
+	if lines[2].Type != "tool" || lines[2].Name != "Read" || lines[2].Text != "bar.go" {
 		t.Errorf("line 2: %+v", lines[2])
+	}
+}
+
+func TestReadSessionLog_UnknownToolEmptyDesc(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	logDir := filepath.Join(tmpDir, ".erg", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := "unknown-tool-test"
+	// UnknownTool has no recognised field, so toolDesc returns ""
+	logContent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"UnknownTool","input":{"something":"value"}}]}}
+`
+	logPath := filepath.Join(logDir, "stream-"+sessionID+".log")
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, err := ReadSessionLog(sessionID, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %+v", len(lines), lines)
+	}
+	if lines[0].Type != "tool" || lines[0].Name != "UnknownTool" || lines[0].Text != "" {
+		t.Errorf("expected tool line with Name='UnknownTool' and empty Text, got %+v", lines[0])
 	}
 }
 
