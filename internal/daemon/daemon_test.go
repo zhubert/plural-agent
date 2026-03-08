@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -3335,14 +3336,15 @@ func TestUpsertIssueComment_CreatesNewWhenNoExisting(t *testing.T) {
 	}
 	cfg.AddSession(*sess)
 
-	err := d.UpsertIssueComment(context.Background(), "sess-upsert-new", "New plan\n<!-- erg:plan -->", "<!-- erg:plan -->")
+	body := "New plan\n" + worker.PlanMarker
+	err := d.UpsertIssueComment(context.Background(), "sess-upsert-new", body, worker.PlanMarker)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(provider.comments) != 1 {
 		t.Fatalf("expected 1 Comment call, got %d", len(provider.comments))
 	}
-	if provider.comments[0].body != "New plan\n<!-- erg:plan -->" {
+	if provider.comments[0].body != body {
 		t.Errorf("unexpected comment body: %q", provider.comments[0].body)
 	}
 	if len(provider.updates) != 0 {
@@ -3355,7 +3357,7 @@ func TestUpsertIssueComment_UpdatesExistingComment(t *testing.T) {
 	provider := &mockIdempotentCommentProvider{
 		src: issues.SourceLinear,
 		existingComments: []issues.IssueComment{
-			{ID: "comment-1", Body: "Old plan\n<!-- erg:plan -->"},
+			{ID: "comment-1", Body: "Old plan\n" + worker.PlanMarker},
 		},
 	}
 	d := testDaemon(cfg)
@@ -3369,7 +3371,7 @@ func TestUpsertIssueComment_UpdatesExistingComment(t *testing.T) {
 	}
 	cfg.AddSession(*sess)
 
-	err := d.UpsertIssueComment(context.Background(), "sess-upsert-update", "Revised plan\n<!-- erg:plan -->", "<!-- erg:plan -->")
+	err := d.UpsertIssueComment(context.Background(), "sess-upsert-update", "Revised plan\n"+worker.PlanMarker, worker.PlanMarker)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3379,8 +3381,46 @@ func TestUpsertIssueComment_UpdatesExistingComment(t *testing.T) {
 	if provider.updates[0].commentID != "comment-1" {
 		t.Errorf("expected commentID 'comment-1', got %q", provider.updates[0].commentID)
 	}
-	if provider.updates[0].body != "Revised plan\n<!-- erg:plan -->" {
+	if provider.updates[0].body != "Revised plan\n"+worker.PlanMarker {
 		t.Errorf("unexpected updated body: %q", provider.updates[0].body)
+	}
+	if len(provider.comments) != 0 {
+		t.Errorf("expected 0 Comment calls when updating, got %d", len(provider.comments))
+	}
+}
+
+func TestUpsertIssueComment_UpdatesMostRecentOfMultiple(t *testing.T) {
+	// When multiple comments have the plan marker (from previous behavior),
+	// the most recent one should be updated.
+	cfg := testConfig()
+	provider := &mockIdempotentCommentProvider{
+		src: issues.SourceLinear,
+		existingComments: []issues.IssueComment{
+			{ID: "comment-old", Body: "First plan\n" + worker.PlanMarker},
+			{ID: "comment-middle", Body: "Some other comment"},
+			{ID: "comment-latest", Body: "Latest plan\n" + worker.PlanMarker},
+		},
+	}
+	d := testDaemon(cfg)
+	d.issueRegistry = issues.NewProviderRegistry(provider)
+
+	sess := &config.Session{
+		ID:       "sess-upsert-multi",
+		RepoPath: "/test/repo",
+		Branch:   "feat-1",
+		IssueRef: &config.IssueRef{Source: "linear", ID: "ENG-42", Title: "Test"},
+	}
+	cfg.AddSession(*sess)
+
+	err := d.UpsertIssueComment(context.Background(), "sess-upsert-multi", "Revised plan\n"+worker.PlanMarker, worker.PlanMarker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(provider.updates) != 1 {
+		t.Fatalf("expected 1 UpdateComment call, got %d", len(provider.updates))
+	}
+	if provider.updates[0].commentID != "comment-latest" {
+		t.Errorf("expected most recent comment 'comment-latest' to be updated, got %q", provider.updates[0].commentID)
 	}
 	if len(provider.comments) != 0 {
 		t.Errorf("expected 0 Comment calls when updating, got %d", len(provider.comments))
@@ -3398,8 +3438,13 @@ func TestUpsertIssueComment_NoSession(t *testing.T) {
 }
 
 func TestUpsertIssueComment_GitHubFallbackCreatesNew(t *testing.T) {
-	// When no provider is registered for GitHub, falls back to GitService.
+	// When no provider is registered for GitHub and no existing comments,
+	// falls back to creating a new comment via GitService.
 	mockExec := exec.NewMockExecutor(nil)
+	// Return empty array for ListIssueComments.
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "gh" && len(args) >= 2 && args[0] == "api" && strings.Contains(strings.Join(args, " "), "comments")
+	}, exec.MockResponse{Stdout: []byte("[]")})
 	cfg := testConfig()
 	d := testDaemonWithExec(cfg, mockExec)
 
@@ -3411,8 +3456,54 @@ func TestUpsertIssueComment_GitHubFallbackCreatesNew(t *testing.T) {
 	}
 	cfg.AddSession(*sess)
 
-	err := d.UpsertIssueComment(context.Background(), "sess-upsert-gh", "Plan body", "<!-- erg:plan -->")
+	err := d.UpsertIssueComment(context.Background(), "sess-upsert-gh", "Plan body", worker.PlanMarker)
 	if err != nil {
 		t.Errorf("expected success, got error: %v", err)
+	}
+}
+
+func TestUpsertIssueComment_GitHubFallbackUpdatesExisting(t *testing.T) {
+	// When no provider is registered but an existing comment has the marker,
+	// it should be updated via GitService.
+	mockExec := exec.NewMockExecutor(nil)
+	// Return a comment with the plan marker for ListIssueComments.
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "gh" && len(args) >= 2 && args[0] == "api" &&
+			strings.Contains(strings.Join(args, " "), "issues/42/comments") &&
+			!strings.Contains(strings.Join(args, " "), "PATCH")
+	}, exec.MockResponse{Stdout: []byte(`[{"id":999,"body":"Old plan\n` + worker.PlanMarker + `"}]`)})
+	// Accept the PATCH update call.
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "gh" && len(args) >= 2 && args[0] == "api" &&
+			strings.Contains(strings.Join(args, " "), "PATCH")
+	}, exec.MockResponse{})
+	cfg := testConfig()
+	d := testDaemonWithExec(cfg, mockExec)
+
+	sess := &config.Session{
+		ID:       "sess-upsert-gh-update",
+		RepoPath: "/test/repo",
+		Branch:   "feat-1",
+		IssueRef: &config.IssueRef{Source: "github", ID: "42", Title: "Test"},
+	}
+	cfg.AddSession(*sess)
+
+	err := d.UpsertIssueComment(context.Background(), "sess-upsert-gh-update", "Updated plan\n"+worker.PlanMarker, worker.PlanMarker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the PATCH call was made to the correct comment ID.
+	calls := mockExec.GetCalls()
+	var patchFound bool
+	for _, call := range calls {
+		args := strings.Join(call.Args, " ")
+		if strings.Contains(args, "PATCH") && strings.Contains(args, "issues/comments/999") {
+			patchFound = true
+			break
+		}
+	}
+	if !patchFound {
+		t.Error("expected PATCH call to update comment 999")
 	}
 }

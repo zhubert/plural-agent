@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/erg/internal/claude"
@@ -158,9 +159,10 @@ func (d *Daemon) UpsertIssueComment(ctx context.Context, sessionID, body, marker
 				if cu, ok := p.(issues.ProviderCommentUpdater); ok {
 					existing, listErr := gc.GetIssueComments(commentCtx, sess.RepoPath, issueRef.ID)
 					if listErr == nil {
-						for _, c := range existing {
-							if containsMarker(c, marker) {
-								return cu.UpdateComment(commentCtx, sess.RepoPath, issueRef.ID, c.ID, body)
+						// Walk backwards to find the most recent matching comment.
+						for i := len(existing) - 1; i >= 0; i-- {
+							if containsMarker(existing[i], marker) {
+								return cu.UpdateComment(commentCtx, sess.RepoPath, issueRef.ID, existing[i].ID, body)
 							}
 						}
 					}
@@ -178,6 +180,15 @@ func (d *Daemon) UpsertIssueComment(ctx context.Context, sessionID, body, marker
 		issueNum, err := strconv.Atoi(issueRef.ID)
 		if err != nil {
 			return fmt.Errorf("invalid GitHub issue ID %q: %w", issueRef.ID, err)
+		}
+		// Attempt marker-based upsert via gh API.
+		existing, listErr := d.gitService.ListIssueComments(commentCtx, sess.RepoPath, issueNum)
+		if listErr == nil {
+			for i := len(existing) - 1; i >= 0; i-- {
+				if strings.Contains(existing[i].Body, marker) {
+					return d.gitService.UpdateIssueComment(commentCtx, sess.RepoPath, existing[i].ID, body)
+				}
+			}
 		}
 		return d.gitService.CommentOnIssue(commentCtx, sess.RepoPath, issueNum, body)
 	}
