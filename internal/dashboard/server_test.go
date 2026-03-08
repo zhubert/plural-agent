@@ -245,8 +245,14 @@ func TestHandleCapabilities_WithController(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.handleCapabilities(w, req)
 
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
 	var caps map[string]bool
-	json.NewDecoder(w.Result().Body).Decode(&caps)
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		t.Fatalf("failed to decode capabilities: %v", err)
+	}
 	if !caps["control"] {
 		t.Error("expected control=true with controller set")
 	}
@@ -362,6 +368,20 @@ func TestHandleMessage_EmptyMessage(t *testing.T) {
 
 	if w.Result().StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 for empty message, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleMessage_WhitespaceOnlyMessage(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+	body := bytes.NewBufferString(`{"message":"   "}`)
+	req := httptest.NewRequest("POST", "/api/workitems/item-1/message", body)
+	req.SetPathValue("itemID", "item-1")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for whitespace-only message, got %d", w.Result().StatusCode)
 	}
 }
 

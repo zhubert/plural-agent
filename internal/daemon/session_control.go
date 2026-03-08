@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zhubert/erg/internal/dashboard"
 	"github.com/zhubert/erg/internal/daemonstate"
 )
 
-// Compile-time assertion: Daemon implements dashboard.SessionController.
-// (Interface checked in dashboard package tests; no import needed here.)
+// Compile-time assertion that Daemon implements dashboard.SessionController.
+var _ dashboard.SessionController = (*Daemon)(nil)
 
 // StopSession cancels the running worker for the given work item ID.
 // If the worker has already finished, it returns nil (already stopped is a success).
@@ -22,7 +23,7 @@ func (d *Daemon) StopSession(itemID string) error {
 		return nil
 	}
 	d.mu.Lock()
-	w, exists := d.workers[item.SessionID]
+	w, exists := d.workers[itemID]
 	d.mu.Unlock()
 
 	if !exists || w.Done() {
@@ -58,6 +59,16 @@ func (d *Daemon) RetryWorkItem(itemID string) error {
 		it.ErrorMessage = ""
 		it.CompletedAt = nil
 		it.UpdatedAt = now
+		// Clear session-related fields so the retried item starts a fresh session
+		// and does not show stale session IDs/logs while queued.
+		it.SessionID = ""
+		it.Branch = ""
+		it.PRURL = ""
+		it.StepEnteredAt = time.Time{}
+		// Reset per-session spend so costs don't accumulate across retries.
+		it.CostUSD = 0
+		it.InputTokens = 0
+		it.OutputTokens = 0
 	})
 	d.saveState()
 	return nil
@@ -76,7 +87,7 @@ func (d *Daemon) SendMessage(itemID, message string) error {
 
 	// Verify the worker is still running before queuing the message.
 	d.mu.Lock()
-	w, exists := d.workers[item.SessionID]
+	w, exists := d.workers[itemID]
 	d.mu.Unlock()
 	if !exists || w.Done() {
 		return fmt.Errorf("session is no longer active: %s", item.SessionID)

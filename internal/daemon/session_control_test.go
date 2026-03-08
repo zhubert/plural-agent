@@ -51,9 +51,9 @@ func TestStopSession_WorkerAlreadyDone(t *testing.T) {
 	d := testDaemon(testConfig())
 	addTestWorkItem(d, "item-1", "sess-1", daemonstate.WorkItemActive)
 
-	// Register a done worker.
+	// Register a done worker keyed by work item ID (matching daemon behavior).
 	d.mu.Lock()
-	d.workers["sess-1"] = worker.NewDoneWorker()
+	d.workers["item-1"] = worker.NewDoneWorker()
 	d.mu.Unlock()
 
 	// Should succeed even though worker is already done.
@@ -176,9 +176,9 @@ func TestSendMessage_WorkerDone(t *testing.T) {
 	d := testDaemon(testConfig())
 	addTestWorkItem(d, "item-1", "sess-1", daemonstate.WorkItemActive)
 
-	// Register a done worker.
+	// Register a done worker keyed by work item ID (matching daemon behavior).
 	d.mu.Lock()
-	d.workers["sess-1"] = worker.NewDoneWorker()
+	d.workers["item-1"] = worker.NewDoneWorker()
 	d.mu.Unlock()
 
 	err := d.SendMessage("item-1", "hello")

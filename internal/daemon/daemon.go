@@ -248,12 +248,26 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start embedded dashboard server if configured.
 	if d.dashboardAddr != "" {
 		dashSrv := dashboard.New(d.dashboardAddr, dashboard.WithController(d))
+		dashErrCh := make(chan error, 1)
 		go func() {
 			if err := dashSrv.Run(ctx); err != nil {
+				select {
+				case dashErrCh <- err:
+				default:
+				}
 				d.logger.Warn("embedded dashboard stopped", "addr", d.dashboardAddr, "error", err)
+				return
 			}
+			d.logger.Info("embedded dashboard stopped", "addr", d.dashboardAddr)
 		}()
-		d.logger.Info("embedded dashboard started", "addr", d.dashboardAddr)
+		// Wait briefly so that an immediate bind failure is captured before
+		// declaring the dashboard started.
+		select {
+		case err := <-dashErrCh:
+			d.logger.Warn("failed to start embedded dashboard", "addr", d.dashboardAddr, "error", err)
+		case <-time.After(500 * time.Millisecond):
+			d.logger.Info("embedded dashboard started", "addr", d.dashboardAddr)
+		}
 	}
 
 	// Load workflow configs for all repos

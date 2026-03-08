@@ -24,7 +24,8 @@ import (
 var indexHTML embed.FS
 
 // SessionController allows the dashboard to issue commands to running sessions.
-// No authentication is applied — the dashboard is a local-only tool.
+// No authentication is applied — ensure the server address is restricted to
+// loopback (e.g., "localhost:port") to prevent remote access.
 type SessionController interface {
 	// StopSession cancels the running worker for the given work item ID.
 	StopSession(itemID string) error
@@ -241,11 +242,16 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req messageRequest
-	if err := json.Unmarshal(body, &req); err != nil || req.Message == "" {
+	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "invalid request: message field required", http.StatusBadRequest)
 		return
 	}
-	if err := s.controller.SendMessage(itemID, req.Message); err != nil {
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		http.Error(w, "invalid request: message field required", http.StatusBadRequest)
+		return
+	}
+	if err := s.controller.SendMessage(itemID, msg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

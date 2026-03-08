@@ -684,6 +684,23 @@
     }
     content.innerHTML = html;
 
+    // Attach control button handlers (avoids inline onclick and JS-string injection).
+    content.querySelectorAll('[data-ctrl-stop]').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); stopItem(btn.dataset.ctrlStop); });
+    });
+    content.querySelectorAll('[data-ctrl-retry]').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); retryItem(btn.dataset.ctrlRetry); });
+    });
+    content.querySelectorAll('[data-ctrl-open]').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); openMessagePanel(btn.dataset.ctrlOpen); });
+    });
+    content.querySelectorAll('[data-ctrl-send]').forEach(btn => {
+      btn.addEventListener('click', () => sendMessage(btn.dataset.ctrlSend));
+    });
+    content.querySelectorAll('[data-ctrl-cancel]').forEach(btn => {
+      btn.addEventListener('click', () => closeMessagePanel(btn.dataset.ctrlCancel));
+    });
+
     // Attach click handlers
     content.querySelectorAll('.work-item[data-id]').forEach(el => {
       el.addEventListener('click', (e) => {
@@ -776,13 +793,13 @@
 
       let buttons = '';
       if (isActive) {
-        buttons += `<button class="ctrl-btn stop" data-ctrl-stop="${id}" onclick="event.stopPropagation();stopItem('${id}')">Stop</button>`;
+        buttons += `<button class="ctrl-btn stop" data-ctrl-stop="${id}">Stop</button>`;
       }
       if (isFailed) {
-        buttons += `<button class="ctrl-btn retry" data-ctrl-retry="${id}" onclick="event.stopPropagation();retryItem('${id}')">Retry</button>`;
+        buttons += `<button class="ctrl-btn retry" data-ctrl-retry="${id}">Retry</button>`;
       }
       if (isActive && hasSession && !msgOpen) {
-        buttons += `<button class="ctrl-btn message" onclick="event.stopPropagation();openMessagePanel('${id}')">Send Message</button>`;
+        buttons += `<button class="ctrl-btn message" data-ctrl-open="${id}">Send Message</button>`;
       }
 
       // Flash placeholders for result feedback
@@ -790,19 +807,20 @@
       if (isActive) flashIds.push('stop');
       if (isFailed) flashIds.push('retry');
       if (isActive && hasSession) flashIds.push('message');
-      const flashHtml = flashIds.map(a => `<span class="ctrl-flash" id="flash-${id}-${a}"></span>`).join('');
+      const encodedId = encodeURIComponent(item.id);
+      const flashHtml = flashIds.map(a => `<span class="ctrl-flash" id="flash-${encodedId}-${a}"></span>`).join('');
 
       if (buttons || msgOpen) {
-        ctrlHtml = `<div class="control-buttons" onclick="event.stopPropagation()">${buttons}${flashHtml}</div>`;
+        ctrlHtml = `<div class="control-buttons">${buttons}${flashHtml}</div>`;
       }
 
       if (msgOpen) {
         ctrlHtml += `
-          <div class="message-panel" onclick="event.stopPropagation()">
-            <textarea id="msg-ta-${id}" placeholder="Message to inject into the running session…" rows="3"></textarea>
+          <div class="message-panel">
+            <textarea id="msg-ta-${encodedId}" placeholder="Message to inject into the running session…" rows="3"></textarea>
             <div class="message-panel-actions">
-              <button class="ctrl-btn send" data-ctrl-send="${id}" onclick="sendMessage('${id}')">Send</button>
-              <button class="ctrl-btn cancel" onclick="closeMessagePanel('${id}')">Cancel</button>
+              <button class="ctrl-btn send" data-ctrl-send="${id}">Send</button>
+              <button class="ctrl-btn cancel" data-ctrl-cancel="${id}">Cancel</button>
             </div>
           </div>`;
       }
@@ -940,7 +958,7 @@
   function openMessagePanel(itemID) {
     messagePanelOpen.add(itemID);
     render();
-    const ta = document.getElementById(`msg-ta-${CSS.escape(itemID)}`);
+    const ta = document.getElementById(`msg-ta-${encodeURIComponent(itemID)}`);
     if (ta) ta.focus();
   }
 
@@ -950,7 +968,7 @@
   }
 
   async function sendMessage(itemID) {
-    const ta = document.getElementById(`msg-ta-${CSS.escape(itemID)}`);
+    const ta = document.getElementById(`msg-ta-${encodeURIComponent(itemID)}`);
     if (!ta) return;
     const msg = ta.value.trim();
     if (!msg) return;
@@ -977,7 +995,7 @@
   }
 
   function flashResult(itemID, action, ok, text) {
-    const el = document.getElementById(`flash-${CSS.escape(itemID)}-${action}`);
+    const el = document.getElementById(`flash-${encodeURIComponent(itemID)}-${action}`);
     if (!el) return;
     el.textContent = ok ? ('✓ ' + text) : ('✗ ' + text.slice(0, 60));
     el.className = 'ctrl-flash ' + (ok ? 'ok' : 'err');
