@@ -67,10 +67,10 @@ type Daemon struct {
 	dockerHealthCheck func(context.Context) error // injectable for testing; nil means use default
 
 	// Workflow
-	workflowFile           string            // optional explicit workflow config file path
-	repoWorkflowFiles      map[string]string // per-repo workflow file overrides (repo path → file path)
-	repoContainerImages    map[string]string // per-repo auto-built container images (repo path → image tag)
-	daemonID               string            // stable ID for lock/state keying in multi-repo mode
+	workflowFile        string            // optional explicit workflow config file path
+	repoWorkflowFiles   map[string]string // per-repo workflow file overrides (repo path → file path)
+	repoContainerImages map[string]string // per-repo auto-built container images (repo path → image tag)
+	daemonID            string            // stable ID for lock/state keying in multi-repo mode
 }
 
 // Option configures the daemon.
@@ -280,11 +280,12 @@ func (d *Daemon) tick(ctx context.Context) {
 	d.collectCompletedWorkers(ctx) // Always: detect finished sessions
 	dockerOK := d.checkDockerHealth(ctx)
 	if dockerOK {
-		d.processRetryItems(ctx)    // Re-execute items whose retry delay has elapsed
-		d.processIdleSyncItems(ctx) // Execute items idle on sync task steps (e.g. after recovery)
-		d.processWorkItems(ctx)     // Process active items via engine
-		d.pollForNewIssues(ctx)     // Find new issues (if slots available)
-		d.startQueuedItems(ctx)     // Start coding on queued items
+		d.processRetryItems(ctx)     // Re-execute items whose retry delay has elapsed
+		d.processIdleSyncItems(ctx)  // Execute items idle on sync task steps (e.g. after recovery)
+		d.processWorkItems(ctx)      // Process active items via engine
+		d.reconcileClosedIssues(ctx) // Cancel work items whose issues were closed externally
+		d.pollForNewIssues(ctx)      // Find new issues (if slots available)
+		d.startQueuedItems(ctx)      // Start coding on queued items
 	}
 	d.saveState() // Always: persist
 }

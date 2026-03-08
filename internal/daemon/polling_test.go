@@ -786,3 +786,214 @@ func TestStartQueuedItems_AwaitReviewConsumesSlotPreventsNewWork(t *testing.T) {
 		t.Errorf("new-item2 should remain queued when the slot is taken by the resumed await_review item, got state=%q", newItem.State)
 	}
 }
+
+// TestReconcileClosedIssues_ActiveGitHubIssueClosed verifies that an active work
+// item whose GitHub issue was closed externally is marked as terminal.
+func TestReconcileClosedIssues_ActiveGitHubIssueClosed(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetIssueState → CLOSED
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte(`{"state":"CLOSED"}`),
+	})
+	// Mock unqueue operations (label removal + comment)
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := New(cfg, gitSvc, sessSvc, issues.NewProviderRegistry(), discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	installTestWorkflow(d)
+
+	// Create a session so resolveRepoPath works
+	sess := testSession("sess-42")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	// Add an active work item for issue 42
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-42",
+		IssueRef:  config.IssueRef{Source: "github", ID: "42", Title: "Glow library"},
+		SessionID: sess.ID,
+		StepData:  map[string]any{"_repo_path": "/test/repo"},
+	})
+	d.state.UpdateWorkItem("item-42", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+		it.CurrentStep = "coding"
+		it.Phase = "async_pending"
+	})
+
+	d.reconcileClosedIssues(context.Background())
+
+	item, ok := d.state.GetWorkItem("item-42")
+	if !ok {
+		t.Fatal("expected work item to still exist")
+	}
+	if !item.IsTerminal() {
+		t.Errorf("expected work item to be terminal, got state=%s", item.State)
+	}
+	if item.ErrorMessage != "issue closed externally" {
+		t.Errorf("expected error message 'issue closed externally', got %q", item.ErrorMessage)
+	}
+}
+
+// TestReconcileClosedIssues_ActiveGitHubIssueOpen verifies that an active work
+// item whose GitHub issue is still open is NOT cancelled.
+func TestReconcileClosedIssues_ActiveGitHubIssueOpen(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetIssueState → OPEN
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "10", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte(`{"state":"OPEN"}`),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := New(cfg, gitSvc, sessSvc, issues.NewProviderRegistry(), discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	installTestWorkflow(d)
+
+	sess := testSession("sess-10")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-10",
+		IssueRef:  config.IssueRef{Source: "github", ID: "10", Title: "Open issue"},
+		SessionID: sess.ID,
+		StepData:  map[string]any{"_repo_path": "/test/repo"},
+	})
+	d.state.UpdateWorkItem("item-10", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+		it.CurrentStep = "coding"
+		it.Phase = "async_pending"
+	})
+
+	d.reconcileClosedIssues(context.Background())
+
+	item, ok := d.state.GetWorkItem("item-10")
+	if !ok {
+		t.Fatal("expected work item to still exist")
+	}
+	if item.IsTerminal() {
+		t.Error("expected work item to remain active when issue is open")
+	}
+}
+
+// TestReconcileClosedIssues_QueuedIssueClosed verifies that a queued work
+// item whose issue was closed externally is removed from the queue.
+func TestReconcileClosedIssues_QueuedIssueClosed(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetIssueState → CLOSED
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "99", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte(`{"state":"CLOSED"}`),
+	})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := New(cfg, gitSvc, sessSvc, issues.NewProviderRegistry(), discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	installTestWorkflow(d)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "queued-99",
+		IssueRef: config.IssueRef{Source: "github", ID: "99", Title: "Closed queued issue"},
+		StepData: map[string]any{"_repo_path": "/test/repo"},
+	})
+
+	d.reconcileClosedIssues(context.Background())
+
+	item, ok := d.state.GetWorkItem("queued-99")
+	if !ok {
+		t.Fatal("expected work item to still exist")
+	}
+	if !item.IsTerminal() {
+		t.Errorf("expected queued item to be terminal after issue closed, got state=%s", item.State)
+	}
+}
+
+// TestReconcileClosedIssues_SkipsTerminalItems verifies that already-terminal
+// work items are not re-checked.
+func TestReconcileClosedIssues_SkipsTerminalItems(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+	// No mock for GetIssueState — if it's called, the test will fail due to
+	// missing mock response, proving terminal items are skipped.
+
+	d := testDaemonWithExec(cfg, mockExec)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:       "completed-1",
+		IssueRef: config.IssueRef{Source: "github", ID: "1"},
+		StepData: map[string]any{"_repo_path": "/test/repo"},
+	})
+	d.state.MarkWorkItemTerminal("completed-1", true)
+
+	// Should not panic or make any API calls
+	d.reconcileClosedIssues(context.Background())
+
+	item, _ := d.state.GetWorkItem("completed-1")
+	if item.State != daemonstate.WorkItemCompleted {
+		t.Errorf("expected completed item to remain completed, got %s", item.State)
+	}
+}
+
+// TestReconcileClosedIssues_APIErrorFailsOpen verifies that when the issue
+// state check fails (API error), the work item is NOT cancelled.
+func TestReconcileClosedIssues_APIErrorFailsOpen(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Mock GetIssueState → error (no matching mock = empty response → parse error)
+	mockExec.AddExactMatch("gh", []string{"issue", "view", "55", "--json", "state"}, exec.MockResponse{
+		Stdout: []byte("invalid json"),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := New(cfg, gitSvc, sessSvc, issues.NewProviderRegistry(), discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	installTestWorkflow(d)
+
+	sess := testSession("sess-55")
+	sess.RepoPath = "/test/repo"
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-55",
+		IssueRef:  config.IssueRef{Source: "github", ID: "55", Title: "API error test"},
+		SessionID: sess.ID,
+		StepData:  map[string]any{"_repo_path": "/test/repo"},
+	})
+	d.state.UpdateWorkItem("item-55", func(it *daemonstate.WorkItem) {
+		it.State = daemonstate.WorkItemActive
+		it.CurrentStep = "await_review"
+		it.Phase = "idle"
+	})
+
+	d.reconcileClosedIssues(context.Background())
+
+	item, _ := d.state.GetWorkItem("item-55")
+	if item.IsTerminal() {
+		t.Error("expected work item to remain active when API fails (fail open)")
+	}
+}

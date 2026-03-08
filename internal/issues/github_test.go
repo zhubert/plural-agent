@@ -304,6 +304,41 @@ func TestGitHubProvider_ImplementsIssueGetter(t *testing.T) {
 	var _ IssueGetter = (*GitHubProvider)(nil)
 }
 
+func TestGitHubProvider_ImplementsIssueStateChecker(t *testing.T) {
+	var _ IssueStateChecker = (*GitHubProvider)(nil)
+}
+
+func TestGitHubProvider_IsIssueClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		expected bool
+	}{
+		{"closed issue", "CLOSED", true},
+		{"open issue", "OPEN", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := exec.NewMockExecutor(nil)
+			mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "state"}, exec.MockResponse{
+				Stdout: []byte(fmt.Sprintf(`{"state":"%s"}`, tc.state)),
+			})
+
+			gitSvc := git.NewGitServiceWithExecutor(mock)
+			p := NewGitHubProvider(gitSvc)
+
+			closed, err := p.IsIssueClosed(context.Background(), "/repo", "42")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if closed != tc.expected {
+				t.Errorf("IsIssueClosed = %v, expected %v", closed, tc.expected)
+			}
+		})
+	}
+}
+
 func TestGetIssueNumber(t *testing.T) {
 	tests := []struct {
 		name     string

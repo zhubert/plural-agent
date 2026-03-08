@@ -152,6 +152,16 @@ func (p *GitHubProvider) GetIssue(ctx context.Context, repoPath string, id strin
 	}, nil
 }
 
+// IsIssueClosed returns true if the GitHub issue is in CLOSED state.
+// Implements IssueStateChecker.
+func (p *GitHubProvider) IsIssueClosed(ctx context.Context, repoPath string, issueID string) (bool, error) {
+	state, err := p.gitService.GetIssueState(ctx, repoPath, issueID)
+	if err != nil {
+		return false, err
+	}
+	return state == "CLOSED", nil
+}
+
 // GetIssueNumber returns the issue number as an int (for backwards compatibility).
 // Returns 0 if the ID is not a valid number.
 func GetIssueNumber(issue Issue) int {

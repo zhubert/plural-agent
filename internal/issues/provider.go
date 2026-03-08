@@ -161,6 +161,14 @@ type IssueGetter interface {
 	GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error)
 }
 
+// IssueStateChecker extends Provider with the ability to check whether an issue
+// is closed. Used by the daemon to reconcile externally-closed issues and remove
+// them from active tracking.
+type IssueStateChecker interface {
+	// IsIssueClosed returns true if the issue/task is in a closed/completed state.
+	IsIssueClosed(ctx context.Context, repoPath string, issueID string) (bool, error)
+}
+
 // ProviderGateChecker extends Provider with operations needed for gate/approval events.
 // Providers that support label checking and comment fetching implement this interface,
 // enabling gate.approved and plan.user_replied events to work across all sources.
