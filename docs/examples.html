@@ -1244,12 +1244,12 @@
           <li class="sidebar-section">
             <span class="sidebar-section-title">Examples</span>
             <a href="#examples" class="sidebar-link">Example workflows</a>
+            <a href="#example-simple-pipeline" class="sidebar-sublink">Simple pipeline</a>
+            <a href="#example-supervised-pipeline" class="sidebar-sublink">Supervised pipeline</a>
             <a href="#example-minimal" class="sidebar-sublink">Minimal</a>
-            <a href="#example-supervised" class="sidebar-sublink">Supervised</a>
             <a href="#example-ci-gate" class="sidebar-sublink">CI gate</a>
             <a href="#example-label-tracking" class="sidebar-sublink">Label tracking</a>
             <a href="#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
-            <a href="#example-template-composition" class="sidebar-sublink">Template composition</a>
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -1263,10 +1263,313 @@
         <!-- Example workflows -->
         <h2 id="examples">Example workflows</h2>
         <p>
-          Ready-made configs for common use cases. Copy any of these into
-          <code>.erg/workflow.yaml</code> in your repo, or run
-          <code>erg configure</code> to generate a starting point
+          Templates are the recommended starting point. Each built-in template
+          encapsulates a self-contained phase — planning, coding, CI, review,
+          merge — that you compose into a workflow by wiring their
+          <code>success</code> and <code>failure</code> exits. When you need
+          control beyond what templates provide, define states directly using
+          actions. Copy any config into <code>.erg/workflow.yaml</code> in your
+          repo, or run <code>erg configure</code> to generate a starting point
           interactively.
+        </p>
+
+        <h2 id="template-workflows">Template workflows</h2>
+        <p>
+          Start here. Built-in templates handle the standard phases of a coding
+          pipeline. Wire their exits together and you have a complete workflow
+          with no boilerplate.
+        </p>
+
+        <h3 id="example-simple-pipeline">Simple pipeline</h3>
+        <p>
+          The zero-friction starting point: four templates wired in sequence —
+          code, open PR, wait for CI to pass, merge. No planning phase, no
+          review loop, no custom states. Ideal for trusted teams or internal
+          bots where speed matters more than oversight.
+        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">simple.yaml</span>
+              </div>
+              <pre>
+# Simple pipeline — four templates wired in sequence.
+#
+# The zero-friction starting point: code, open a PR, wait for CI to pass,
+# then merge. No planning phase, no review loop. Ideal for trusted teams
+# or internal bots where speed matters more than oversight.
+#
+# Built-in templates handle each phase:
+#   builtin:code   — AI coding session
+#   builtin:pr     — create pull request
+#   builtin:ci     — CI monitoring + fix loop
+#   builtin:merge  — merge + cleanup
+
+workflow: simple
+start: code
+
+source:
+  provider: github
+  filter:
+    label: queued
+
+settings:
+  max_concurrent: 5
+  branch_prefix: bot/
+  cleanup_merged: true
+
+states:
+  code:
+    type: template
+    use: builtin:code
+    exits:
+      success: pr
+      failure: failed
+
+  pr:
+    type: template
+    use: builtin:pr
+    exits:
+      success: ci
+      failure: failed
+
+  ci:
+    type: template
+    use: builtin:ci
+    exits:
+      success: merge
+      failure: failed
+
+  merge:
+    type: template
+    use: builtin:merge
+    exits:
+      success: done
+      failure: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> code
+    state code {
+        [*] --> coding
+        coding --> [*] : ai.code
+    }
+    code --> pr : success
+    state pr {
+        [*] --> open_pr
+        open_pr --> [*] : github.create_pr
+    }
+    pr --> ci : success
+    state ci {
+        [*] --> await_ci
+        await_ci --> check_result : ci.complete
+        check_result --> fix_ci : ci_failed
+        fix_ci --> await_ci : push
+        check_result --> [*] : ci_passed
+    }
+    ci --> merge : success
+    state merge {
+        [*] --> do_merge
+        do_merge --> [*] : github.merge
+    }
+    merge --> done : success
+    code --> failed : failure
+    pr --> failed : failure
+    ci --> failed : failure
+    merge --> failed : failure
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <h3 id="example-supervised-pipeline">Supervised pipeline</h3>
+        <p>
+          Add a planning phase before coding. Claude analyzes the issue and
+          posts a structured implementation plan as an issue comment —
+          <em>before writing any code</em>. A human approves the plan or leaves
+          feedback; Claude revises until approved. Once signed off, the full PR
+          lifecycle runs through five more templates automatically. To add Slack
+          notifications, wrap the <code>plan</code> and <code>merge</code>
+          template states with <code>slack.notify</code> task states.
+        </p>
+        <div class="example-tabs">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
+              yaml
+            </button>
+            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
+              diagram
+            </button>
+          </div>
+          <div data-panel="yaml">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-filename">supervised-template.yaml</span>
+              </div>
+              <pre>
+# Supervised pipeline — six templates wired in sequence.
+#
+# Claude analyzes the issue and posts a structured implementation plan as
+# an issue comment — before writing any code. A human approves the plan
+# or leaves feedback; Claude revises and loops back until approved. Once
+# signed off, the full PR lifecycle runs through five more templates.
+#
+# Built-in templates handle each phase:
+#   builtin:plan   — planning session + human feedback loop
+#   builtin:code   — AI coding session
+#   builtin:pr     — create pull request
+#   builtin:ci     — CI monitoring + fix loop
+#   builtin:review — code review + address feedback loop
+#   builtin:merge  — merge + cleanup
+
+workflow: supervised
+start: plan
+
+source:
+  provider: github
+  filter:
+    label: plan
+
+settings:
+  max_concurrent: 2
+  branch_prefix: bot/
+  cleanup_merged: true
+
+states:
+  plan:
+    type: template
+    use: builtin:plan
+    exits:
+      success: code
+      failure: failed
+
+  code:
+    type: template
+    use: builtin:code
+    exits:
+      success: pr
+      failure: failed
+
+  pr:
+    type: template
+    use: builtin:pr
+    exits:
+      success: ci
+      failure: failed
+
+  ci:
+    type: template
+    use: builtin:ci
+    exits:
+      success: review
+      failure: failed
+
+  review:
+    type: template
+    use: builtin:review
+    exits:
+      success: merge
+      failure: failed
+
+  merge:
+    type: template
+    use: builtin:merge
+    exits:
+      success: done
+      failure: failed
+
+  done:
+    type: succeed
+
+  failed:
+    type: fail</pre
+              >
+            </div>
+          </div>
+          <div data-panel="diagram" style="display: none">
+            <div class="diagram-panel">
+              <pre class="mermaid">
+stateDiagram-v2
+    [*] --> plan
+    state plan {
+        [*] --> planning
+        planning --> await_feedback : ai.plan
+        await_feedback --> planning : rejected
+        await_feedback --> [*] : approved
+    }
+    plan --> code : success
+    state code {
+        [*] --> coding
+        coding --> [*] : ai.code
+    }
+    code --> pr : success
+    state pr {
+        [*] --> open_pr
+        open_pr --> [*] : github.create_pr
+    }
+    pr --> ci : success
+    state ci {
+        [*] --> await_ci
+        await_ci --> check_result : ci.complete
+        check_result --> fix_ci : ci_failed
+        fix_ci --> await_ci : push
+        check_result --> [*] : ci_passed
+    }
+    ci --> review : success
+    state review {
+        [*] --> await_review
+        await_review --> check_review : pr.reviewed
+        check_review --> address : changes_requested
+        address --> await_review : push
+        check_review --> [*] : approved
+    }
+    review --> merge : success
+    state merge {
+        [*] --> do_merge
+        do_merge --> [*] : github.merge
+    }
+    merge --> done : success
+    plan --> failed : failure
+    code --> failed : failure
+    pr --> failed : failure
+    ci --> failed : failure
+    review --> failed : failure
+    merge --> failed : failure
+    done --> [*]
+    failed --> [*]</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <h2 id="custom-workflows">Custom workflows</h2>
+        <p>
+          When you need control beyond what built-in templates provide, define
+          states directly using actions. The following examples demonstrate
+          specific patterns — combining review and CI into a single wait state,
+          CI-gated review with fix loops, label-based status tracking, and
+          Asana integration.
         </p>
 
         <h3 id="example-minimal">Minimal</h3>
@@ -1382,224 +1685,6 @@ stateDiagram-v2
     await_merge --> timed_out : timeout
     timed_out --> failed : github.comment_pr
     merge --> done : github.merge
-    done --> [*]
-    failed --> [*]</pre
-              >
-            </div>
-          </div>
-        </div>
-
-        <h3 id="example-supervised">Supervised</h3>
-        <p>
-          The recommended starting workflow for most teams. Claude analyzes the
-          issue and posts a structured implementation plan as an issue comment —
-          <em>before writing any code</em>. A human approves the approach or
-          leaves feedback; Claude revises and loops back until approved. Once
-          the plan is signed off, the full PR lifecycle runs automatically.
-        </p>
-        <div class="example-tabs">
-          <div class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
-              yaml
-            </button>
-            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
-              diagram
-            </button>
-          </div>
-          <div data-panel="yaml">
-            <div class="code-block">
-              <div class="code-header">
-                <span class="code-filename">supervised.yaml</span>
-              </div>
-              <pre>
-# Supervised workflow — plan first, get human approval, then code.
-#
-# Claude analyzes the issue and codebase in read-only mode, then posts
-# a structured implementation plan as an issue comment. A human reviews
-# the plan and replies to approve or give feedback. Claude loops back to
-# revise the plan until approved, then proceeds to code and open a PR.
-#
-# Label an issue "plan" to trigger this workflow.
-#
-# Highlights:
-#   - ai.plan: read-only session, posts plan as issue comment (no branch created)
-#   - plan.user_replied: waits for human feedback on the plan
-#   - choice state routes on plan_approved: approved → coding, feedback → re-plan
-#   - label transitions for visibility: plan → plan-review → in-progress
-#   - pr.mergeable: combined review + CI wait before merge
-
-workflow: supervised
-start: planning
-
-source:
-  provider: github
-  filter:
-    label: plan              # Label an issue "plan" to trigger this workflow
-
-settings:
-  max_concurrent: 3
-  branch_prefix: bot/
-  cleanup_merged: true
-
-states:
-  # Claude explores the codebase and posts a plan as an issue comment.
-  # Read-only: no branch is created, no code is written.
-  planning:
-    type: task
-    action: ai.plan
-    params:
-      max_turns: 30
-      max_duration: 15m
-    next: remove_plan_label
-    error: notify_failed
-
-  # Swap labels so the issue shows it is ready for plan review.
-  remove_plan_label:
-    type: task
-    action: github.remove_label
-    params:
-      label: plan
-    next: add_plan_review_label
-
-  add_plan_review_label:
-    type: task
-    action: github.add_label
-    params:
-      label: plan-review
-    next: await_plan_feedback
-
-  # Wait for a human to comment on the issue.
-  # Reply "LGTM", "approved", "proceed", etc. to approve.
-  # Any other reply is treated as feedback — Claude will revise the plan.
-  await_plan_feedback:
-    type: wait
-    event: plan.user_replied
-    params:
-      approval_pattern: '(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)'
-    timeout: 72h
-    timeout_next: plan_expired
-    next: check_plan_feedback
-    error: notify_failed
-
-  # Route based on whether the human approved or gave feedback.
-  check_plan_feedback:
-    type: choice
-    choices:
-      - variable: plan_approved
-        equals: true
-        next: remove_plan_review_label   # Approved → proceed to coding
-      - variable: plan_approved
-        equals: false
-        next: planning                   # Feedback → revise and re-post the plan
-    default: notify_failed
-
-  remove_plan_review_label:
-    type: task
-    action: github.remove_label
-    params:
-      label: plan-review
-    next: add_in_progress_label
-
-  add_in_progress_label:
-    type: task
-    action: github.add_label
-    params:
-      label: in-progress
-    next: coding
-
-  # Plan approved — Claude now creates a branch and writes the code.
-  coding:
-    type: task
-    action: ai.code
-    params:
-      max_turns: 50
-      max_duration: 30m
-    next: open_pr
-    error: notify_failed
-
-  open_pr:
-    type: task
-    action: github.create_pr
-    params:
-      link_issue: true
-    next: await_merge
-    error: notify_failed
-
-  # pr.mergeable fires when BOTH review approval AND CI pass.
-  await_merge:
-    type: wait
-    event: pr.mergeable
-    params:
-      require_review: true
-      require_ci: true
-    timeout: 72h
-    timeout_next: review_overdue
-    next: merge
-    error: notify_failed
-
-  merge:
-    type: task
-    action: github.merge
-    params:
-      method: squash
-      cleanup: true
-    next: done
-
-  # Comment on the issue if the plan is not approved within 72h.
-  plan_expired:
-    type: task
-    action: github.comment_issue
-    params:
-      body: "The implementation plan has been awaiting approval for 72h. Re-label the issue to restart."
-    next: failed
-    error: failed
-
-  review_overdue:
-    type: task
-    action: github.comment_pr
-    params:
-      body: "This PR has been awaiting review for 72h. Could a maintainer take a look?"
-    next: notify_failed
-    error: notify_failed
-
-  notify_failed:
-    type: task
-    action: github.comment_issue
-    params:
-      body: "Unable to complete automatically. Manual intervention required."
-    next: failed
-    error: failed
-
-  done:
-    type: succeed
-
-  failed:
-    type: fail</pre
-              >
-            </div>
-          </div>
-          <div data-panel="diagram" style="display: none">
-            <div class="diagram-panel">
-              <pre class="mermaid">
-stateDiagram-v2
-    [*] --> planning
-    planning --> remove_plan_label : ai.plan
-    remove_plan_label --> add_plan_review_label : github.remove_label
-    add_plan_review_label --> await_plan_feedback : github.add_label
-    await_plan_feedback --> check_plan_feedback : plan.user_replied
-    await_plan_feedback --> plan_expired : timeout
-    check_plan_feedback --> remove_plan_review_label : plan_approved is true
-    check_plan_feedback --> planning : plan_approved is false
-    remove_plan_review_label --> add_in_progress_label : github.remove_label
-    add_in_progress_label --> coding : github.add_label
-    coding --> open_pr : ai.code
-    open_pr --> await_merge : github.create_pr
-    await_merge --> merge : pr.mergeable
-    await_merge --> review_overdue : timeout
-    review_overdue --> notify_failed : github.comment_pr
-    merge --> done : github.merge
-    plan_expired --> failed : github.comment_issue
-    notify_failed --> failed : github.comment_issue
     done --> [*]
     failed --> [*]</pre
               >
@@ -2248,179 +2333,6 @@ stateDiagram-v2
     review_overdue --> notify_failed : github.comment_pr
     plan_expired --> failed : asana.comment
     notify_failed --> failed : asana.comment
-    done --> [*]
-    failed --> [*]</pre
-              >
-            </div>
-          </div>
-        </div>
-
-        <h3 id="example-template-composition">Template composition</h3>
-        <p>
-          Use the <code>template</code> state type to compose workflows from
-          modular built-in templates. Each template encapsulates a self-contained
-          phase (planning, coding, CI, review, etc.) with <code>success</code>
-          and <code>failure</code> exits that you wire to your own states.
-          Skip phases you don't need, reorder them, or add custom states
-          between them.
-        </p>
-        <div class="example-tabs">
-          <div class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab(this, 'yaml')">
-              yaml
-            </button>
-            <button class="tab-btn" onclick="switchTab(this, 'diagram')">
-              diagram
-            </button>
-          </div>
-          <div data-panel="yaml">
-            <div class="code-block">
-              <div class="code-header">
-                <span class="code-filename">template-composition.yaml</span>
-              </div>
-              <pre>
-# Template composition — compose modular templates into a workflow.
-#
-# Each builtin template handles one phase:
-#   builtin:plan   — planning + feedback loop
-#   builtin:code   — AI coding session
-#   builtin:pr     — create pull request
-#   builtin:ci     — CI + fix failures + resolve conflicts
-#   builtin:review — review + address feedback loop
-#   builtin:merge  — merge + cleanup
-#
-# Wire exits to control flow. Skip templates you don't need.
-
-workflow: plan-then-code
-start: notify_start
-
-source:
-  provider: github
-  filter:
-    label: plan
-
-settings:
-  max_concurrent: 2
-  branch_prefix: bot/
-  cleanup_merged: true
-
-states:
-  notify_start:
-    type: task
-    action: slack.notify
-    params:
-      channel: "#engineering"
-      message: "Starting work on {{.IssueURL}}"
-    next: plan
-    error: plan
-
-  plan:
-    type: template
-    use: builtin:plan
-    exits:
-      success: code
-      failure: notify_failure
-
-  code:
-    type: template
-    use: builtin:code
-    exits:
-      success: pr
-      failure: notify_failure
-
-  pr:
-    type: template
-    use: builtin:pr
-    exits:
-      success: ci
-      failure: notify_failure
-
-  ci:
-    type: template
-    use: builtin:ci
-    exits:
-      success: review
-      failure: notify_failure
-
-  review:
-    type: template
-    use: builtin:review
-    exits:
-      success: notify_done
-      failure: notify_failure
-
-  notify_done:
-    type: task
-    action: slack.notify
-    params:
-      channel: "#engineering"
-      message: "PR ready for review: {{.PRURL}}"
-    next: done
-    error: done
-
-  notify_failure:
-    type: task
-    action: slack.notify
-    params:
-      channel: "#engineering"
-      message: "Failed: {{.IssueURL}} — manual intervention required"
-    next: failed
-    error: failed
-
-  done:
-    type: succeed
-
-  failed:
-    type: fail</pre
-              >
-            </div>
-          </div>
-          <div data-panel="diagram" style="display: none">
-            <div class="diagram-panel">
-              <pre class="mermaid">
-stateDiagram-v2
-    [*] --> notify_start
-    notify_start --> plan : slack.notify
-    state plan {
-        [*] --> planning
-        planning --> await_feedback : ai.plan
-        await_feedback --> planning : rejected
-        await_feedback --> [*] : approved
-    }
-    plan --> code : success
-    state code {
-        [*] --> coding
-        coding --> [*] : ai.code
-    }
-    code --> pr : success
-    state pr {
-        [*] --> open_pr
-        open_pr --> [*] : github.create_pr
-    }
-    pr --> ci : success
-    state ci {
-        [*] --> await_ci
-        await_ci --> check_result : ci.complete
-        check_result --> fix_ci : ci_failed
-        fix_ci --> await_ci : push
-        check_result --> [*] : ci_passed
-    }
-    ci --> review : success
-    state review {
-        [*] --> await_review
-        await_review --> check_review : pr.reviewed
-        check_review --> address : changes_requested
-        address --> await_review : push
-        check_review --> [*] : approved
-    }
-    review --> notify_done : success
-    plan --> notify_failure : failure
-    code --> notify_failure : failure
-    pr --> notify_failure : failure
-    ci --> notify_failure : failure
-    review --> notify_failure : failure
-    notify_done --> done : slack.notify
-    notify_failure --> failed : slack.notify
     done --> [*]
     failed --> [*]</pre
               >
