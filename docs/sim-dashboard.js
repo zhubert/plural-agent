@@ -13,6 +13,11 @@
     return d.innerHTML;
   };
 
+  // escAttr is safe for use inside quoted HTML attribute values (escapes " in addition to esc())
+  var escAttr = function(s) {
+    return esc(s).replace(/"/g, '&quot;');
+  };
+
   var formatCost = function(v) {
     if (v < 0.01) return '$' + v.toFixed(3);
     return '$' + v.toFixed(2);
@@ -300,7 +305,7 @@
   function renderItem(item) {
     var isExp = expandedId === item.id;
     var pulseCls = (item.state === 'active' && item.phase === 'async_pending') ? ' pulsing' : '';
-    var html = '<div class="sim-item st-' + item.state + pulseCls + '" data-id="' + esc(item.id) + '">';
+    var html = '<div class="sim-item st-' + item.state + pulseCls + '" data-id="' + escAttr(item.id) + '">';
     html += '<div class="sim-item-top"><div class="sim-item-title">' + esc(item.title) + '</div>';
     html += '<span class="sim-badge ' + item.state + '">' + item.state + '</span></div>';
     html += '<div class="sim-item-meta">';
@@ -318,22 +323,26 @@
     var hasLogs = !!item.logs;
     var isMsgOpen = msgPanelOpen === item.id;
     var ctrlBtns = '';
-    if (isActive) ctrlBtns += '<button class="sim-ctrl-btn stop" data-sim-stop="' + esc(item.id) + '">Stop</button>';
-    if (isFailed) ctrlBtns += '<button class="sim-ctrl-btn retry" data-sim-retry="' + esc(item.id) + '">Retry</button>';
-    if (isActive && hasLogs && !isMsgOpen) ctrlBtns += '<button class="sim-ctrl-btn message" data-sim-open="' + esc(item.id) + '">Send Message</button>';
+    if (isActive) ctrlBtns += '<button class="sim-ctrl-btn stop" data-sim-stop="' + escAttr(item.id) + '">Stop</button>';
+    if (isFailed) ctrlBtns += '<button class="sim-ctrl-btn retry" data-sim-retry="' + escAttr(item.id) + '">Retry</button>';
+    if (isActive && hasLogs && !isMsgOpen) ctrlBtns += '<button class="sim-ctrl-btn message" data-sim-open="' + escAttr(item.id) + '">Send Message</button>';
     var flashSpans = '';
-    if (isActive) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-stop"></span>';
-    if (isFailed) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-retry"></span>';
-    if (isActive && hasLogs) flashSpans += '<span class="sim-flash" id="sim-flash-' + esc(item.id) + '-message"></span>';
+    var fd = flashData ? flashData[item.id] : null;
+    var showStopFlash = isActive || (fd && fd.action === 'stop');
+    var showRetryFlash = isFailed || (fd && fd.action === 'retry');
+    var showMessageFlash = (isActive && hasLogs) || (fd && fd.action === 'message');
+    if (showStopFlash) flashSpans += '<span class="sim-flash" id="sim-flash-' + escAttr(item.id) + '-stop"></span>';
+    if (showRetryFlash) flashSpans += '<span class="sim-flash" id="sim-flash-' + escAttr(item.id) + '-retry"></span>';
+    if (showMessageFlash) flashSpans += '<span class="sim-flash" id="sim-flash-' + escAttr(item.id) + '-message"></span>';
     if (ctrlBtns || isMsgOpen) {
       html += '<div class="sim-ctrl-btns">' + ctrlBtns + flashSpans + '</div>';
     }
     if (isMsgOpen) {
       html += '<div class="sim-msg-panel">' +
-        '<textarea id="sim-ta-' + esc(item.id) + '" placeholder="Message to inject into the running session…" rows="3"></textarea>' +
+        '<textarea id="sim-ta-' + escAttr(item.id) + '" aria-label="Message to inject into the running session" placeholder="Message to inject into the running session…" rows="3"></textarea>' +
         '<div class="sim-msg-panel-actions">' +
-          '<button class="sim-ctrl-btn send" data-sim-send="' + esc(item.id) + '">Send</button>' +
-          '<button class="sim-ctrl-btn cancel" data-sim-cancel="' + esc(item.id) + '">Cancel</button>' +
+          '<button class="sim-ctrl-btn send" data-sim-send="' + escAttr(item.id) + '">Send</button>' +
+          '<button class="sim-ctrl-btn cancel" data-sim-cancel="' + escAttr(item.id) + '">Cancel</button>' +
         '</div></div>';
     }
     if (isExp && item.logs && item.logs.length > 0) {
@@ -360,12 +369,14 @@
   function simStop(id) {
     setItem(id, { state: 'failed', step: 'stopped', phase: 'idle' });
     simFlash(id, 'stop', true, 'stopped');
+    if (msgPanelOpen === id) msgPanelOpen = null;
     render();
   }
 
   function simRetry(id) {
     setItem(id, { state: 'active', step: 'coding', phase: 'sync', error: null, logs: [], logIdx: 0 });
     simFlash(id, 'retry', true, 'queued');
+    if (msgPanelOpen === id) msgPanelOpen = null;
     render();
   }
 
