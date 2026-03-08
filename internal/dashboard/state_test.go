@@ -147,7 +147,7 @@ func TestReadSessionLog_WithFile(t *testing.T) {
 	if lines[1].Type != "text" || lines[1].Text != "Second line" {
 		t.Errorf("line 1: %+v", lines[1])
 	}
-	if lines[2].Type != "tool" || lines[2].Text != "Read: bar.go" {
+	if lines[2].Type != "tool" || lines[2].Name != "Read" || lines[2].Text != "bar.go" {
 		t.Errorf("line 2: %+v", lines[2])
 	}
 }

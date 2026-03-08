@@ -302,17 +302,35 @@
     line-height: 1.5;
   }
   .log-viewer .log-line {
-    padding: 0.1rem 0.75rem;
+    padding: 0.15rem 0.75rem;
     border-bottom: 1px solid rgba(42, 42, 46, 0.4);
+    display: flex;
+    align-items: baseline;
+    gap: 0;
   }
   .log-viewer .log-line:last-child {
     border-bottom: none;
   }
-  .log-viewer .log-line.tool {
+  .log-viewer .log-line.tool .tool-arrow {
+    color: var(--accent);
+    margin-right: 0.45rem;
+    flex-shrink: 0;
+  }
+  .log-viewer .log-line.tool .tool-name {
     color: var(--cyan);
+    font-weight: 500;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+  }
+  .log-viewer .log-line.tool .tool-arg {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .log-viewer .log-line.text {
     color: var(--text-muted);
+    padding-left: 1.5rem;
   }
   .log-loading {
     padding: 1rem;
@@ -689,8 +707,13 @@
     }
     let html = '<div class="log-viewer">';
     for (const line of lines) {
-      const cls = line.type === 'tool' ? 'tool' : 'text';
-      html += `<div class="log-line ${cls}">${escapeHtml(line.text)}</div>`;
+      if (line.type === 'tool') {
+        const nameHtml = line.name ? `<span class="tool-name">${escapeHtml(line.name)}</span>` : '';
+        const argHtml = line.text ? `<span class="tool-arg">${escapeHtml(line.text)}</span>` : '';
+        html += `<div class="log-line tool"><span class="tool-arrow">&#9658;</span>${nameHtml}${argHtml}</div>`;
+      } else {
+        html += `<div class="log-line text">${escapeHtml(line.text)}</div>`;
+      }
     }
     html += '</div>';
     return html;
