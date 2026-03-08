@@ -1,11 +1,9 @@
 package dashboard
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -153,53 +151,29 @@ func ReadSessionLog(sessionID string, tailN int) ([]LogLine, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(logPath)
+	data, err := os.ReadFile(logPath)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	// Pre-filter: keep only lines that are part of JSON objects.
-	// Non-JSON lines (plain text errors, etc.) are discarded so the
-	// json.Decoder never encounters them.
-	var filtered bytes.Buffer
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
-	depth := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if depth == 0 && (len(trimmed) == 0 || trimmed[0] != '{') {
-			continue
-		}
-		// Once we're inside a JSON object (or starting one), pass through.
-		for _, ch := range trimmed {
-			switch ch {
-			case '{':
-				depth++
-			case '}':
-				depth--
-			}
-		}
-		filtered.WriteString(line)
-		filtered.WriteByte('\n')
-		if depth < 0 {
-			depth = 0
-		}
-	}
 
 	var lines []LogLine
-	dec := json.NewDecoder(&filtered)
 
-	for dec.More() {
+	for len(data) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(data))
 		var msg streamLogMsg
 		if err := dec.Decode(&msg); err != nil {
-			// Skip past any remaining bad data
-			if _, seekErr := io.ReadAll(dec.Buffered()); seekErr != nil {
+			// Skip non-JSON content: advance past the current line
+			// and retry from the next line.
+			idx := bytes.IndexByte(data, '\n')
+			if idx < 0 {
 				break
 			}
-			break
+			data = data[idx+1:]
+			continue
 		}
+		// Advance data past what the decoder consumed.
+		consumed := int(dec.InputOffset())
+		data = data[consumed:]
 
 		if msg.Type != "assistant" {
 			continue
