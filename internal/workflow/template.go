@@ -250,6 +250,14 @@ func applyParamSubstitution(state *State, params map[string]any) {
 	}
 	for k, v := range state.Params {
 		if s, ok := v.(string); ok {
+			// When the entire value is a single {{name}} placeholder, replace it
+			// with the typed value from params (preserving bool, int, etc.).
+			if m := paramPlaceholder.FindStringSubmatch(s); m != nil && m[0] == s {
+				if val, ok := params[m[1]]; ok {
+					state.Params[k] = val
+					continue
+				}
+			}
 			state.Params[k] = substituteParams(s, params)
 		}
 	}
