@@ -590,12 +590,9 @@ func (w *SessionWorker) handleCommentIssue(req mcp.CommentIssueRequest) {
 	log.Info("posting issue comment via MCP tool")
 
 	body := req.Body
-	if w.planningMode {
-		body += "\n" + PlanMarker
-	}
-
 	var err error
 	if w.planningMode {
+		body += "\n" + PlanMarker
 		err = w.host.UpsertIssueComment(w.ctx, w.sessionID, body, PlanMarker)
 	} else {
 		err = w.host.CommentOnIssue(w.ctx, w.sessionID, body)
