@@ -2,8 +2,10 @@ package dashboard
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -140,8 +142,9 @@ type LogLine struct {
 }
 
 // ReadSessionLog reads and parses the stream log for a session.
-// The stream log contains pretty-printed (multi-line) JSON objects separated
-// by top-level "{" and "}" lines, so we accumulate lines between braces.
+// The stream log contains pretty-printed (multi-line) JSON objects,
+// so we use json.Decoder to handle arbitrary formatting correctly.
+// Non-JSON lines (e.g. raw process output) are skipped gracefully.
 func ReadSessionLog(sessionID string, tailN int) ([]LogLine, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("no session ID")
@@ -156,25 +159,20 @@ func ReadSessionLog(sessionID string, tailN int) ([]LogLine, error) {
 	}
 	defer f.Close()
 
-	var lines []LogLine
+	// Pre-filter: keep only lines that are part of JSON objects.
+	// Non-JSON lines (plain text errors, etc.) are discarded so the
+	// json.Decoder never encounters them.
+	var filtered bytes.Buffer
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
-
-	var acc []byte
 	depth := 0
-
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		trimmed := strings.TrimSpace(string(line))
-		if len(trimmed) == 0 {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if depth == 0 && (len(trimmed) == 0 || trimmed[0] != '{') {
 			continue
 		}
-
-		// Track brace depth to accumulate multi-line JSON objects.
-		if depth == 0 && trimmed[0] != '{' {
-			continue
-		}
-
+		// Once we're inside a JSON object (or starting one), pass through.
 		for _, ch := range trimmed {
 			switch ch {
 			case '{':
@@ -183,23 +181,25 @@ func ReadSessionLog(sessionID string, tailN int) ([]LogLine, error) {
 				depth--
 			}
 		}
-
-		if len(acc) > 0 {
-			acc = append(acc, '\n')
+		filtered.WriteString(line)
+		filtered.WriteByte('\n')
+		if depth < 0 {
+			depth = 0
 		}
-		acc = append(acc, line...)
+	}
 
-		if depth > 0 {
-			continue
-		}
+	var lines []LogLine
+	dec := json.NewDecoder(&filtered)
 
-		// We have a complete JSON object — parse it.
+	for dec.More() {
 		var msg streamLogMsg
-		if err := json.Unmarshal(acc, &msg); err != nil {
-			acc = acc[:0]
-			continue
+		if err := dec.Decode(&msg); err != nil {
+			// Skip past any remaining bad data
+			if _, seekErr := io.ReadAll(dec.Buffered()); seekErr != nil {
+				break
+			}
+			break
 		}
-		acc = acc[:0]
 
 		if msg.Type != "assistant" {
 			continue

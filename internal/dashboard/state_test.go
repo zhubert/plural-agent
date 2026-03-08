@@ -281,6 +281,64 @@ func TestReadSessionLog_PrettyPrintedJSON(t *testing.T) {
 	}
 }
 
+func TestReadSessionLog_BracesInStringValues(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	logDir := filepath.Join(tmpDir, ".erg", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := "braces-in-strings"
+	// Bash command contains braces inside the string value
+	logContent := `{
+  "type": "assistant",
+  "message": {
+    "content": [
+      {
+        "type": "tool_use",
+        "name": "Bash",
+        "input": {
+          "command": "for f in $(ls); do echo {}; done"
+        }
+      }
+    ]
+  }
+}
+{
+  "type": "assistant",
+  "message": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Done running the loop"
+      }
+    ]
+  }
+}
+`
+	logPath := filepath.Join(logDir, "stream-"+sessionID+".log")
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, err := ReadSessionLog(sessionID, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %+v", len(lines), lines)
+	}
+	if lines[0].Type != "tool" || lines[0].Name != "Bash" {
+		t.Errorf("line 0: %+v", lines[0])
+	}
+	if lines[1].Type != "text" || lines[1].Text != "Done running the loop" {
+		t.Errorf("line 1: %+v", lines[1])
+	}
+}
+
 func TestReadSessionLog_Tail(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
