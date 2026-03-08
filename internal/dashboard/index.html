@@ -696,11 +696,13 @@
     content.querySelectorAll('.log-container[data-id]').forEach(container => {
       const lv = container.querySelector('.log-viewer');
       if (!lv) return;
+      const wasAtBottom = isAtBottom(lv);
+      const session = container.dataset.session;
       container.removeChild(lv);
       savedLogViewers.set(container.dataset.id, {
         element: lv,
-        wasAtBottom: isAtBottom(lv),
-        session: container.dataset.session,
+        wasAtBottom,
+        session,
       });
     });
 
