@@ -290,7 +290,7 @@ func TestBuildDaemonArgs_WithConfigFile(t *testing.T) {
 }
 
 func TestBuildDaemonArgs_WithDashboardAddr(t *testing.T) {
-	args := buildDaemonArgs("owner/repo", false, "", "", "localhost:21122")
+	args := buildDaemonArgs("owner/repo", false, "", "", defaultDashboardAddr)
 	if !slices.Contains(args, "--dashboard-addr") {
 		t.Errorf("expected '--dashboard-addr' in args: %v", args)
 	}
@@ -298,8 +298,8 @@ func TestBuildDaemonArgs_WithDashboardAddr(t *testing.T) {
 	if idx < 0 || idx+1 >= len(args) {
 		t.Fatalf("--dashboard-addr flag has no value in args: %v", args)
 	}
-	if args[idx+1] != "localhost:21122" {
-		t.Errorf("expected 'localhost:21122', got %q", args[idx+1])
+	if args[idx+1] != defaultDashboardAddr {
+		t.Errorf("expected %q, got %q", defaultDashboardAddr, args[idx+1])
 	}
 }
 

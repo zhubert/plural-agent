@@ -89,52 +89,23 @@ func TestStartCmdDashboardFlagExists(t *testing.T) {
 	}
 }
 
-func TestStartDashboardSetsDefaultAddr(t *testing.T) {
-	// Save and restore package-level vars
-	origStartDashboard := startDashboard
-	origStartDashboardAddr := startDashboardAddr
-	origAgentDashboardAddr := agentDashboardAddr
-	defer func() {
-		startDashboard = origStartDashboard
-		startDashboardAddr = origStartDashboardAddr
-		agentDashboardAddr = origAgentDashboardAddr
-	}()
-
-	startDashboard = true
-	startDashboardAddr = ""
-
-	// Replicate the logic from runStart
-	agentDashboardAddr = startDashboardAddr
-	if startDashboard && agentDashboardAddr == "" {
-		agentDashboardAddr = "localhost:21122"
-	}
-
-	if agentDashboardAddr != "localhost:21122" {
-		t.Errorf("expected agentDashboardAddr to be 'localhost:21122', got %q", agentDashboardAddr)
+func TestResolveDashboardAddrDefault(t *testing.T) {
+	got := resolveDashboardAddr(true, "")
+	if got != defaultDashboardAddr {
+		t.Errorf("expected %q, got %q", defaultDashboardAddr, got)
 	}
 }
 
-func TestStartDashboardAddrOverridesDashboardFlag(t *testing.T) {
-	// Save and restore package-level vars
-	origStartDashboard := startDashboard
-	origStartDashboardAddr := startDashboardAddr
-	origAgentDashboardAddr := agentDashboardAddr
-	defer func() {
-		startDashboard = origStartDashboard
-		startDashboardAddr = origStartDashboardAddr
-		agentDashboardAddr = origAgentDashboardAddr
-	}()
-
-	startDashboard = true
-	startDashboardAddr = "localhost:9999"
-
-	// Replicate the logic from runStart
-	agentDashboardAddr = startDashboardAddr
-	if startDashboard && agentDashboardAddr == "" {
-		agentDashboardAddr = "localhost:21122"
+func TestResolveDashboardAddrExplicitOverrides(t *testing.T) {
+	got := resolveDashboardAddr(true, "localhost:9999")
+	if got != "localhost:9999" {
+		t.Errorf("expected explicit addr to win, got %q", got)
 	}
+}
 
-	if agentDashboardAddr != "localhost:9999" {
-		t.Errorf("expected --dashboard-addr to win over --dashboard, got %q", agentDashboardAddr)
+func TestResolveDashboardAddrFlagOff(t *testing.T) {
+	got := resolveDashboardAddr(false, "")
+	if got != "" {
+		t.Errorf("expected empty addr when --dashboard is false and no addr given, got %q", got)
 	}
 }

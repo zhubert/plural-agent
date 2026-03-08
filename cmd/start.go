@@ -8,6 +8,8 @@ import (
 	"github.com/zhubert/erg/internal/paths"
 )
 
+const defaultDashboardAddr = "localhost:21122"
+
 var (
 	startRepo          string
 	startForeground    bool
@@ -77,10 +79,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	agentOnce = startOnce
 	agentWorkflowFile = startWorkflowFile
 	agentConfigFile = startConfigFile
-	agentDashboardAddr = startDashboardAddr
-	if startDashboard && agentDashboardAddr == "" {
-		agentDashboardAddr = "localhost:21122"
-	}
+	agentDashboardAddr = resolveDashboardAddr(startDashboard, startDashboardAddr)
 
 	// --once implies foreground
 	if agentOnce {
@@ -91,4 +90,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return runForeground(cmd, args)
 	}
 	return daemonize(cmd, args)
+}
+
+// resolveDashboardAddr returns the effective dashboard address given the
+// --dashboard shorthand flag and an explicit --dashboard-addr value.
+// An explicit addr always takes precedence; --dashboard alone uses the default.
+func resolveDashboardAddr(dashboard bool, addr string) string {
+	if addr != "" {
+		return addr
+	}
+	if dashboard {
+		return defaultDashboardAddr
+	}
+	return ""
 }
