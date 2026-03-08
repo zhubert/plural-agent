@@ -61,7 +61,7 @@ brews:
       (var/"erg").mkpath
       (var/"log/erg").mkpath
     service: |
-      run [opt_bin/"erg", "start", "-f"]
+      run [opt_bin/"erg", "start", "-f", "--dashboard"]
       keep_alive true
       environment_variables PATH: "#{Dir.home}/.local/bin:#{std_service_path_env}",
                               XDG_CONFIG_HOME: "#{Dir.home}/.config",

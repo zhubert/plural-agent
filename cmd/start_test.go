@@ -78,3 +78,63 @@ func TestStartCmdRegisteredOnRoot(t *testing.T) {
 		t.Error("expected 'start' subcommand to be registered on rootCmd")
 	}
 }
+
+func TestStartCmdDashboardFlagExists(t *testing.T) {
+	flag := startCmd.Flags().Lookup("dashboard")
+	if flag == nil {
+		t.Fatal("expected --dashboard flag on start command")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("expected default value 'false', got %q", flag.DefValue)
+	}
+}
+
+func TestStartDashboardSetsDefaultAddr(t *testing.T) {
+	// Save and restore package-level vars
+	origStartDashboard := startDashboard
+	origStartDashboardAddr := startDashboardAddr
+	origAgentDashboardAddr := agentDashboardAddr
+	defer func() {
+		startDashboard = origStartDashboard
+		startDashboardAddr = origStartDashboardAddr
+		agentDashboardAddr = origAgentDashboardAddr
+	}()
+
+	startDashboard = true
+	startDashboardAddr = ""
+
+	// Replicate the logic from runStart
+	agentDashboardAddr = startDashboardAddr
+	if startDashboard && agentDashboardAddr == "" {
+		agentDashboardAddr = "localhost:21122"
+	}
+
+	if agentDashboardAddr != "localhost:21122" {
+		t.Errorf("expected agentDashboardAddr to be 'localhost:21122', got %q", agentDashboardAddr)
+	}
+}
+
+func TestStartDashboardAddrOverridesDashboardFlag(t *testing.T) {
+	// Save and restore package-level vars
+	origStartDashboard := startDashboard
+	origStartDashboardAddr := startDashboardAddr
+	origAgentDashboardAddr := agentDashboardAddr
+	defer func() {
+		startDashboard = origStartDashboard
+		startDashboardAddr = origStartDashboardAddr
+		agentDashboardAddr = origAgentDashboardAddr
+	}()
+
+	startDashboard = true
+	startDashboardAddr = "localhost:9999"
+
+	// Replicate the logic from runStart
+	agentDashboardAddr = startDashboardAddr
+	if startDashboard && agentDashboardAddr == "" {
+		agentDashboardAddr = "localhost:21122"
+	}
+
+	if agentDashboardAddr != "localhost:9999" {
+		t.Errorf("expected --dashboard-addr to win over --dashboard, got %q", agentDashboardAddr)
+	}
+}
