@@ -36,13 +36,13 @@ func hasContainerRuntime() bool {
 // checkDockerDaemon verifies a container runtime daemon is reachable, not just
 // that the binary exists. This catches the case where Docker/Colima is installed
 // but not running, which would otherwise cause silent per-session failures.
-// Works with both Docker Desktop and Colima since both expose a Docker-compatible API.
+// Works with OrbStack, Docker Desktop, and Colima since all expose a Docker-compatible API.
 func checkDockerDaemon() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "docker", "info").Run(); err != nil {
 		hint := runtimeStartHint()
-		return fmt.Errorf("container runtime is not reachable (is Colima or Docker Desktop running?)%s", hint)
+		return fmt.Errorf("container runtime is not reachable (is OrbStack, Docker Desktop, or Colima running?)%s", hint)
 	}
 	return nil
 }
@@ -53,7 +53,7 @@ func runtimeStartHint() string {
 	if _, err := lookPathFunc("colima"); err == nil {
 		return "\n\nStart with: colima start"
 	}
-	return "\n\nInstall a container runtime:\n  Docker Desktop: https://docs.docker.com/get-docker/\n  Colima:          https://github.com/abiosoft/colima"
+	return "\n\nInstall a container runtime:\n  OrbStack (recommended): https://orbstack.dev\n  Docker Desktop:         https://docs.docker.com/get-docker/\n  Colima:                 https://github.com/abiosoft/colima"
 }
 
 // findSingleRunningDaemon scans lock files to find a running daemon when

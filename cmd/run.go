@@ -62,7 +62,7 @@ func runIssue(cmd *cobra.Command, args []string) error {
 	}
 
 	if !hasContainerRuntime() {
-		return fmt.Errorf("a container runtime is required for agent mode.\nInstall Docker: https://docs.docker.com/get-docker/\nInstall Colima: https://github.com/abiosoft/colima")
+		return fmt.Errorf("a container runtime is required for agent mode.\nInstall OrbStack: https://orbstack.dev\nInstall Docker:   https://docs.docker.com/get-docker/\nInstall Colima:   https://github.com/abiosoft/colima")
 	}
 	if err := checkDockerDaemon(); err != nil {
 		return err

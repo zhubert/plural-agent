@@ -214,6 +214,9 @@ func TestRuntimeStartHint_ColimaNotInstalled(t *testing.T) {
 	if !strings.Contains(hint, "Colima") {
 		t.Errorf("expected Colima link in hint, got: %q", hint)
 	}
+	if !strings.Contains(hint, "OrbStack") {
+		t.Errorf("expected OrbStack link in hint, got: %q", hint)
+	}
 }
 
 // ---- buildDaemonArgs ----
