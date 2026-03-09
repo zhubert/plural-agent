@@ -61,8 +61,7 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	cfg := workflow.WizardConfig{
 		Provider:    provider,
 		Label:       "queued",
-		FixCI:       true,
-		AutoReview:  true,
+		AutoMerge:   true,
 		MergeMethod: "rebase",
 	}
 
@@ -83,25 +82,18 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	// Phase 4: Workflow behavior
 	fmt.Fprintln(output)
 	cfg.PlanFirst = promptYN(scanner, output, "Should Claude plan the approach before coding?", false)
-	cfg.FixCI = promptYN(scanner, output, "Should Claude try to fix failing CI?", true)
-	cfg.AutoReview = promptYN(scanner, output, "Should Claude auto-address PR review comments?", true)
 	cfg.Reviewer = promptString(scanner, output, "GitHub username to request as reviewer (Enter to skip)")
 
-	fmt.Fprintln(output, "Merge method:")
-	fmt.Fprintln(output, "  1) Rebase")
-	fmt.Fprintln(output, "  2) Squash")
-	fmt.Fprintln(output, "  3) Merge")
-	cfg.MergeMethod = promptSelect(scanner, output, "Choice [1-3]: ", []string{"rebase", "squash", "merge"})
+	cfg.AutoMerge = promptYN(scanner, output, "Should erg auto-merge approved PRs?", true)
+	if cfg.AutoMerge {
+		fmt.Fprintln(output, "Merge method:")
+		fmt.Fprintln(output, "  1) Rebase")
+		fmt.Fprintln(output, "  2) Squash")
+		fmt.Fprintln(output, "  3) Merge")
+		cfg.MergeMethod = promptSelect(scanner, output, "Choice [1-3]: ", []string{"rebase", "squash", "merge"})
+	}
 
 	cfg.Containerized = promptYN(scanner, output, "Run sessions in Docker containers?", false)
-
-	cfg.NotifySlack = promptYN(scanner, output, "Send Slack notifications on failure?", false)
-	if cfg.NotifySlack {
-		cfg.SlackWebhook = promptString(scanner, output, "Slack webhook URL or env var (e.g., $SLACK_WEBHOOK_URL)")
-		if cfg.SlackWebhook == "" {
-			cfg.NotifySlack = false
-		}
-	}
 
 	// Phase 5: Summary + confirm
 	fmt.Fprintln(output)
@@ -301,16 +293,14 @@ func buildSummaryText(cfg workflow.WizardConfig) string {
 		}
 	}
 	b.WriteString(fmt.Sprintf("Plan first:     %v\n", cfg.PlanFirst))
-	b.WriteString(fmt.Sprintf("Fix CI:         %v\n", cfg.FixCI))
-	b.WriteString(fmt.Sprintf("Auto review:    %v\n", cfg.AutoReview))
 	if cfg.Reviewer != "" {
 		b.WriteString(fmt.Sprintf("Reviewer:       %s\n", cfg.Reviewer))
 	}
-	b.WriteString(fmt.Sprintf("Merge method:   %s\n", cfg.MergeMethod))
-	b.WriteString(fmt.Sprintf("Containerized:  %v\n", cfg.Containerized))
-	if cfg.NotifySlack {
-		b.WriteString(fmt.Sprintf("Slack webhook:  %s\n", cfg.SlackWebhook))
+	b.WriteString(fmt.Sprintf("Auto-merge:     %v\n", cfg.AutoMerge))
+	if cfg.AutoMerge {
+		b.WriteString(fmt.Sprintf("Merge method:   %s\n", cfg.MergeMethod))
 	}
+	b.WriteString(fmt.Sprintf("Containerized:  %v\n", cfg.Containerized))
 	return b.String()
 }
 
