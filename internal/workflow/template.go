@@ -219,8 +219,16 @@ func builtinTemplate(name string) (*TemplateConfig, error) {
 		return ReviewTemplateConfig(), nil
 	case "merge":
 		return MergeTemplateConfig(), nil
+	case "asana_move_section":
+		return AsanaMoveSectionTemplateConfig(), nil
+	case "linear_move_state":
+		return LinearMoveStateTemplateConfig(), nil
+	case "asana_await_section":
+		return AsanaAwaitSectionTemplateConfig(), nil
+	case "linear_await_state":
+		return LinearAwaitStateTemplateConfig(), nil
 	default:
-		return nil, fmt.Errorf("unknown built-in template %q (available: plan, code, pr, ci, review, merge)", name)
+		return nil, fmt.Errorf("unknown built-in template %q (available: plan, code, pr, ci, review, merge, asana_move_section, linear_move_state, asana_await_section, linear_await_state)", name)
 	}
 }
 

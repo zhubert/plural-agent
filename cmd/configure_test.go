@@ -65,9 +65,9 @@ func captureWriter(captured *workflow.WizardConfig) workflowWriterFn {
 	}
 }
 
-// githubDefaultInput: tracker=1(GitHub), label=(default), plan=n, fixci=(default Y),
-// autoreview=(default Y), reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-const githubDefaultInput = "1\n\nn\n\n\n\n1\nn\nn\ny\n"
+// githubDefaultInput: tracker=1(GitHub), label=(default), plan=n, reviewer=(skip),
+// automerge=y(default), merge=1(rebase), containers=n, confirm=y
+const githubDefaultInput = "1\n\nn\n\ny\n1\nn\ny\n"
 
 func TestRunConfigure_AllPrereqsMissing(t *testing.T) {
 	var out bytes.Buffer
@@ -126,9 +126,9 @@ func TestRunConfigure_GitHub(t *testing.T) {
 
 func TestRunConfigure_GitHub_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=1(GitHub), label=myqueue, plan=y, fixci=n, autoreview=n, reviewer=alice,
-	// method=2(squash), containers=y, slack=n, confirm=y
-	input := "1\nmyqueue\ny\nn\nn\nalice\n2\ny\nn\ny\n"
+	// tracker=1(GitHub), label=myqueue, plan=y, reviewer=alice,
+	// automerge=y, method=2(squash), containers=y, confirm=y
+	input := "1\nmyqueue\ny\nalice\ny\n2\ny\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -144,14 +144,11 @@ func TestRunConfigure_GitHub_WizardCaptures(t *testing.T) {
 	if !captured.PlanFirst {
 		t.Errorf("expected PlanFirst=true")
 	}
-	if captured.FixCI {
-		t.Errorf("expected FixCI=false")
-	}
-	if captured.AutoReview {
-		t.Errorf("expected AutoReview=false")
-	}
 	if captured.Reviewer != "alice" {
 		t.Errorf("expected Reviewer=alice, got %q", captured.Reviewer)
+	}
+	if !captured.AutoMerge {
+		t.Errorf("expected AutoMerge=true")
 	}
 	if captured.MergeMethod != "squash" {
 		t.Errorf("expected MergeMethod=squash, got %q", captured.MergeMethod)
@@ -178,22 +175,40 @@ func TestRunConfigure_GitHub_WizardDefaults(t *testing.T) {
 	if captured.PlanFirst {
 		t.Errorf("expected PlanFirst=false (default)")
 	}
-	if !captured.FixCI {
-		t.Errorf("expected FixCI=true (default)")
-	}
-	if !captured.AutoReview {
-		t.Errorf("expected AutoReview=true (default)")
+	if !captured.AutoMerge {
+		t.Errorf("expected AutoMerge=true (default)")
 	}
 	if captured.MergeMethod != "rebase" {
 		t.Errorf("expected MergeMethod=rebase (default), got %q", captured.MergeMethod)
 	}
 }
 
+func TestRunConfigure_GitHub_AutoMerge_False(t *testing.T) {
+	var captured workflow.WizardConfig
+	// tracker=1(GitHub), label=(default), plan=n, reviewer=(skip),
+	// automerge=n, containers=n, confirm=y
+	input := "1\n\nn\n\nn\nn\ny\n"
+	var out bytes.Buffer
+	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if captured.AutoMerge {
+		t.Errorf("expected AutoMerge=false")
+	}
+	// Summary should show Auto-merge: false
+	output := out.String()
+	if !strings.Contains(output, "Auto-merge") {
+		t.Errorf("expected Auto-merge in summary, got:\n%s", output)
+	}
+}
+
 func TestRunConfigure_Asana(t *testing.T) {
 	// tracker=2(Asana), project=proj123, org=1(tags), tag=(default),
-	// section=(skip), completion=(skip), plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "2\nproj123\n1\n\n\n\nn\n\n\n\n1\nn\nn\ny\n"
+	// section=(skip), completion=(skip), plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "2\nproj123\n1\n\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", noopWriter, true)
 	if err != nil {
@@ -214,9 +229,9 @@ func TestRunConfigure_Asana(t *testing.T) {
 func TestRunConfigure_Asana_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
 	// tracker=2(Asana), project=1234, org=1(tags), tag=ready,
-	// section=(skip), completion=Done, plan=n, fixci=y, autoreview=y,
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "2\n1234\n1\nready\n\nDone\nn\ny\ny\n\n1\nn\nn\ny\n"
+	// section=(skip), completion=Done, plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "2\n1234\n1\nready\n\nDone\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -242,9 +257,9 @@ func TestRunConfigure_Asana_WizardCaptures(t *testing.T) {
 
 func TestRunConfigure_Linear(t *testing.T) {
 	// tracker=3(Linear), team=team1, org=1(labels), label=(default),
-	// completionState=(skip), plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "3\nteam1\n1\n\n\nn\n\n\n\n1\nn\nn\ny\n"
+	// completionState=(skip), plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "3\nteam1\n1\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", noopWriter, true)
 	if err != nil {
@@ -265,9 +280,9 @@ func TestRunConfigure_Linear(t *testing.T) {
 func TestRunConfigure_Linear_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
 	// tracker=3(Linear), team=team-xyz, org=1(labels), label=(default),
-	// completionState=Merged, plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "3\nteam-xyz\n1\n\nMerged\nn\n\n\n\n1\nn\nn\ny\n"
+	// completionState=Merged, plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "3\nteam-xyz\n1\n\nMerged\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -364,9 +379,9 @@ func TestRunConfigure_ShowsErgStart(t *testing.T) {
 func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
 	// tracker=2(Asana), project=1234, org=2(kanban), section=(default "To do"),
-	// completion=(default Done), plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "2\n1234\n2\n\n\nn\n\n\n\n1\nn\nn\ny\n"
+	// completion=(default Done), plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "2\n1234\n2\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -393,9 +408,9 @@ func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
 	// tracker=3(Linear), team=team-xyz, org=2(kanban), label=(default "queued"),
-	// completionState=(default Done), plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=y
-	input := "3\nteam-xyz\n2\n\n\nn\n\n\n\n1\nn\nn\ny\n"
+	// completionState=(default Done), plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=y
+	input := "3\nteam-xyz\n2\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -416,30 +431,10 @@ func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	}
 }
 
-func TestRunConfigure_GitHub_Slack_WizardCaptures(t *testing.T) {
-	var captured workflow.WizardConfig
-	// tracker=1(GitHub), label=(default), plan=n, fixci=y, autoreview=y,
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=y, webhook=$SLACK_WEBHOOK_URL,
-	// confirm=y
-	input := "1\n\nn\ny\ny\n\n1\nn\ny\n$SLACK_WEBHOOK_URL\ny\n"
-	var out bytes.Buffer
-	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !captured.NotifySlack {
-		t.Errorf("expected NotifySlack=true")
-	}
-	if captured.SlackWebhook != "$SLACK_WEBHOOK_URL" {
-		t.Errorf("expected SlackWebhook=$SLACK_WEBHOOK_URL, got %q", captured.SlackWebhook)
-	}
-}
-
 func TestRunConfigure_ConfirmCancelled(t *testing.T) {
-	// tracker=1(GitHub), label=(default), plan=n, fixci=(default Y), autoreview=(default Y),
-	// reviewer=(skip), merge=1(rebase), containers=n, slack=n, confirm=n
-	input := "1\n\nn\n\n\n\n1\nn\nn\nn\n"
+	// tracker=1(GitHub), label=(default), plan=n, reviewer=(skip),
+	// automerge=y, merge=1(rebase), containers=n, confirm=n
+	input := "1\n\nn\n\ny\n1\nn\nn\n"
 	var out bytes.Buffer
 	writerCalled := false
 	neverWriter := func(repoPath string, cfg workflow.WizardConfig) (string, error) {

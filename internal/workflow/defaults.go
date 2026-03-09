@@ -236,6 +236,9 @@ func PlanTemplateConfig() *TemplateConfig {
 			"success": "plan_done",
 			"failure": "plan_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "containerized", Default: true},
+		},
 		States: map[string]*State{
 			"planning": {
 				Type:   StateTypeTask,
@@ -243,7 +246,7 @@ func PlanTemplateConfig() *TemplateConfig {
 				Params: map[string]any{
 					"max_turns":     30,
 					"max_duration":  "15m",
-					"containerized": true,
+					"containerized": "{{containerized}}",
 				},
 				Next:  "await_plan_feedback",
 				Error: "plan_failed",
@@ -297,6 +300,7 @@ func CodeTemplateConfig() *TemplateConfig {
 		},
 		Params: []TemplateParam{
 			{Name: "simplify", Default: false},
+			{Name: "containerized", Default: true},
 		},
 		States: map[string]*State{
 			"coding": {
@@ -305,7 +309,7 @@ func CodeTemplateConfig() *TemplateConfig {
 				Params: map[string]any{
 					"max_turns":     50,
 					"max_duration":  "30m",
-					"containerized": true,
+					"containerized": "{{containerized}}",
 					"simplify":      "{{simplify}}",
 				},
 				Next:  "code_done",
@@ -537,12 +541,15 @@ func MergeTemplateConfig() *TemplateConfig {
 			"success": "merge_done",
 			"failure": "merge_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "method", Default: "rebase"},
+		},
 		States: map[string]*State{
 			"merge": {
 				Type:   StateTypeTask,
 				Action: "github.merge",
 				Params: map[string]any{
-					"method":  "rebase",
+					"method":  "{{method}}",
 					"cleanup": true,
 				},
 				Next:  "merge_done",
@@ -553,6 +560,140 @@ func MergeTemplateConfig() *TemplateConfig {
 				Type: StateTypeSucceed,
 			},
 			"merge_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// AsanaMoveSectionTemplateConfig returns a template for moving an Asana task to a section.
+func AsanaMoveSectionTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "asana_move_section",
+		Entry:    "move",
+		Exits: map[string]string{
+			"success": "move_done",
+			"failure": "move_failed",
+		},
+		Params: []TemplateParam{
+			{Name: "section", Default: ""},
+		},
+		States: map[string]*State{
+			"move": {
+				Type:   StateTypeTask,
+				Action: "asana.move_to_section",
+				Params: map[string]any{
+					"section": "{{section}}",
+				},
+				Next:  "move_done",
+				Error: "move_failed",
+			},
+			"move_done": {
+				Type: StateTypeSucceed,
+			},
+			"move_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// LinearMoveStateTemplateConfig returns a template for moving a Linear issue to a state.
+func LinearMoveStateTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "linear_move_state",
+		Entry:    "move",
+		Exits: map[string]string{
+			"success": "move_done",
+			"failure": "move_failed",
+		},
+		Params: []TemplateParam{
+			{Name: "state", Default: ""},
+		},
+		States: map[string]*State{
+			"move": {
+				Type:   StateTypeTask,
+				Action: "linear.move_to_state",
+				Params: map[string]any{
+					"state": "{{state}}",
+				},
+				Next:  "move_done",
+				Error: "move_failed",
+			},
+			"move_done": {
+				Type: StateTypeSucceed,
+			},
+			"move_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// AsanaAwaitSectionTemplateConfig returns a template for waiting until an Asana task
+// is in a specific section. Times out after 7 days.
+func AsanaAwaitSectionTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "asana_await_section",
+		Entry:    "await",
+		Exits: map[string]string{
+			"success": "await_done",
+			"failure": "await_failed",
+		},
+		Params: []TemplateParam{
+			{Name: "section", Default: ""},
+		},
+		States: map[string]*State{
+			"await": {
+				Type:        StateTypeWait,
+				Event:       "asana.in_section",
+				Timeout:     &Duration{7 * 24 * time.Hour},
+				TimeoutNext: "await_failed",
+				Params: map[string]any{
+					"section": "{{section}}",
+				},
+				Next:  "await_done",
+				Error: "await_failed",
+			},
+			"await_done": {
+				Type: StateTypeSucceed,
+			},
+			"await_failed": {
+				Type: StateTypeFail,
+			},
+		},
+	}
+}
+
+// LinearAwaitStateTemplateConfig returns a template for waiting until a Linear issue
+// is in a specific state. Times out after 7 days.
+func LinearAwaitStateTemplateConfig() *TemplateConfig {
+	return &TemplateConfig{
+		Template: "linear_await_state",
+		Entry:    "await",
+		Exits: map[string]string{
+			"success": "await_done",
+			"failure": "await_failed",
+		},
+		Params: []TemplateParam{
+			{Name: "state", Default: ""},
+		},
+		States: map[string]*State{
+			"await": {
+				Type:        StateTypeWait,
+				Event:       "linear.in_state",
+				Timeout:     &Duration{7 * 24 * time.Hour},
+				TimeoutNext: "await_failed",
+				Params: map[string]any{
+					"state": "{{state}}",
+				},
+				Next:  "await_done",
+				Error: "await_failed",
+			},
+			"await_done": {
+				Type: StateTypeSucceed,
+			},
+			"await_failed": {
 				Type: StateTypeFail,
 			},
 		},

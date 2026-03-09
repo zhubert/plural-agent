@@ -1567,6 +1567,180 @@ func TestExpandTemplates_BuiltinMerge(t *testing.T) {
 	}
 }
 
+func TestExpandTemplates_BuiltinAsanaMoveSection(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:asana_move_section",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+			Params: map[string]any{
+				"section": "In Progress",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	move := result.States["_t_start_move"]
+	if move == nil {
+		t.Fatal("_t_start_move missing")
+	}
+	if move.Action != "asana.move_to_section" {
+		t.Errorf("move.action: got %q, want asana.move_to_section", move.Action)
+	}
+	if move.Params["section"] != "In Progress" {
+		t.Errorf("move.params.section: got %v, want In Progress", move.Params["section"])
+	}
+
+	exitDone := result.States["_t_start_move_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("move_done exit: expected pass→done, got %+v", exitDone)
+	}
+	exitFailed := result.States["_t_start_move_failed"]
+	if exitFailed == nil || exitFailed.Type != StateTypePass || exitFailed.Next != "failed" {
+		t.Errorf("move_failed exit: expected pass→failed, got %+v", exitFailed)
+	}
+}
+
+func TestExpandTemplates_BuiltinLinearMoveState(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:linear_move_state",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+			Params: map[string]any{
+				"state": "In Progress",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	move := result.States["_t_start_move"]
+	if move == nil {
+		t.Fatal("_t_start_move missing")
+	}
+	if move.Action != "linear.move_to_state" {
+		t.Errorf("move.action: got %q, want linear.move_to_state", move.Action)
+	}
+	if move.Params["state"] != "In Progress" {
+		t.Errorf("move.params.state: got %v, want In Progress", move.Params["state"])
+	}
+
+	exitDone := result.States["_t_start_move_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("move_done exit: expected pass→done, got %+v", exitDone)
+	}
+	exitFailed := result.States["_t_start_move_failed"]
+	if exitFailed == nil || exitFailed.Type != StateTypePass || exitFailed.Next != "failed" {
+		t.Errorf("move_failed exit: expected pass→failed, got %+v", exitFailed)
+	}
+}
+
+func TestExpandTemplates_BuiltinAsanaAwaitSection(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:asana_await_section",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+			Params: map[string]any{
+				"section": "Done",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	await := result.States["_t_start_await"]
+	if await == nil {
+		t.Fatal("_t_start_await missing")
+	}
+	if await.Event != "asana.in_section" {
+		t.Errorf("await.event: got %q, want asana.in_section", await.Event)
+	}
+	if await.Params["section"] != "Done" {
+		t.Errorf("await.params.section: got %v, want Done", await.Params["section"])
+	}
+	if await.Timeout == nil {
+		t.Error("await should have a timeout")
+	}
+
+	exitDone := result.States["_t_start_await_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("await_done exit: expected pass→done, got %+v", exitDone)
+	}
+	exitFailed := result.States["_t_start_await_failed"]
+	if exitFailed == nil || exitFailed.Type != StateTypePass || exitFailed.Next != "failed" {
+		t.Errorf("await_failed exit: expected pass→failed, got %+v", exitFailed)
+	}
+}
+
+func TestExpandTemplates_BuiltinLinearAwaitState(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:linear_await_state",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+			Params: map[string]any{
+				"state": "Done",
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	await := result.States["_t_start_await"]
+	if await == nil {
+		t.Fatal("_t_start_await missing")
+	}
+	if await.Event != "linear.in_state" {
+		t.Errorf("await.event: got %q, want linear.in_state", await.Event)
+	}
+	if await.Params["state"] != "Done" {
+		t.Errorf("await.params.state: got %v, want Done", await.Params["state"])
+	}
+	if await.Timeout == nil {
+		t.Error("await should have a timeout")
+	}
+
+	exitDone := result.States["_t_start_await_done"]
+	if exitDone == nil || exitDone.Type != StateTypePass || exitDone.Next != "done" {
+		t.Errorf("await_done exit: expected pass→done, got %+v", exitDone)
+	}
+	exitFailed := result.States["_t_start_await_failed"]
+	if exitFailed == nil || exitFailed.Type != StateTypePass || exitFailed.Next != "failed" {
+		t.Errorf("await_failed exit: expected pass→failed, got %+v", exitFailed)
+	}
+}
+
 // TestExpandTemplates_ModularComposition verifies that multiple modular templates
 // can be composed into a complete workflow (the primary use case).
 func TestExpandTemplates_ModularComposition(t *testing.T) {
