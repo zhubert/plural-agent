@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -34,13 +36,17 @@ func hasContainerRuntime() bool {
 }
 
 // checkDockerDaemon verifies a container runtime daemon is reachable, not just
-// that the binary exists. This catches the case where Docker/Colima is installed
-// but not running, which would otherwise cause silent per-session failures.
+// that the binary exists. This catches the case where a Docker-compatible container
+// runtime is installed but not running, which would otherwise cause silent per-session failures.
 // Works with OrbStack, Docker Desktop, and Colima since all expose a Docker-compatible API.
 func checkDockerDaemon() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "docker", "info").Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			hint := runtimeStartHint()
+			return fmt.Errorf("docker CLI not found on PATH — install a container runtime that provides it%s", hint)
+		}
 		hint := runtimeStartHint()
 		return fmt.Errorf("container runtime is not reachable (is OrbStack, Docker Desktop, or Colima running?)%s", hint)
 	}
@@ -53,7 +59,10 @@ func runtimeStartHint() string {
 	if _, err := lookPathFunc("colima"); err == nil {
 		return "\n\nStart with: colima start"
 	}
-	return "\n\nInstall a container runtime:\n  OrbStack (recommended): https://orbstack.dev\n  Docker Desktop:         https://docs.docker.com/get-docker/\n  Colima:                 https://github.com/abiosoft/colima"
+	if runtime.GOOS == "darwin" {
+		return "\n\nInstall a container runtime:\n  OrbStack (macOS, recommended on macOS): https://orbstack.dev\n  Docker Desktop:                         https://docs.docker.com/get-docker/\n  Colima:                                 https://github.com/abiosoft/colima"
+	}
+	return "\n\nInstall a container runtime:\n  Docker Desktop: https://docs.docker.com/get-docker/\n  Colima:         https://github.com/abiosoft/colima"
 }
 
 // findSingleRunningDaemon scans lock files to find a running daemon when
