@@ -5336,6 +5336,68 @@ func TestAsanaMoveToSectionAction_NoProvider(t *testing.T) {
 	}
 }
 
+// --- resolveRepoPath StepData fallback tests ---
+
+func TestResolveRepoPath_FallsBackToStepData(t *testing.T) {
+	// After planning cleanup the session is removed but _repo_path is in StepData.
+	// resolveRepoPath should use it instead of returning empty.
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemon(cfg)
+
+	item := daemonstate.WorkItem{
+		ID:        "item-1",
+		SessionID: "nonexistent-session",
+		StepData:  map[string]any{"_repo_path": "/test/repo"},
+	}
+
+	got := d.resolveRepoPath(context.Background(), item)
+	if got != "/test/repo" {
+		t.Errorf("expected /test/repo from StepData fallback, got %q", got)
+	}
+}
+
+func TestAsanaMoveToSectionAction_AfterPlanningCleanup(t *testing.T) {
+	// Regression: after planning completes, the session is cleaned up but the
+	// work item's StepData has _repo_path. move_to_section must still resolve
+	// the repo path and succeed.
+	cfg := testConfig()
+	provider := &mockSectionMoverProvider{src: issues.SourceAsana}
+	registry := issues.NewProviderRegistry(provider)
+	gitSvc := git.NewGitServiceWithExecutor(exec.NewMockExecutor(nil))
+	sessSvc := session.NewSessionServiceWithExecutor(exec.NewMockExecutor(nil))
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+
+	// No session in config — simulates post-planning cleanup.
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:        "item-1",
+		IssueRef:  config.IssueRef{Source: "asana", ID: "task-abc"},
+		SessionID: "cleaned-up-session",
+		StepData:  map[string]any{"_repo_path": "/test/repo"},
+	})
+
+	action := &asanaMoveToSectionAction{daemon: d}
+	params := workflow.NewParamHelper(map[string]any{"section": "Planned"})
+	ac := &workflow.ActionContext{WorkItemID: "item-1", Params: params}
+
+	result := action.Execute(context.Background(), ac)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %v", result.Error)
+	}
+	if len(provider.moveCalls) != 1 {
+		t.Fatalf("expected 1 MoveToSection call, got %d", len(provider.moveCalls))
+	}
+	if provider.moveCalls[0].repoPath != "/test/repo" {
+		t.Errorf("expected repoPath %q, got %q", "/test/repo", provider.moveCalls[0].repoPath)
+	}
+	if provider.moveCalls[0].section != "Planned" {
+		t.Errorf("expected section %q, got %q", "Planned", provider.moveCalls[0].section)
+	}
+}
+
 // --- linearCommentAction tests ---
 
 func TestLinearCommentAction_WorkItemNotFound(t *testing.T) {

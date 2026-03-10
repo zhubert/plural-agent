@@ -744,6 +744,12 @@ func (d *Daemon) resolveRepoPath(ctx context.Context, item daemonstate.WorkItem)
 			return sess.RepoPath
 		}
 	}
+	// After planning cleanup the session is removed, but the repo path is
+	// stashed in StepData so subsequent actions (e.g. asana.move_to_section)
+	// can still resolve it.
+	if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+		return rp
+	}
 	return d.findRepoPath(ctx)
 }
 
