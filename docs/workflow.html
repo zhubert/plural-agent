@@ -1213,6 +1213,17 @@
             <a href="#state-choice" class="sidebar-sublink">choice</a>
             <a href="#state-pass" class="sidebar-sublink">pass</a>
             <a href="#state-template" class="sidebar-sublink">template</a>
+            <a href="#templates" class="sidebar-link">Built-in templates</a>
+            <a href="#tmpl-plan" class="sidebar-sublink">builtin:plan</a>
+            <a href="#tmpl-code" class="sidebar-sublink">builtin:code</a>
+            <a href="#tmpl-pr" class="sidebar-sublink">builtin:pr</a>
+            <a href="#tmpl-ci" class="sidebar-sublink">builtin:ci</a>
+            <a href="#tmpl-review" class="sidebar-sublink">builtin:review</a>
+            <a href="#tmpl-merge" class="sidebar-sublink">builtin:merge</a>
+            <a href="#tmpl-asana-move" class="sidebar-sublink">builtin:asana_move_section</a>
+            <a href="#tmpl-linear-move" class="sidebar-sublink">builtin:linear_move_state</a>
+            <a href="#tmpl-asana-await" class="sidebar-sublink">builtin:asana_await_section</a>
+            <a href="#tmpl-linear-await" class="sidebar-sublink">builtin:linear_await_state</a>
             <a href="#error-handling" class="sidebar-link">Error handling</a>
             <a href="#hooks" class="sidebar-link">Hooks</a>
           </li>
@@ -1240,16 +1251,6 @@
             <a href="events.html#events-asana" class="sidebar-sublink">asana</a>
             <a href="events.html#events-linear" class="sidebar-sublink">linear</a>
             <a href="events.html#events-gate" class="sidebar-sublink">gate</a>
-          </li>
-          <li class="sidebar-section">
-            <span class="sidebar-section-title">Examples</span>
-            <a href="examples.html#examples" class="sidebar-link">Example workflows</a>
-            <a href="examples.html#example-simple-pipeline" class="sidebar-sublink">Simple pipeline</a>
-            <a href="examples.html#example-supervised-pipeline" class="sidebar-sublink">Supervised pipeline</a>
-            <a href="examples.html#example-minimal" class="sidebar-sublink">Minimal</a>
-            <a href="examples.html#example-ci-gate" class="sidebar-sublink">CI gate</a>
-            <a href="examples.html#example-label-tracking" class="sidebar-sublink">Label tracking</a>
-            <a href="examples.html#example-asana-kanban" class="sidebar-sublink">Asana kanban</a>
           </li>
         </ul>
         <div class="sidebar-footer">
@@ -1750,57 +1751,338 @@
     <span class="ck">failure:</span> <span class="cv">notify_slack</span></pre>
         </div>
 
-        <h4>Built-in templates</h4>
+        <h4 id="templates">Built-in templates</h4>
         <p>
           Erg ships with modular built-in templates that can be composed to
-          build any workflow. Each has <code>success</code> and
-          <code>failure</code> exits.
+          build any workflow. Run <code>erg configure</code> inside your repo
+          to scaffold a starting workflow from these building blocks, then
+          customize with specific actions. Each template exposes
+          <code>success</code> and <code>failure</code> exits.
         </p>
-        <div class="info-grid">
-          <div class="info-card">
-            <h4>builtin:plan</h4>
-            <p>
-              Planning phase: AI generates a plan &rarr; waits for user
-              feedback &rarr; re-plans on rejection (loop until approved).
-              Includes 72h timeout with expiry notification.
-            </p>
+
+        <div id="tmpl-plan" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:plan</span>
           </div>
-          <div class="info-card">
-            <h4>builtin:code</h4>
-            <p>
-              AI coding session with preset turn and duration limits.
-              Runs containerized by default.
-            </p>
+          <p class="action-desc">
+            Planning phase &mdash; AI generates a plan and posts it as an
+            issue comment, then waits for user feedback. Rejected plans loop
+            back for revision. Includes a 72-hour timeout with an expiry
+            notification.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Plan approved by user.</td></tr>
+                <tr><td>failure</td><td>Unrecoverable error or timeout expired.</td></tr>
+              </tbody>
+            </table>
           </div>
-          <div class="info-card">
-            <h4>builtin:pr</h4>
-            <p>
-              Creates a pull request linked to the source issue.
-              Includes retry on transient failures.
-            </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>containerized</td><td>bool</td><td>true</td><td>Run the planning session inside a container.</td></tr>
+              </tbody>
+            </table>
           </div>
-          <div class="info-card">
-            <h4>builtin:ci</h4>
-            <p>
-              Waits for CI &rarr; fixes failures (bounded loop) &rarr;
-              resolves merge conflicts via rebase or AI. Includes
-              timeout and unfixable notifications.
-            </p>
+        </div>
+
+        <div id="tmpl-code" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:code</span>
           </div>
-          <div class="info-card">
-            <h4>builtin:review</h4>
-            <p>
-              Waits for PR review &rarr; addresses feedback (bounded loop).
-              Handles approval, changes-requested, and external merge.
-              Includes 48h timeout notification.
-            </p>
+          <p class="action-desc">
+            AI coding session with preset turn and duration limits. Runs
+            containerized by default.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Coding session completed successfully.</td></tr>
+                <tr><td>failure</td><td>Session error or unrecoverable failure.</td></tr>
+              </tbody>
+            </table>
           </div>
-          <div class="info-card">
-            <h4>builtin:merge</h4>
-            <p>
-              Merges the PR (rebase by default) and cleans up the branch.
-              Includes retry on transient failures.
-            </p>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>containerized</td><td>bool</td><td>true</td><td>Run the coding session inside a container.</td></tr>
+                <tr><td>simplify</td><td>bool</td><td>false</td><td>Run the simplify pass after coding to clean up the implementation.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-pr" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:pr</span>
+          </div>
+          <p class="action-desc">
+            Creates a pull request linked to the source issue. Includes retry
+            on transient failures.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Pull request created successfully.</td></tr>
+                <tr><td>failure</td><td>PR creation failed after retries.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <p class="param-none">No configurable params.</p>
+          </div>
+        </div>
+
+        <div id="tmpl-ci" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:ci</span>
+          </div>
+          <p class="action-desc">
+            Waits for CI, then fixes failures in a bounded loop. Resolves
+            merge conflicts first via rebase, then via AI if needed. Includes
+            a 2-hour CI timeout and notifications for unfixable failures.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>CI passed.</td></tr>
+                <tr><td>failure</td><td>CI failed and could not be fixed, or timed out.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>simplify</td><td>bool</td><td>false</td><td>Run the simplify pass when resolving conflicts or fixing CI.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-review" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:review</span>
+          </div>
+          <p class="action-desc">
+            Waits for PR review then addresses feedback in a bounded loop.
+            Handles approval, changes-requested, and external merge. Includes
+            a 48-hour timeout notification.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>PR approved or merged externally.</td></tr>
+                <tr><td>failure</td><td>Review failed or feedback loop exhausted.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>simplify</td><td>bool</td><td>false</td><td>Run the simplify pass when addressing review feedback.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-merge" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:merge</span>
+          </div>
+          <p class="action-desc">
+            Merges the PR and cleans up the branch. Includes retry on
+            transient failures.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>PR merged and branch deleted.</td></tr>
+                <tr><td>failure</td><td>Merge failed after retries.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>method</td><td>string</td><td>rebase</td><td>GitHub merge strategy. One of <code>rebase</code>, <code>merge</code>, or <code>squash</code>.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-asana-move" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:asana_move_section</span>
+          </div>
+          <p class="action-desc">
+            Moves the linked Asana task to a named section.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Task moved successfully.</td></tr>
+                <tr><td>failure</td><td>Move failed.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>section</td><td>string</td><td><em>required</em></td><td>Target section name in Asana.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-linear-move" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:linear_move_state</span>
+          </div>
+          <p class="action-desc">
+            Moves the linked Linear issue to a named workflow state.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Issue moved successfully.</td></tr>
+                <tr><td>failure</td><td>Move failed.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>state</td><td>string</td><td><em>required</em></td><td>Target workflow state name in Linear.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-asana-await" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:asana_await_section</span>
+          </div>
+          <p class="action-desc">
+            Waits until the linked Asana task arrives in a named section.
+            Times out after 7 days.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Task arrived in the target section.</td></tr>
+                <tr><td>failure</td><td>Timeout or error.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>section</td><td>string</td><td><em>required</em></td><td>Section name to wait for in Asana.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tmpl-linear-await" class="action-ref">
+          <div class="action-header">
+            <span class="action-title">builtin:linear_await_state</span>
+          </div>
+          <p class="action-desc">
+            Waits until the linked Linear issue reaches a named workflow state.
+            Times out after 7 days.
+          </p>
+          <div class="param-section">
+            <div class="param-section-title">Exits</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Port</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>success</td><td>Issue reached the target state.</td></tr>
+                <tr><td>failure</td><td>Timeout or error.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="param-section">
+            <div class="param-section-title">Params</div>
+            <table class="param-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>state</td><td>string</td><td><em>required</em></td><td>State name to wait for in Linear.</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
