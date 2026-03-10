@@ -482,13 +482,13 @@ func ensureAsanaSections(scanner *bufio.Scanner, output io.Writer, projectGID, c
 		insertBeforeID = cs.ID
 	}
 
-	// Create in reverse order so each goes before the completion section,
-	// resulting in the correct order: ... Doing, In Review, Done
-	for i := len(missing) - 1; i >= 0; i-- {
-		if err := issues.CreateAsanaSection(ctx, projectGID, missing[i], insertBeforeID); err != nil {
-			fmt.Fprintf(output, "  Failed to create %q: %v\n", missing[i], err)
+	// Create in forward order; each insert-before the completion section
+	// pushes earlier entries upward, resulting in: ... Doing, In Review, Done
+	for _, name := range missing {
+		if err := issues.CreateAsanaSection(ctx, projectGID, name, insertBeforeID); err != nil {
+			fmt.Fprintf(output, "  Failed to create %q: %v\n", name, err)
 		} else {
-			fmt.Fprintf(output, "  Created %q\n", missing[i])
+			fmt.Fprintf(output, "  Created %q\n", name)
 		}
 	}
 }
