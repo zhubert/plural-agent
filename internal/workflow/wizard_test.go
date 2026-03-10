@@ -722,34 +722,24 @@ func TestGenerateWizardYAML_Asana_Kanban_PlanFirst(t *testing.T) {
 		}
 	}
 
-	// Should have move_to_planned using builtin:asana_move_section
-	if !strings.Contains(out, "move_to_planned:") {
-		t.Errorf("expected move_to_planned state")
+	// Should have move_to_doing using builtin:asana_move_section
+	if !strings.Contains(out, "move_to_doing:") {
+		t.Errorf("expected move_to_doing state")
 	}
-	idx := strings.Index(out, "  move_to_planned:")
+	idx := strings.Index(out, "  move_to_doing:")
 	if idx >= 0 {
 		block := out[idx:]
 		if !strings.Contains(block, "use: builtin:asana_move_section") {
-			t.Errorf("expected use: builtin:asana_move_section in move_to_planned")
+			t.Errorf("expected use: builtin:asana_move_section in move_to_doing")
 		}
-		if !strings.Contains(block, `section: "Planned"`) {
-			t.Errorf("expected section: \"Planned\" param in move_to_planned")
+		if !strings.Contains(block, `section: "Doing"`) {
+			t.Errorf("expected section: \"Doing\" param in move_to_doing")
 		}
 	}
 
-	// Should have await_doing using builtin:asana_await_section
-	if !strings.Contains(out, "await_doing:") {
-		t.Errorf("expected await_doing state")
-	}
-	idx = strings.Index(out, "  await_doing:")
-	if idx >= 0 {
-		block := out[idx:]
-		if !strings.Contains(block, "use: builtin:asana_await_section") {
-			t.Errorf("expected use: builtin:asana_await_section in await_doing")
-		}
-		if !strings.Contains(block, `section: "Doing"`) {
-			t.Errorf("expected section: \"Doing\" param in await_doing")
-		}
+	// Should NOT have await_doing (no longer waits)
+	if strings.Contains(out, "await_doing:") {
+		t.Errorf("should not have await_doing state, workflow should move directly to Doing")
 	}
 }
 
@@ -819,33 +809,23 @@ func TestGenerateWizardYAML_Linear_Kanban_PlanFirst(t *testing.T) {
 		}
 	}
 
-	// Should have move_to_planned using builtin:linear_move_state "Planned"
-	if !strings.Contains(out, "move_to_planned:") {
-		t.Errorf("expected move_to_planned state")
+	// Should have move_to_in_progress using builtin:linear_move_state "In Progress"
+	if !strings.Contains(out, "move_to_in_progress:") {
+		t.Errorf("expected move_to_in_progress state")
 	}
-	idx := strings.Index(out, "  move_to_planned:")
+	idx := strings.Index(out, "  move_to_in_progress:")
 	if idx >= 0 {
 		block := out[idx:]
 		if !strings.Contains(block, "use: builtin:linear_move_state") {
-			t.Errorf("expected use: builtin:linear_move_state in move_to_planned")
+			t.Errorf("expected use: builtin:linear_move_state in move_to_in_progress")
 		}
-		if !strings.Contains(block, `state: "Planned"`) {
-			t.Errorf("expected state: \"Planned\" param in move_to_planned")
+		if !strings.Contains(block, `state: "In Progress"`) {
+			t.Errorf("expected state: \"In Progress\" param in move_to_in_progress")
 		}
 	}
 
-	// Should have await_in_progress using builtin:linear_await_state "In Progress"
-	if !strings.Contains(out, "await_in_progress:") {
-		t.Errorf("expected await_in_progress state")
-	}
-	idx = strings.Index(out, "  await_in_progress:")
-	if idx >= 0 {
-		block := out[idx:]
-		if !strings.Contains(block, "use: builtin:linear_await_state") {
-			t.Errorf("expected use: builtin:linear_await_state in await_in_progress")
-		}
-		if !strings.Contains(block, `state: "In Progress"`) {
-			t.Errorf("expected state: \"In Progress\" param in await_in_progress")
-		}
+	// Should NOT have await_in_progress (no longer waits)
+	if strings.Contains(out, "await_in_progress:") {
+		t.Errorf("should not have await_in_progress state, workflow should move directly to In Progress")
 	}
 }

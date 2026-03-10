@@ -413,6 +413,15 @@ func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 	if captured.CompletionSection != "Done" {
 		t.Errorf("expected CompletionSection=Done, got %q", captured.CompletionSection)
 	}
+
+	// Should mention the intermediate board sections (checking or warning)
+	output := out.String()
+	if !strings.Contains(output, "Doing") {
+		t.Errorf("expected mention of Doing section in kanban output")
+	}
+	if !strings.Contains(output, "In Review") {
+		t.Errorf("expected mention of In Review section in kanban output")
+	}
 }
 
 func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
@@ -438,6 +447,15 @@ func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	}
 	if captured.CompletionState != "Done" {
 		t.Errorf("expected CompletionState=Done, got %q", captured.CompletionState)
+	}
+
+	// Should mention the intermediate workflow states (checking or warning)
+	output := out.String()
+	if !strings.Contains(output, "In Progress") {
+		t.Errorf("expected mention of In Progress state in kanban output")
+	}
+	if !strings.Contains(output, "In Review") {
+		t.Errorf("expected mention of In Review state in kanban output")
 	}
 }
 

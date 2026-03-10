@@ -93,8 +93,13 @@ func GenerateWizardYAML(cfg WizardConfig) string {
 
 	// Resolve exit targets for each phase
 	afterPlanApproved := "code_phase"
-	if cfg.Kanban && cfg.PlanFirst && (cfg.Provider == "asana" || cfg.Provider == "linear") {
-		afterPlanApproved = "move_to_planned"
+	if cfg.Kanban && cfg.PlanFirst {
+		switch cfg.Provider {
+		case "asana":
+			afterPlanApproved = "move_to_doing"
+		case "linear":
+			afterPlanApproved = "move_to_in_progress"
+		}
 	}
 
 	afterPR := "ci_phase"
@@ -166,23 +171,13 @@ func GenerateWizardYAML(cfg WizardConfig) string {
 		b.WriteString("      failure: notify_failed\n")
 		b.WriteByte('\n')
 
-		// Kanban: move to planned section/state after plan approved
+		// Kanban: move to doing section/state after plan approved, then start coding
 		if cfg.Kanban {
 			switch cfg.Provider {
 			case "asana":
-				b.WriteString("  move_to_planned:\n")
+				b.WriteString("  move_to_doing:\n")
 				b.WriteString("    type: template\n")
 				b.WriteString("    use: builtin:asana_move_section\n")
-				b.WriteString("    params:\n")
-				b.WriteString("      section: \"Planned\"\n")
-				b.WriteString("    exits:\n")
-				b.WriteString("      success: await_doing\n")
-				b.WriteString("      failure: notify_failed\n")
-				b.WriteByte('\n')
-
-				b.WriteString("  await_doing:\n")
-				b.WriteString("    type: template\n")
-				b.WriteString("    use: builtin:asana_await_section\n")
 				b.WriteString("    params:\n")
 				b.WriteString("      section: \"Doing\"\n")
 				b.WriteString("    exits:\n")
@@ -191,19 +186,9 @@ func GenerateWizardYAML(cfg WizardConfig) string {
 				b.WriteByte('\n')
 
 			case "linear":
-				b.WriteString("  move_to_planned:\n")
+				b.WriteString("  move_to_in_progress:\n")
 				b.WriteString("    type: template\n")
 				b.WriteString("    use: builtin:linear_move_state\n")
-				b.WriteString("    params:\n")
-				b.WriteString("      state: \"Planned\"\n")
-				b.WriteString("    exits:\n")
-				b.WriteString("      success: await_in_progress\n")
-				b.WriteString("      failure: notify_failed\n")
-				b.WriteByte('\n')
-
-				b.WriteString("  await_in_progress:\n")
-				b.WriteString("    type: template\n")
-				b.WriteString("    use: builtin:linear_await_state\n")
 				b.WriteString("    params:\n")
 				b.WriteString("      state: \"In Progress\"\n")
 				b.WriteString("    exits:\n")

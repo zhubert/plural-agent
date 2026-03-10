@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zhubert/erg/internal/cli"
+	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/secrets"
 	"github.com/zhubert/erg/internal/workflow"
 	"golang.org/x/term"
@@ -196,6 +198,9 @@ func collectAsanaConfig(scanner *bufio.Scanner, input io.Reader, output io.Write
 		cfg.Label = ""
 		cfg.Section = promptStringDefault(scanner, output, "Which section has new tasks?", "To do")
 		cfg.CompletionSection = promptStringDefault(scanner, output, "Completion section?", "Done")
+
+		required := []string{"Doing", "In Review"}
+		ensureAsanaSections(scanner, output, cfg.Project, cfg.CompletionSection, required)
 	} else {
 		cfg.Label = promptStringDefault(scanner, output, "Asana tag to watch for new tasks?", cfg.Label)
 		cfg.Section = promptString(scanner, output, "Filter to section? (Enter to skip)")
@@ -217,6 +222,9 @@ func collectLinearConfig(scanner *bufio.Scanner, input io.Reader, output io.Writ
 		cfg.Kanban = true
 		cfg.Label = promptStringDefault(scanner, output, "Label to identify erg-managed issues?", cfg.Label)
 		cfg.CompletionState = promptStringDefault(scanner, output, "Completion state?", "Done")
+
+		required := []string{"In Progress", "In Review"}
+		ensureLinearStates(scanner, output, cfg.Team, required)
 	} else {
 		cfg.Label = promptStringDefault(scanner, output, "Linear label to watch for new issues?", cfg.Label)
 		cfg.CompletionState = promptString(scanner, output, "Move completed issues to which state? (Enter to skip)")
@@ -432,4 +440,112 @@ func promptSecret(scanner *bufio.Scanner, input io.Reader, output io.Writer, pro
 		return strings.TrimSpace(scanner.Text())
 	}
 	return ""
+}
+
+// ensureAsanaSections checks that required sections exist on an Asana board
+// and offers to create any that are missing.
+func ensureAsanaSections(scanner *bufio.Scanner, output io.Writer, projectGID, completionSection string, required []string) {
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Checking board sections...")
+
+	ctx := context.Background()
+	sections, err := issues.ListAsanaSections(ctx, projectGID)
+	if err != nil {
+		fmt.Fprintf(output, "  Warning: could not fetch sections: %v\n", err)
+		fmt.Fprintln(output, "  Make sure these sections exist on your board: "+strings.Join(required, ", "))
+		return
+	}
+
+	var missing []string
+	for _, name := range required {
+		if _, found := issues.FindSectionByName(sections, name); found {
+			fmt.Fprintf(output, "  ✓ %q exists\n", name)
+		} else {
+			fmt.Fprintf(output, "  ✗ %q not found\n", name)
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) == 0 {
+		return
+	}
+
+	fmt.Fprintln(output)
+	if !promptYN(scanner, output, "Create missing sections?", true) {
+		fmt.Fprintln(output, "  Skipped. Create them manually before starting erg.")
+		return
+	}
+
+	// Find the completion section GID to insert before it.
+	var insertBeforeID string
+	if cs, found := issues.FindSectionByName(sections, completionSection); found {
+		insertBeforeID = cs.ID
+	}
+
+	// Create in reverse order so each goes before the completion section,
+	// resulting in the correct order: ... Doing, In Review, Done
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := issues.CreateAsanaSection(ctx, projectGID, missing[i], insertBeforeID); err != nil {
+			fmt.Fprintf(output, "  Failed to create %q: %v\n", missing[i], err)
+		} else {
+			fmt.Fprintf(output, "  Created %q\n", missing[i])
+		}
+	}
+}
+
+// ensureLinearStates checks that required workflow states exist for a Linear team
+// and offers to create any that are missing.
+func ensureLinearStates(scanner *bufio.Scanner, output io.Writer, teamID string, required []string) {
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Checking workflow states...")
+
+	ctx := context.Background()
+	states, err := issues.ListLinearWorkflowStates(ctx, teamID)
+	if err != nil {
+		fmt.Fprintf(output, "  Warning: could not fetch states: %v\n", err)
+		fmt.Fprintln(output, "  Make sure these states exist in your workflow: "+strings.Join(required, ", "))
+		return
+	}
+
+	var missing []string
+	for _, name := range required {
+		if _, found := issues.FindSectionByName(states, name); found {
+			fmt.Fprintf(output, "  ✓ %q exists\n", name)
+		} else {
+			fmt.Fprintf(output, "  ✗ %q not found\n", name)
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) == 0 {
+		return
+	}
+
+	fmt.Fprintln(output)
+	if !promptYN(scanner, output, "Create missing states?", true) {
+		fmt.Fprintln(output, "  Skipped. Create them manually in Linear before starting erg.")
+		return
+	}
+
+	// Linear state type and color mapping for the states erg needs.
+	stateConfig := map[string]struct {
+		stateType string
+		color     string
+	}{
+		"In Progress": {stateType: "started", color: "#f2c94c"},
+		"In Review":   {stateType: "started", color: "#4ea7fc"},
+	}
+
+	for _, name := range missing {
+		sc, ok := stateConfig[name]
+		if !ok {
+			fmt.Fprintf(output, "  Skipped %q: unknown state type\n", name)
+			continue
+		}
+		if err := issues.CreateLinearWorkflowState(ctx, teamID, name, sc.stateType, sc.color); err != nil {
+			fmt.Fprintf(output, "  Failed to create %q: %v\n", name, err)
+		} else {
+			fmt.Fprintf(output, "  Created %q\n", name)
+		}
+	}
 }
