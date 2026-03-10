@@ -319,6 +319,28 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	// HasWorkItemForIssue prevents re-adoption on subsequent polls within the same run.
 	// The label is removed later when the PR is actually merged (normal workflow path).
 
+	// Use the workflow engine to find the right wait state (e.g. await_ci).
+	// We cannot hardcode state names because template expansion namespaces
+	// them (e.g. "await_ci" becomes "_t_ci_await_ci"). Search by event type
+	// in priority order: CI first, then review, then mergeable.
+	// Compute this before creating the session to avoid orphaned session entries on failure.
+	engine := d.getEngine(repoPath)
+	recoveryStep := engine.FindFirstWaitStateByEvents([]string{
+		"ci.complete",
+		"ci.wait_for_checks",
+		"pr.reviewed",
+		"pr.mergeable",
+	})
+	if recoveryStep == "" {
+		log.Warn("no wait state found in workflow, cannot adopt PR")
+		d.unqueueIssue(ctx, *item, "Cannot adopt PR: no matching wait state found in workflow configuration. Please check your workflow definition.")
+		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
+			log.Debug("failed to mark work item terminal after adoption failure", "error", err)
+		}
+		d.state.SetErrorMessage(item.ID, "no wait state found in workflow for PR adoption")
+		return true
+	}
+
 	// Create a synthetic session so GetSession() works for CI/review polling.
 	sessionID := uuid.New().String()
 	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
@@ -341,24 +363,6 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 		},
 	}
 	d.config.AddSession(sess)
-
-	// Use the workflow engine to find the right wait state (e.g. await_ci).
-	// We cannot hardcode state names because template expansion namespaces
-	// them (e.g. "await_ci" becomes "_t_ci_await_ci"). Search by event type
-	// in priority order: CI first, then review, then mergeable.
-	engine := d.getEngine(repoPath)
-	recoveryStep := engine.FindFirstWaitStateByEvents([]string{
-		"ci.complete",
-		"ci.wait_for_checks",
-		"pr.reviewed",
-		"pr.mergeable",
-	})
-	if recoveryStep == "" {
-		log.Warn("no wait state found in workflow, cannot adopt PR")
-		d.state.MarkWorkItemTerminal(item.ID, false)
-		d.state.SetErrorMessage(item.ID, "no wait state found in workflow for PR adoption")
-		return true
-	}
 
 	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
 		now := time.Now()
