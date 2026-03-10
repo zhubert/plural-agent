@@ -396,6 +396,13 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 	d.state = daemonstate.NewDaemonState("/test/repo")
 	d.repoFilter = "/test/repo"
 
+	// Set up the default workflow engine so recovery finds the "await_ci" wait state.
+	defaultCfg := workflow.DefaultWorkflowConfig()
+	actionRegistry := workflow.NewActionRegistry()
+	defaultEngine := workflow.NewEngine(defaultCfg, actionRegistry, nil, discardLogger())
+	d.engines = map[string]*workflow.Engine{"/test/repo": defaultEngine}
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": defaultCfg}
+
 	issue := issues.Issue{
 		ID:     "42",
 		Title:  "Fix the bug",
@@ -448,6 +455,92 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsIntoWorkflow(t *testing.T) {
 		if call.Name == "gh" && len(call.Args) > 1 && call.Args[1] == "edit" {
 			t.Error("expected no gh issue edit call for open PR adoption (label should be preserved)")
 		}
+	}
+}
+
+// TestCheckLinkedPRsAndUnqueue_OpenPR_TemplateExpandedWorkflow verifies that
+// when using a template-based workflow (where state names are prefixed like
+// _t_ci_await_ci), the adopted PR lands on the correct namespaced wait state.
+func TestCheckLinkedPRsAndUnqueue_OpenPR_TemplateExpandedWorkflow(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: []byte(`{
+			"data": {
+				"repository": {
+					"issue": {
+						"timelineItems": {
+							"nodes": [
+								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}}
+							]
+						}
+					}
+				}
+			}
+		}`),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	githubProvider := issues.NewGitHubProvider(gitSvc)
+	registry := issues.NewProviderRegistry(githubProvider)
+
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+
+	// Set up a template-expanded workflow with prefixed state names.
+	templateCfg := &workflow.Config{
+		Start: "plan",
+		States: map[string]*workflow.State{
+			"plan":                   {Type: workflow.StateTypePass, Next: "_t_code_coding"},
+			"_t_code_coding":         {Type: workflow.StateTypeTask, Action: "ai.code", Next: "_t_pr_open_pr"},
+			"_t_pr_open_pr":          {Type: workflow.StateTypeTask, Action: "github.create_pr", Next: "_t_ci_await_ci"},
+			"_t_ci_await_ci":         {Type: workflow.StateTypeWait, Event: "ci.complete", Next: "_t_ci_check_result"},
+			"_t_ci_check_result":     {Type: workflow.StateTypeChoice, Choices: []workflow.ChoiceRule{{Variable: "ci_passed", Equals: true, Next: "_t_review_await_review"}}, Default: "failed"},
+			"_t_review_await_review": {Type: workflow.StateTypeWait, Event: "pr.reviewed", Next: "done"},
+			"done":                   {Type: workflow.StateTypeSucceed},
+			"failed":                 {Type: workflow.StateTypeFail},
+		},
+	}
+	actionRegistry := workflow.NewActionRegistry()
+	templateEngine := workflow.NewEngine(templateCfg, actionRegistry, nil, discardLogger())
+	d.engines = map[string]*workflow.Engine{"/test/repo": templateEngine}
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": templateCfg}
+
+	issue := issues.Issue{
+		ID:     "42",
+		Title:  "Fix the bug",
+		Source: issues.SourceGitHub,
+	}
+
+	skip := d.checkLinkedPRsAndUnqueue(context.Background(), "/test/repo", issue)
+
+	if !skip {
+		t.Error("expected checkLinkedPRsAndUnqueue to return true")
+	}
+
+	itemID := "/test/repo-42"
+	item, ok := d.state.GetWorkItem(itemID)
+	if !ok {
+		t.Fatal("expected work item to be created")
+	}
+
+	if item.State != daemonstate.WorkItemActive {
+		t.Errorf("expected WorkItemActive, got %s", item.State)
+	}
+	// With template expansion, the step should be the namespaced name.
+	if item.CurrentStep != "_t_ci_await_ci" {
+		t.Errorf("expected step '_t_ci_await_ci', got %q", item.CurrentStep)
+	}
+	if item.Phase != "idle" {
+		t.Errorf("expected phase 'idle', got %q", item.Phase)
 	}
 }
 

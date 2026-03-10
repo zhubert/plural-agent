@@ -343,10 +343,21 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	d.config.AddSession(sess)
 
 	// Use the workflow engine to find the right wait state (e.g. await_ci).
+	// We cannot hardcode state names because template expansion namespaces
+	// them (e.g. "await_ci" becomes "_t_ci_await_ci"). Search by event type
+	// in priority order: CI first, then review, then mergeable.
 	engine := d.getEngine(repoPath)
-	recoveryStep := engine.FindRecoveryWaitStep("open_pr")
+	recoveryStep := engine.FindFirstWaitStateByEvents([]string{
+		"ci.complete",
+		"ci.wait_for_checks",
+		"pr.reviewed",
+		"pr.mergeable",
+	})
 	if recoveryStep == "" {
-		recoveryStep = "await_ci"
+		log.Warn("no wait state found in workflow, cannot adopt PR")
+		d.state.MarkWorkItemTerminal(item.ID, false)
+		d.state.SetErrorMessage(item.ID, "no wait state found in workflow for PR adoption")
+		return true
 	}
 
 	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {

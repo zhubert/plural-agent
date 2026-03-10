@@ -1592,6 +1592,65 @@ func TestEngine_FindRecoveryWaitStep_NilConfig(t *testing.T) {
 	}
 }
 
+func TestEngine_FindFirstWaitStateByEvents(t *testing.T) {
+	tests := []struct {
+		name     string
+		events   []string
+		wantStep string
+	}{
+		{"ci.complete in default workflow", []string{"ci.complete"}, "await_ci"},
+		{"pr.reviewed in default workflow", []string{"pr.reviewed"}, "await_review"},
+		{"priority order returns first match", []string{"ci.complete", "pr.reviewed"}, "await_ci"},
+		{"falls through to second event", []string{"does.not.exist", "pr.reviewed"}, "await_review"},
+		{"no matches", []string{"does.not.exist"}, ""},
+		{"empty list", []string{}, ""},
+	}
+	engine := defaultWorkflowEngine()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := engine.FindFirstWaitStateByEvents(tc.events)
+			if got != tc.wantStep {
+				t.Errorf("FindFirstWaitStateByEvents(%v) = %q, want %q", tc.events, got, tc.wantStep)
+			}
+		})
+	}
+}
+
+func TestEngine_FindFirstWaitStateByEvents_TemplateExpanded(t *testing.T) {
+	// Simulate a template-expanded workflow where state names are prefixed.
+	cfg := &Config{
+		Start: "plan",
+		States: map[string]*State{
+			"plan":                   {Type: StateTypePass, Next: "_t_code_coding"},
+			"_t_code_coding":         {Type: StateTypeTask, Action: "ai.code", Next: "_t_pr_open_pr"},
+			"_t_pr_open_pr":          {Type: StateTypeTask, Action: "github.create_pr", Next: "_t_ci_await_ci"},
+			"_t_ci_await_ci":         {Type: StateTypeWait, Event: "ci.complete", Next: "_t_ci_check_result"},
+			"_t_ci_check_result":     {Type: StateTypeChoice, Choices: []ChoiceRule{{Variable: "ci_passed", Equals: true, Next: "_t_review_await_review"}}, Default: "failed"},
+			"_t_review_await_review": {Type: StateTypeWait, Event: "pr.reviewed", Next: "done"},
+			"done":                   {Type: StateTypeSucceed},
+			"failed":                 {Type: StateTypeFail},
+		},
+	}
+	engine := NewEngine(cfg, NewActionRegistry(), nil, testutil.DiscardLogger())
+
+	if got := engine.FindFirstWaitStateByEvents([]string{"ci.complete"}); got != "_t_ci_await_ci" {
+		t.Errorf("got %q, want %q", got, "_t_ci_await_ci")
+	}
+	if got := engine.FindFirstWaitStateByEvents([]string{"pr.reviewed"}); got != "_t_review_await_review" {
+		t.Errorf("got %q, want %q", got, "_t_review_await_review")
+	}
+	if got := engine.FindFirstWaitStateByEvents([]string{"ci.complete", "pr.reviewed"}); got != "_t_ci_await_ci" {
+		t.Errorf("priority order: got %q, want %q", got, "_t_ci_await_ci")
+	}
+}
+
+func TestEngine_FindFirstWaitStateByEvents_NilConfig(t *testing.T) {
+	engine := &Engine{config: nil}
+	if got := engine.FindFirstWaitStateByEvents([]string{"ci.complete"}); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
 func TestEngine_ProcessStep_StepPopulatedInActionContext(t *testing.T) {
 	// Verify that the ActionContext.Step field is set to the current workflow state name.
 	var capturedStep string

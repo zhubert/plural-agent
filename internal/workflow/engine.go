@@ -602,6 +602,52 @@ func (e *Engine) FindRecoveryWaitStep(currentStep string) string {
 	return ""
 }
 
+// FindFirstWaitStateByEvents does a BFS from the start state and returns the name
+// of the first wait state whose Event matches any of the given event strings,
+// checked in priority order. Returns "" if no matching wait state is found.
+// This is useful for recovery when state names are not known ahead of time
+// (e.g. after template expansion).
+func (e *Engine) FindFirstWaitStateByEvents(events []string) string {
+	for _, event := range events {
+		if s := e.findFirstWaitStateByEvent(event); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func (e *Engine) findFirstWaitStateByEvent(event string) string {
+	if e.config == nil || e.config.States == nil || e.config.Start == "" {
+		return ""
+	}
+
+	queue := []string{e.config.Start}
+	visited := map[string]bool{e.config.Start: true}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		state, ok := e.config.States[cur]
+		if !ok || state.Type == StateTypeSucceed || state.Type == StateTypeFail {
+			continue
+		}
+
+		if state.Type == StateTypeWait && state.Event == event {
+			return cur
+		}
+
+		for _, next := range stateOutgoing(state) {
+			if !visited[next] {
+				visited[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+
+	return ""
+}
+
 // stateOutgoing returns all states directly reachable from state in one step,
 // following every possible transition edge (next, error, timeout_next, catch, choices, default).
 func stateOutgoing(state *State) []string {
