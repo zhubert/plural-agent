@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zhubert/erg/internal/secrets"
 )
 
 const (
@@ -93,9 +94,9 @@ type asanaTasksResponse struct {
 // is matched case-insensitively). If filter.Label is also set, it is applied as
 // an additional tag filter on top of the section results.
 func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectID := filter.Project
@@ -175,9 +176,9 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 // GetIssue fetches a single Asana task by its GID.
 // Implements IssueGetter.
 func (p *AsanaProvider) GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s?opt_fields=gid,name,notes,permalink_url", p.apiBase, id)
@@ -208,10 +209,10 @@ func (p *AsanaProvider) GetIssue(ctx context.Context, repoPath string, id string
 }
 
 // IsConfigured returns true if Asana is configured for the given repo.
-// Requires both ASANA_PAT env var and a project GID mapped to the repo.
+// Requires both ASANA_PAT (env var or macOS Keychain) and a project GID mapped to the repo.
 func (p *AsanaProvider) IsConfigured(repoPath string) bool {
-	// Check if PAT is set
-	if os.Getenv(asanaPATEnvVar) == "" {
+	// Check if PAT is available (env var or keychain)
+	if _, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService); !ok {
 		return false
 	}
 	// Check if repo has a project mapped
@@ -279,9 +280,9 @@ type asanaProjectsResponse struct {
 // If the user belongs to a single workspace, project names are returned directly.
 // If multiple workspaces exist, names are prefixed with "WorkspaceName / ProjectName".
 func (p *AsanaProvider) FetchProjects(ctx context.Context) ([]AsanaProject, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	workspaces, err := p.fetchWorkspaces(ctx, pat)
@@ -398,9 +399,9 @@ type asanaTagsWithGIDResponse struct {
 // then removes it via the Asana API.
 // Implements ProviderActions.
 func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueID string, label string) error {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	// Fetch current tags on the task to find the GID for the target label.
@@ -453,9 +454,9 @@ type asanaTaskTagsResponse struct {
 // CheckIssueHasLabel returns true if the Asana task has a tag matching label.
 // Implements ProviderGateChecker.
 func (p *AsanaProvider) CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return false, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return false, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s?opt_fields=tags.name", p.apiBase, issueID)
@@ -493,9 +494,9 @@ type asanaStoriesResponse struct {
 // GetIssueComments returns all comments (stories of type "comment") on an Asana task.
 // Implements ProviderGateChecker.
 func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return nil, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=gid,type,text,created_at,created_by.name", p.apiBase, issueID)
@@ -547,9 +548,9 @@ type asanaMembershipsResponse struct {
 // within its configured project. The section is matched case-insensitively.
 // Implements ProviderSectionChecker.
 func (p *AsanaProvider) IsInSection(ctx context.Context, repoPath string, issueID string, section string) (bool, error) {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return false, fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return false, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectGID := p.config.GetAsanaProject(repoPath)
@@ -600,9 +601,9 @@ func (p *AsanaProvider) fetchSections(ctx context.Context, pat, projectGID strin
 // The section name is matched case-insensitively.
 // Implements ProviderSectionMover.
 func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectGID := p.config.GetAsanaProject(repoPath)
@@ -640,9 +641,9 @@ func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issu
 // Comment adds a comment (story) to an Asana task.
 // Implements ProviderActions.
 func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID string, body string) error {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
@@ -659,9 +660,9 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 // UpdateComment updates an existing Asana story (comment) by its GID.
 // Implements ProviderCommentUpdater.
 func (p *AsanaProvider) UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error {
-	pat := os.Getenv(asanaPATEnvVar)
-	if pat == "" {
-		return fmt.Errorf("ASANA_PAT environment variable not set")
+	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
+	if !ok {
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	storyURL := fmt.Sprintf("%s/stories/%s", p.apiBase, commentID)

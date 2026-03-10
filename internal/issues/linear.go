@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/zhubert/erg/internal/secrets"
 )
 
 const (
@@ -112,11 +113,6 @@ type linearTeamsResponse struct {
 // FetchIssues retrieves active issues from the Linear team.
 // The filter.Team should be the Linear team ID.
 func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
-	apiKey := os.Getenv(linearAPIKeyEnvVar)
-	if apiKey == "" {
-		return nil, fmt.Errorf("LINEAR_API_KEY environment variable not set")
-	}
-
 	projectID := filter.Team
 	if projectID == "" {
 		return nil, fmt.Errorf("Linear team ID not configured for this repository")
@@ -224,9 +220,9 @@ func (p *LinearProvider) GetIssue(ctx context.Context, repoPath string, id strin
 }
 
 // IsConfigured returns true if Linear is configured for the given repo.
-// Requires both LINEAR_API_KEY env var and a team ID mapped to the repo.
+// Requires both LINEAR_API_KEY (env var or macOS Keychain) and a team ID mapped to the repo.
 func (p *LinearProvider) IsConfigured(repoPath string) bool {
-	if os.Getenv(linearAPIKeyEnvVar) == "" {
+	if _, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService); !ok {
 		return false
 	}
 	return p.config.HasLinearTeam(repoPath)
@@ -296,9 +292,9 @@ const linearIssueUpdateMutation = `mutation($id: String!, $labelIds: [String!]!)
 // linearGraphQL executes a GraphQL request against the Linear API.
 // If forbiddenMsg is non-empty, a 403 response produces that specific error.
 func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variables map[string]any, forbiddenMsg string, result any) error {
-	apiKey := os.Getenv(linearAPIKeyEnvVar)
-	if apiKey == "" {
-		return fmt.Errorf("LINEAR_API_KEY environment variable not set")
+	apiKey, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService)
+	if !ok {
+		return secrets.TokenNotFoundError(linearAPIKeyEnvVar)
 	}
 
 	gqlReq := linearGraphQLRequest{

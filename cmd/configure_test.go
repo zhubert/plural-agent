@@ -7,8 +7,18 @@ import (
 	"testing"
 
 	"github.com/zhubert/erg/internal/cli"
+	"github.com/zhubert/erg/internal/secrets"
 	"github.com/zhubert/erg/internal/workflow"
 )
+
+// keychainSkip returns "n\n" on macOS (to decline the keychain prompt) or ""
+// on other platforms where the prompt doesn't appear.
+func keychainSkip() string {
+	if secrets.IsKeychainAvailable() {
+		return "n\n"
+	}
+	return ""
+}
 
 // allFoundChecker returns a checker where every prerequisite is found.
 func allFoundChecker(prereqs []cli.Prerequisite) []cli.CheckResult {
@@ -205,10 +215,10 @@ func TestRunConfigure_GitHub_AutoMerge_False(t *testing.T) {
 }
 
 func TestRunConfigure_Asana(t *testing.T) {
-	// tracker=2(Asana), project=proj123, org=1(tags), tag=(default),
+	// tracker=2(Asana), [keychain=n on macOS], project=proj123, org=1(tags), tag=(default),
 	// section=(skip), completion=(skip), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "2\nproj123\n1\n\n\n\nn\n\ny\n1\nn\ny\n"
+	input := "2\n" + keychainSkip() + "proj123\n1\n\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", noopWriter, true)
 	if err != nil {
@@ -228,10 +238,10 @@ func TestRunConfigure_Asana(t *testing.T) {
 
 func TestRunConfigure_Asana_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=2(Asana), project=1234, org=1(tags), tag=ready,
+	// tracker=2(Asana), [keychain=n on macOS], project=1234, org=1(tags), tag=ready,
 	// section=(skip), completion=Done, plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "2\n1234\n1\nready\n\nDone\nn\n\ny\n1\nn\ny\n"
+	input := "2\n" + keychainSkip() + "1234\n1\nready\n\nDone\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -256,10 +266,10 @@ func TestRunConfigure_Asana_WizardCaptures(t *testing.T) {
 }
 
 func TestRunConfigure_Linear(t *testing.T) {
-	// tracker=3(Linear), team=team1, org=1(labels), label=(default),
+	// tracker=3(Linear), [keychain=n on macOS], team=team1, org=1(labels), label=(default),
 	// completionState=(skip), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "3\nteam1\n1\n\n\nn\n\ny\n1\nn\ny\n"
+	input := "3\n" + keychainSkip() + "team1\n1\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", noopWriter, true)
 	if err != nil {
@@ -279,10 +289,10 @@ func TestRunConfigure_Linear(t *testing.T) {
 
 func TestRunConfigure_Linear_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=3(Linear), team=team-xyz, org=1(labels), label=(default),
+	// tracker=3(Linear), [keychain=n on macOS], team=team-xyz, org=1(labels), label=(default),
 	// completionState=Merged, plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "3\nteam-xyz\n1\n\nMerged\nn\n\ny\n1\nn\ny\n"
+	input := "3\n" + keychainSkip() + "team-xyz\n1\n\nMerged\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -378,10 +388,10 @@ func TestRunConfigure_ShowsErgStart(t *testing.T) {
 
 func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=2(Asana), project=1234, org=2(kanban), section=(default "To do"),
+	// tracker=2(Asana), [keychain=n on macOS], project=1234, org=2(kanban), section=(default "To do"),
 	// completion=(default Done), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "2\n1234\n2\n\n\nn\n\ny\n1\nn\ny\n"
+	input := "2\n" + keychainSkip() + "1234\n2\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -407,10 +417,10 @@ func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 
 func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=3(Linear), team=team-xyz, org=2(kanban), label=(default "queued"),
+	// tracker=3(Linear), [keychain=n on macOS], team=team-xyz, org=2(kanban), label=(default "queued"),
 	// completionState=(default Done), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "3\nteam-xyz\n2\n\n\nn\n\ny\n1\nn\ny\n"
+	input := "3\n" + keychainSkip() + "team-xyz\n2\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
