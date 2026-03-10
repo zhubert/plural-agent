@@ -9,6 +9,22 @@ import (
 
 const keychainAccount = "erg"
 
+// Keychain service names for issue tracker tokens.
+const (
+	AsanaPATService     = "erg/ASANA_PAT"
+	LinearAPIKeyService = "erg/LINEAR_API_KEY"
+)
+
+// TokenNotFoundError returns an error message appropriate for the current platform.
+// On macOS it suggests using 'erg configure' to store in the Keychain;
+// on other platforms it only mentions the environment variable.
+func TokenNotFoundError(envVar string) string {
+	if IsKeychainAvailable() {
+		return envVar + " not found (set env var or run 'erg configure' to store in macOS Keychain)"
+	}
+	return envVar + " not found (set the " + envVar + " environment variable)"
+}
+
 // Get retrieves a secret from the macOS Keychain by service name.
 // Returns the value and true if found, or ("", false) on non-macOS platforms,
 // if the entry doesn't exist, or on error.

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/zhubert/erg/internal/secrets"
 )
 
 const (
@@ -111,8 +113,8 @@ type linearTeamsResponse struct {
 // FetchIssues retrieves active issues from the Linear team.
 // The filter.Team should be the Linear team ID.
 func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
-	if _, ok := resolveToken(linearAPIKeyEnvVar, linearKeychainService); !ok {
-		return nil, fmt.Errorf("LINEAR_API_KEY not found (set env var or run 'erg configure' to store in macOS Keychain)")
+	if _, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService); !ok {
+		return nil, tokenNotFoundErr(linearAPIKeyEnvVar)
 	}
 
 	projectID := filter.Team
@@ -224,7 +226,7 @@ func (p *LinearProvider) GetIssue(ctx context.Context, repoPath string, id strin
 // IsConfigured returns true if Linear is configured for the given repo.
 // Requires both LINEAR_API_KEY (env var or macOS Keychain) and a team ID mapped to the repo.
 func (p *LinearProvider) IsConfigured(repoPath string) bool {
-	if _, ok := resolveToken(linearAPIKeyEnvVar, linearKeychainService); !ok {
+	if _, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService); !ok {
 		return false
 	}
 	return p.config.HasLinearTeam(repoPath)
@@ -294,9 +296,9 @@ const linearIssueUpdateMutation = `mutation($id: String!, $labelIds: [String!]!)
 // linearGraphQL executes a GraphQL request against the Linear API.
 // If forbiddenMsg is non-empty, a 403 response produces that specific error.
 func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variables map[string]any, forbiddenMsg string, result any) error {
-	apiKey, ok := resolveToken(linearAPIKeyEnvVar, linearKeychainService)
+	apiKey, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService)
 	if !ok {
-		return fmt.Errorf("LINEAR_API_KEY not found (set env var or run 'erg configure' to store in macOS Keychain)")
+		return tokenNotFoundErr(linearAPIKeyEnvVar)
 	}
 
 	gqlReq := linearGraphQLRequest{

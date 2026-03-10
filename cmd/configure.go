@@ -11,6 +11,7 @@ import (
 	"github.com/zhubert/erg/internal/cli"
 	"github.com/zhubert/erg/internal/secrets"
 	"github.com/zhubert/erg/internal/workflow"
+	"golang.org/x/term"
 )
 
 var configureCmd = &cobra.Command{
@@ -75,9 +76,9 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	case "github":
 		cfg.Label = promptStringDefault(scanner, output, "Label to watch for new issues", cfg.Label)
 	case "asana":
-		collectAsanaConfig(scanner, output, &cfg)
+		collectAsanaConfig(scanner, input, output, &cfg)
 	case "linear":
-		collectLinearConfig(scanner, output, &cfg)
+		collectLinearConfig(scanner, input, output, &cfg)
 	}
 
 	// Phase 4: Workflow behavior
@@ -180,15 +181,15 @@ func checkPrereqs(output io.Writer, checker prereqCheckerFn) bool {
 	return true
 }
 
-func collectAsanaConfig(scanner *bufio.Scanner, output io.Writer, cfg *workflow.WizardConfig) {
+func collectAsanaConfig(scanner *bufio.Scanner, input io.Reader, output io.Writer, cfg *workflow.WizardConfig) {
 	if secrets.IsKeychainAvailable() {
 		fmt.Fprintln(output, "You can store your Asana PAT in the macOS Keychain")
 		fmt.Fprintln(output, "so erg works via brew services without shell env vars.")
 		fmt.Fprintln(output)
 		if promptYN(scanner, output, "Store ASANA_PAT in Keychain?", true) {
-			pat := promptString(scanner, output, "Paste your Asana PAT")
+			pat := promptSecret(scanner, input, output, "Paste your Asana PAT")
 			if pat != "" {
-				if err := secrets.Set("erg/ASANA_PAT", pat); err != nil {
+				if err := secrets.Set(secrets.AsanaPATService, pat); err != nil {
 					fmt.Fprintf(output, "Warning: failed to store in Keychain: %v\n", err)
 				} else {
 					fmt.Fprintln(output, "Saved to macOS Keychain.")
@@ -217,15 +218,15 @@ func collectAsanaConfig(scanner *bufio.Scanner, output io.Writer, cfg *workflow.
 	}
 }
 
-func collectLinearConfig(scanner *bufio.Scanner, output io.Writer, cfg *workflow.WizardConfig) {
+func collectLinearConfig(scanner *bufio.Scanner, input io.Reader, output io.Writer, cfg *workflow.WizardConfig) {
 	if secrets.IsKeychainAvailable() {
 		fmt.Fprintln(output, "You can store your Linear API key in the macOS Keychain")
 		fmt.Fprintln(output, "so erg works via brew services without shell env vars.")
 		fmt.Fprintln(output)
 		if promptYN(scanner, output, "Store LINEAR_API_KEY in Keychain?", true) {
-			key := promptString(scanner, output, "Paste your Linear API key")
+			key := promptSecret(scanner, input, output, "Paste your Linear API key")
 			if key != "" {
-				if err := secrets.Set("erg/LINEAR_API_KEY", key); err != nil {
+				if err := secrets.Set(secrets.LinearAPIKeyService, key); err != nil {
 					fmt.Fprintf(output, "Warning: failed to store in Keychain: %v\n", err)
 				} else {
 					fmt.Fprintln(output, "Saved to macOS Keychain.")
@@ -282,11 +283,16 @@ func buildProviderSetupText(provider string) string {
 		b.WriteString("       https://app.asana.com/0/my-apps\n")
 		b.WriteString("  2. Click \"+ New access token\"\n")
 		b.WriteString("  3. Give it a description (e.g., \"erg\") and copy the token\n\n")
-		b.WriteString("You can either:\n")
-		b.WriteString("  a) Store it in the macOS Keychain (recommended for brew services) —\n")
-		b.WriteString("     you'll be prompted in the next step\n")
-		b.WriteString("  b) Add it to your shell profile (~/.zshrc or ~/.bashrc):\n")
-		b.WriteString("       export ASANA_PAT=\"your-token-here\"\n\n")
+		if secrets.IsKeychainAvailable() {
+			b.WriteString("You can either:\n")
+			b.WriteString("  a) Store it in the macOS Keychain (recommended for brew services) —\n")
+			b.WriteString("     you'll be prompted in the next step\n")
+			b.WriteString("  b) Add it to your shell profile (~/.zshrc or ~/.bashrc):\n")
+			b.WriteString("       export ASANA_PAT=\"your-token-here\"\n\n")
+		} else {
+			b.WriteString("Add the token to your shell profile (~/.zshrc or ~/.bashrc):\n\n")
+			b.WriteString("  export ASANA_PAT=\"your-token-here\"\n\n")
+		}
 		b.WriteString("Find your project GID in the Asana project URL:\n")
 		b.WriteString("  https://app.asana.com/0/PROJECT_GID/list")
 	case "linear":
@@ -295,11 +301,16 @@ func buildProviderSetupText(provider string) string {
 		b.WriteString("  1. Log in at https://linear.app\n")
 		b.WriteString("  2. Go to Settings → API → Personal API Keys\n")
 		b.WriteString("  3. Click \"New API key\", give it a name (e.g., \"erg\"), and copy the key\n\n")
-		b.WriteString("You can either:\n")
-		b.WriteString("  a) Store it in the macOS Keychain (recommended for brew services) —\n")
-		b.WriteString("     you'll be prompted in the next step\n")
-		b.WriteString("  b) Add it to your shell profile (~/.zshrc or ~/.bashrc):\n")
-		b.WriteString("       export LINEAR_API_KEY=\"your-key-here\"\n\n")
+		if secrets.IsKeychainAvailable() {
+			b.WriteString("You can either:\n")
+			b.WriteString("  a) Store it in the macOS Keychain (recommended for brew services) —\n")
+			b.WriteString("     you'll be prompted in the next step\n")
+			b.WriteString("  b) Add it to your shell profile (~/.zshrc or ~/.bashrc):\n")
+			b.WriteString("       export LINEAR_API_KEY=\"your-key-here\"\n\n")
+		} else {
+			b.WriteString("Add the key to your shell profile (~/.zshrc or ~/.bashrc):\n\n")
+			b.WriteString("  export LINEAR_API_KEY=\"your-key-here\"\n\n")
+		}
 		b.WriteString("Find your team ID in Linear: Settings → API → or in the team URL.")
 	}
 	return b.String()
@@ -405,6 +416,28 @@ func promptSelect(scanner *bufio.Scanner, output io.Writer, prompt string, optio
 	}
 	if len(options) > 0 {
 		return options[0]
+	}
+	return ""
+}
+
+// promptSecret shows a prompt and reads input without echoing to the terminal.
+// Falls back to scanner-based input when stdin is not a terminal (e.g., in tests).
+func promptSecret(scanner *bufio.Scanner, input io.Reader, output io.Writer, prompt string) string {
+	fmt.Fprintf(output, "%s: ", prompt)
+
+	// Try no-echo input if stdin is a terminal
+	if f, ok := input.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		pw, err := term.ReadPassword(int(f.Fd()))
+		fmt.Fprintln(output) // newline after hidden input
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(pw))
+	}
+
+	// Fallback for tests/pipes
+	if scanner.Scan() {
+		return strings.TrimSpace(scanner.Text())
 	}
 	return ""
 }

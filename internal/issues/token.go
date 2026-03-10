@@ -1,14 +1,10 @@
 package issues
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/zhubert/erg/internal/secrets"
-)
-
-const (
-	asanaKeychainService  = "erg/ASANA_PAT"
-	linearKeychainService = "erg/LINEAR_API_KEY"
 )
 
 // keychainGet is the function used to look up secrets from the keychain.
@@ -22,4 +18,9 @@ func resolveToken(envVar, keychainService string) (string, bool) {
 		return v, true
 	}
 	return keychainGet(keychainService)
+}
+
+// tokenNotFoundErr returns a platform-appropriate error for a missing token.
+func tokenNotFoundErr(envVar string) error {
+	return fmt.Errorf("%s", secrets.TokenNotFoundError(envVar))
 }

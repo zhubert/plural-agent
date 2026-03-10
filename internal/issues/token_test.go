@@ -6,7 +6,7 @@ import (
 )
 
 // disableKeychainForTest replaces the keychain lookup with a no-op
-// and returns a cleanup function that restores the original.
+// and registers a cleanup function that restores the original.
 func disableKeychainForTest(t *testing.T) {
 	t.Helper()
 	orig := keychainGet
