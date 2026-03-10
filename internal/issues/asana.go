@@ -96,7 +96,7 @@ type asanaTasksResponse struct {
 func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return nil, tokenNotFoundErr(asanaPATEnvVar)
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectID := filter.Project
@@ -178,7 +178,7 @@ func (p *AsanaProvider) FetchIssues(ctx context.Context, repoPath string, filter
 func (p *AsanaProvider) GetIssue(ctx context.Context, repoPath string, id string) (*Issue, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return nil, tokenNotFoundErr(asanaPATEnvVar)
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s?opt_fields=gid,name,notes,permalink_url", p.apiBase, id)
@@ -282,7 +282,7 @@ type asanaProjectsResponse struct {
 func (p *AsanaProvider) FetchProjects(ctx context.Context) ([]AsanaProject, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return nil, tokenNotFoundErr(asanaPATEnvVar)
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	workspaces, err := p.fetchWorkspaces(ctx, pat)
@@ -401,7 +401,7 @@ type asanaTagsWithGIDResponse struct {
 func (p *AsanaProvider) RemoveLabel(ctx context.Context, repoPath string, issueID string, label string) error {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return tokenNotFoundErr(asanaPATEnvVar)
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	// Fetch current tags on the task to find the GID for the target label.
@@ -456,7 +456,7 @@ type asanaTaskTagsResponse struct {
 func (p *AsanaProvider) CheckIssueHasLabel(ctx context.Context, repoPath string, issueID string, label string) (bool, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return false, tokenNotFoundErr(asanaPATEnvVar)
+		return false, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s?opt_fields=tags.name", p.apiBase, issueID)
@@ -496,7 +496,7 @@ type asanaStoriesResponse struct {
 func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, issueID string) ([]IssueComment, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return nil, tokenNotFoundErr(asanaPATEnvVar)
+		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=gid,type,text,created_at,created_by.name", p.apiBase, issueID)
@@ -550,7 +550,7 @@ type asanaMembershipsResponse struct {
 func (p *AsanaProvider) IsInSection(ctx context.Context, repoPath string, issueID string, section string) (bool, error) {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return false, tokenNotFoundErr(asanaPATEnvVar)
+		return false, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectGID := p.config.GetAsanaProject(repoPath)
@@ -603,7 +603,7 @@ func (p *AsanaProvider) fetchSections(ctx context.Context, pat, projectGID strin
 func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issueID string, section string) error {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return tokenNotFoundErr(asanaPATEnvVar)
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	projectGID := p.config.GetAsanaProject(repoPath)
@@ -643,7 +643,7 @@ func (p *AsanaProvider) MoveToSection(ctx context.Context, repoPath string, issu
 func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID string, body string) error {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return tokenNotFoundErr(asanaPATEnvVar)
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
@@ -662,7 +662,7 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 func (p *AsanaProvider) UpdateComment(ctx context.Context, repoPath string, issueID string, commentID string, body string) error {
 	pat, ok := resolveToken(asanaPATEnvVar, secrets.AsanaPATService)
 	if !ok {
-		return tokenNotFoundErr(asanaPATEnvVar)
+		return secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
 	storyURL := fmt.Sprintf("%s/stories/%s", p.apiBase, commentID)

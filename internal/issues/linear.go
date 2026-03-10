@@ -113,10 +113,6 @@ type linearTeamsResponse struct {
 // FetchIssues retrieves active issues from the Linear team.
 // The filter.Team should be the Linear team ID.
 func (p *LinearProvider) FetchIssues(ctx context.Context, repoPath string, filter FilterConfig) ([]Issue, error) {
-	if _, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService); !ok {
-		return nil, tokenNotFoundErr(linearAPIKeyEnvVar)
-	}
-
 	projectID := filter.Team
 	if projectID == "" {
 		return nil, fmt.Errorf("Linear team ID not configured for this repository")
@@ -298,7 +294,7 @@ const linearIssueUpdateMutation = `mutation($id: String!, $labelIds: [String!]!)
 func (p *LinearProvider) linearGraphQL(ctx context.Context, query string, variables map[string]any, forbiddenMsg string, result any) error {
 	apiKey, ok := resolveToken(linearAPIKeyEnvVar, secrets.LinearAPIKeyService)
 	if !ok {
-		return tokenNotFoundErr(linearAPIKeyEnvVar)
+		return secrets.TokenNotFoundError(linearAPIKeyEnvVar)
 	}
 
 	gqlReq := linearGraphQLRequest{

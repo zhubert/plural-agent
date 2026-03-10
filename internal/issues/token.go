@@ -1,7 +1,6 @@
 package issues
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/zhubert/erg/internal/secrets"
@@ -18,9 +17,4 @@ func resolveToken(envVar, keychainService string) (string, bool) {
 		return v, true
 	}
 	return keychainGet(keychainService)
-}
-
-// tokenNotFoundErr returns a platform-appropriate error for a missing token.
-func tokenNotFoundErr(envVar string) error {
-	return fmt.Errorf("%s", secrets.TokenNotFoundError(envVar))
 }

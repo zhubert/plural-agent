@@ -15,14 +15,14 @@ const (
 	LinearAPIKeyService = "erg/LINEAR_API_KEY"
 )
 
-// TokenNotFoundError returns an error message appropriate for the current platform.
+// TokenNotFoundError returns a platform-appropriate error for a missing token.
 // On macOS it suggests using 'erg configure' to store in the Keychain;
 // on other platforms it only mentions the environment variable.
-func TokenNotFoundError(envVar string) string {
+func TokenNotFoundError(envVar string) error {
 	if IsKeychainAvailable() {
-		return envVar + " not found (set env var or run 'erg configure' to store in macOS Keychain)"
+		return fmt.Errorf("%s not found (set env var or run 'erg configure' to store in macOS Keychain)", envVar)
 	}
-	return envVar + " not found (set the " + envVar + " environment variable)"
+	return fmt.Errorf("%s not found (set the %s environment variable)", envVar, envVar)
 }
 
 // Get retrieves a secret from the macOS Keychain by service name.

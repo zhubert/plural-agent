@@ -182,22 +182,7 @@ func checkPrereqs(output io.Writer, checker prereqCheckerFn) bool {
 }
 
 func collectAsanaConfig(scanner *bufio.Scanner, input io.Reader, output io.Writer, cfg *workflow.WizardConfig) {
-	if secrets.IsKeychainAvailable() {
-		fmt.Fprintln(output, "You can store your Asana PAT in the macOS Keychain")
-		fmt.Fprintln(output, "so erg works via brew services without shell env vars.")
-		fmt.Fprintln(output)
-		if promptYN(scanner, output, "Store ASANA_PAT in Keychain?", true) {
-			pat := promptSecret(scanner, input, output, "Paste your Asana PAT")
-			if pat != "" {
-				if err := secrets.Set(secrets.AsanaPATService, pat); err != nil {
-					fmt.Fprintf(output, "Warning: failed to store in Keychain: %v\n", err)
-				} else {
-					fmt.Fprintln(output, "Saved to macOS Keychain.")
-				}
-			}
-		}
-		fmt.Fprintln(output)
-	}
+	promptKeychainStore(scanner, input, output, "Asana PAT", "ASANA_PAT", secrets.AsanaPATService)
 
 	cfg.Project = promptString(scanner, output, "Asana project GID (from URL: https://app.asana.com/0/GID/list)")
 
@@ -219,22 +204,7 @@ func collectAsanaConfig(scanner *bufio.Scanner, input io.Reader, output io.Write
 }
 
 func collectLinearConfig(scanner *bufio.Scanner, input io.Reader, output io.Writer, cfg *workflow.WizardConfig) {
-	if secrets.IsKeychainAvailable() {
-		fmt.Fprintln(output, "You can store your Linear API key in the macOS Keychain")
-		fmt.Fprintln(output, "so erg works via brew services without shell env vars.")
-		fmt.Fprintln(output)
-		if promptYN(scanner, output, "Store LINEAR_API_KEY in Keychain?", true) {
-			key := promptSecret(scanner, input, output, "Paste your Linear API key")
-			if key != "" {
-				if err := secrets.Set(secrets.LinearAPIKeyService, key); err != nil {
-					fmt.Fprintf(output, "Warning: failed to store in Keychain: %v\n", err)
-				} else {
-					fmt.Fprintln(output, "Saved to macOS Keychain.")
-				}
-			}
-		}
-		fmt.Fprintln(output)
-	}
+	promptKeychainStore(scanner, input, output, "Linear API key", "LINEAR_API_KEY", secrets.LinearAPIKeyService)
 
 	cfg.Team = promptString(scanner, output, "Linear team ID (from Settings → API)")
 
@@ -418,6 +388,28 @@ func promptSelect(scanner *bufio.Scanner, output io.Writer, prompt string, optio
 		return options[0]
 	}
 	return ""
+}
+
+// promptKeychainStore offers to store a secret in the macOS Keychain.
+// No-op on non-macOS platforms.
+func promptKeychainStore(scanner *bufio.Scanner, input io.Reader, output io.Writer, displayName, envVar, service string) {
+	if !secrets.IsKeychainAvailable() {
+		return
+	}
+	fmt.Fprintf(output, "You can store your %s in the macOS Keychain\n", displayName)
+	fmt.Fprintln(output, "so erg works via brew services without shell env vars.")
+	fmt.Fprintln(output)
+	if promptYN(scanner, output, "Store "+envVar+" in Keychain?", true) {
+		val := promptSecret(scanner, input, output, "Paste your "+displayName)
+		if val != "" {
+			if err := secrets.Set(service, val); err != nil {
+				fmt.Fprintf(output, "Warning: failed to store in Keychain: %v\n", err)
+			} else {
+				fmt.Fprintln(output, "Saved to macOS Keychain.")
+			}
+		}
+	}
+	fmt.Fprintln(output)
 }
 
 // promptSecret shows a prompt and reads input without echoing to the terminal.
