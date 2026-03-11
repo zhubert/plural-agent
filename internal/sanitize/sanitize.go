@@ -69,25 +69,31 @@ var htmlTagPairs = []struct {
 
 func stripHiddenHTMLBlocks(s string) string {
 	for _, pair := range htmlTagPairs {
+		pos := 0
 		for {
-			loc := pair.open.FindStringIndex(s)
+			loc := pair.open.FindStringIndex(s[pos:])
 			if loc == nil {
 				break
 			}
-			openTag := s[loc[0]:loc[1]]
+			abs0 := pos + loc[0]
+			abs1 := pos + loc[1]
+			openTag := s[abs0:abs1]
 			if !hiddenStyleRE.MatchString(openTag) {
-				// This tag isn't hidden — skip past it to avoid infinite loop.
-				// We search the remainder of the string on the next iteration.
-				break
+				// Not hidden — advance past this tag and keep scanning so
+				// hidden elements later in the string are not missed.
+				pos = abs1
+				continue
 			}
-			closeIdx := strings.Index(s[loc[1]:], pair.close)
+			closeIdx := strings.Index(s[abs1:], pair.close)
 			if closeIdx < 0 {
 				// No closing tag found — strip from open tag to end.
-				s = s[:loc[0]]
+				s = s[:abs0]
 				break
 			}
-			end := loc[1] + closeIdx + len(pair.close)
-			s = s[:loc[0]] + s[end:]
+			end := abs1 + closeIdx + len(pair.close)
+			s = s[:abs0] + s[end:]
+			// Don't advance pos — re-scan from the same position after removal
+			// in case there are consecutive hidden elements.
 		}
 	}
 	return s

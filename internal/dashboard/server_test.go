@@ -8,11 +8,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	iexec "github.com/zhubert/erg/internal/exec"
+	"github.com/zhubert/erg/internal/logger"
 )
 
 // mockController is a SessionController implementation for tests.
@@ -113,6 +116,54 @@ func TestHandleSSE(t *testing.T) {
 	data := string(buf[:n])
 	if !strings.HasPrefix(data, "data: ") {
 		t.Errorf("expected SSE data prefix, got: %s", data[:min(50, len(data))])
+	}
+}
+
+func TestHandleLogs_TailCapped(t *testing.T) {
+	// Write a temporary stream log with more than maxTailLines entries and
+	// assert the response contains at most maxTailLines log lines.
+	sessionID := "tail-cap-test"
+	logPath, err := logger.StreamLogPath(sessionID)
+	if err != nil {
+		t.Fatalf("stream log path: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(logPath) })
+
+	// Ensure the logs directory exists.
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Each stream log entry with one text line produces one LogLine.
+	totalLines := maxTailLines + 500
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create log file: %v", err)
+	}
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(f, `{"type":"assistant","message":{"content":[{"type":"text","text":"line %d"}]}}`+"\n", i)
+	}
+	f.Close()
+
+	srv := New("localhost:0")
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/logs/%s?tail=1000000000", sessionID), nil)
+	req.SetPathValue("sessionID", sessionID)
+	w := httptest.NewRecorder()
+	srv.handleLogs(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Result().StatusCode, w.Body.String())
+	}
+
+	var lines []LogLine
+	if err := json.NewDecoder(w.Body).Decode(&lines); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(lines) > maxTailLines {
+		t.Errorf("expected at most %d lines, got %d", maxTailLines, len(lines))
+	}
+	if len(lines) != maxTailLines {
+		t.Errorf("expected exactly %d lines (capped), got %d", maxTailLines, len(lines))
 	}
 }
 
@@ -258,6 +309,59 @@ func TestHandleCapabilities_WithController(t *testing.T) {
 	}
 	if !caps["control"] {
 		t.Error("expected control=true with controller set")
+	}
+}
+
+func TestHandleStop_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	cases := []struct {
+		name   string
+		itemID string
+	}{
+		{"empty", ""},
+		{"slash", "foo/bar"},
+		{"backslash", "foo\\bar"},
+		{"dotdot", "../../etc"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/workitems/x/stop", nil)
+			req.SetPathValue("itemID", tt.itemID)
+			w := httptest.NewRecorder()
+			srv.handleStop(w, req)
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400 for itemID %q, got %d", tt.itemID, w.Result().StatusCode)
+			}
+		})
+	}
+}
+
+func TestHandleRetry_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	req := httptest.NewRequest("POST", "/api/workitems/x/retry", nil)
+	req.SetPathValue("itemID", "../evil")
+	w := httptest.NewRecorder()
+	srv.handleRetry(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal itemID, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleMessage_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	body := bytes.NewBufferString(`{"message":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/workitems/x/message", body)
+	req.SetPathValue("itemID", "foo/bar")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal itemID, got %d", w.Result().StatusCode)
 	}
 }
 
@@ -757,7 +861,7 @@ func TestValidateLoopback(t *testing.T) {
 		{"localhost", "localhost:8080", false},
 		{"127.0.0.1", "127.0.0.1:8080", false},
 		{"::1", "[::1]:8080", false},
-		{"empty host", ":8080", false},
+		{"empty host", ":8080", true},
 		{"0.0.0.0 rejected", "0.0.0.0:8080", true},
 		{"public IP rejected", "192.168.1.1:8080", true},
 		{"no port", "localhost", true},
