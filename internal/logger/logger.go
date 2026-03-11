@@ -68,12 +68,12 @@ func Init(path string) error {
 
 	// Ensure the directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create log directory %s: %w", dir, err)
 	}
 
 	logPath = path
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file %s: %w", path, err)
 	}
@@ -101,13 +101,13 @@ func ensureInit() {
 
 	// Ensure the logs directory exists
 	dir := filepath.Dir(defaultPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory %s: %v\n", dir, err)
 		return
 	}
 
 	logPath = defaultPath
-	f, err := os.OpenFile(defaultPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(defaultPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to open log file %s: %v\n", defaultPath, err)
 		return
