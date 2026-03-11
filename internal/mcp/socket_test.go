@@ -460,6 +460,15 @@ func TestNewTCPSocketServer(t *testing.T) {
 		t.Error("TCPAddr() returned empty string")
 	}
 
+	// The listener must be bound to loopback only (security regression check)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		t.Fatalf("failed to parse TCPAddr %q: %v", addr, err)
+	}
+	if !tcpAddr.IP.IsLoopback() {
+		t.Errorf("TCPAddr() = %q, want loopback address (127.0.0.1)", addr)
+	}
+
 	// TCPPort should return a positive port number
 	port := server.TCPPort()
 	if port <= 0 {

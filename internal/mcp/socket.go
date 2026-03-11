@@ -170,8 +170,8 @@ func WithHostToolChannels(
 }
 
 // NewTCPSocketServer creates a socket server that listens on TCP instead of a
-// Unix socket. Used for container sessions where Unix sockets can't cross the
-// Docker container boundary.
+// Unix socket. This is a legacy/testing helper and is not used by current
+// production container sessions.
 //
 // Binds to 127.0.0.1 (loopback only). This function is legacy/unused in the
 // current production container flow: production sessions use a reversed-TCP
