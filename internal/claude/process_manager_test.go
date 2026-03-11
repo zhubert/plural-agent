@@ -1890,9 +1890,8 @@ func TestKeychainNeedsRefresh_ExpiredTokenDetection(t *testing.T) {
 				}
 				return
 			}
-			// Replicate the logic in KeychainNeedsRefresh.
-			needRefresh := creds.ClaudeAiOauth.AccessToken == "" ||
-				(creds.ClaudeAiOauth.ExpiresAt > 0 && time.Now().UnixMilli() >= creds.ClaudeAiOauth.ExpiresAt)
+			// Use the same helper that KeychainNeedsRefresh calls.
+			needRefresh := oauthNeedsRefresh(creds)
 			if needRefresh != tt.needRefresh {
 				t.Errorf("got needRefresh=%v, want %v", needRefresh, tt.needRefresh)
 			}

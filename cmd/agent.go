@@ -90,7 +90,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	// Also refresh when the keychain entry exists but the token is expired —
 	// otherwise ContainerAuthSource() returns "" and we'd skip the refresh.
 	authSource := claude.ContainerAuthSource()
-	if strings.Contains(authSource, "keychain") || claude.KeychainNeedsRefresh() {
+	if strings.Contains(authSource, "keychain") || (authSource == "" && claude.KeychainNeedsRefresh()) {
 		if out, err := exec.Command("claude", "-v").Output(); err == nil {
 			fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
 		}
@@ -360,7 +360,7 @@ func runForeground(_ *cobra.Command, _ []string) error {
 	// Also refresh when the keychain entry exists but the token is expired —
 	// otherwise ContainerAuthSource() returns "" and we'd skip the refresh.
 	authSource := claude.ContainerAuthSource()
-	if strings.Contains(authSource, "keychain") || claude.KeychainNeedsRefresh() {
+	if strings.Contains(authSource, "keychain") || (authSource == "" && claude.KeychainNeedsRefresh()) {
 		if out, err := exec.Command("claude", "-v").Output(); err == nil {
 			fmt.Printf("Claude: %s\n", strings.TrimSpace(string(out)))
 		}
