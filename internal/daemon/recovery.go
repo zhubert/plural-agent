@@ -77,8 +77,11 @@ func (d *Daemon) rebuildStateFromTracker(ctx context.Context) {
 			"repo", repoPath, "provider", provider, "issues", len(fetchedIssues))
 
 		for _, issue := range fetchedIssues {
-			// Skip if a terminal item already exists for this issue
-			if d.state.HasWorkItemForIssue(string(provider), issue.ID) {
+			// Skip if an item already exists for this issue in this repo.
+			// Use the repo-scoped work item ID to avoid collisions when
+			// different repos have issues with the same number.
+			workItemID := fmt.Sprintf("%s-%s", repoPath, issue.ID)
+			if _, exists := d.state.GetWorkItem(workItemID); exists {
 				continue
 			}
 
@@ -164,7 +167,16 @@ func (d *Daemon) rebuildGitHubWorkItem(
 		return item
 	}
 
+	// Prefer an open PR over a merged one — an open PR represents active
+	// work, whereas a merged PR may be from a previous attempt while a
+	// newer open PR supersedes it.
 	pr := linkedPRs[0]
+	for _, candidate := range linkedPRs {
+		if candidate.State == git.PRStateOpen {
+			pr = candidate
+			break
+		}
+	}
 	item.Branch = pr.HeadRefName
 	item.PRURL = pr.URL
 
@@ -194,9 +206,15 @@ func (d *Daemon) rebuildGitHubWorkItem(
 	sessionID := uuid.New().String()
 	item.SessionID = sessionID
 
+	var worktreePath string
+	if worktreesDir, err := paths.WorktreesDir(); err == nil {
+		worktreePath = filepath.Join(worktreesDir, sessionID)
+	}
+
 	sess := config.Session{
 		ID:            sessionID,
 		RepoPath:      repoPath,
+		WorkTree:      worktreePath,
 		Branch:        pr.HeadRefName,
 		DaemonManaged: true,
 		Autonomous:    true,
@@ -226,13 +244,21 @@ func (d *Daemon) rebuildGenericWorkItem(
 	// For non-GitHub providers without a PR concept, we can still probe
 	// wait states using event checkers (e.g., asana.in_section, linear.in_state).
 	// However, we need a session for the event checker to resolve the repo path.
-	// Create a minimal session.
+	// Create a minimal session with Branch and WorkTree populated so
+	// downstream code that inspects the session doesn't get empty values.
 	sessionID := uuid.New().String()
 	item.SessionID = sessionID
+
+	var worktreePath string
+	if worktreesDir, err := paths.WorktreesDir(); err == nil {
+		worktreePath = filepath.Join(worktreesDir, sessionID)
+	}
 
 	sess := config.Session{
 		ID:            sessionID,
 		RepoPath:      repoPath,
+		WorkTree:      worktreePath,
+		Branch:        item.Branch,
 		DaemonManaged: true,
 		Autonomous:    true,
 		Containerized: true,
@@ -313,17 +339,19 @@ func (d *Daemon) walkWorkflowForPosition(
 		lastSatisfiedIdx = i
 	}
 
-	// All wait states satisfied — place at the sync task after the last wait state.
-	// This is typically the "merge" step.
-	if lastSatisfiedIdx >= 0 && lastSatisfiedIdx < len(waitStates) {
+	// All wait states satisfied — place at the last wait state rather than
+	// the sync task after it. processWaitItems / processCIItems will detect
+	// that the event has already fired, advance the item, and call
+	// executeSyncChain to run any subsequent sync steps (choice, pass, task).
+	// Placing directly at a sync step would leave the item stuck because
+	// normal polling only processes wait states.
+	if lastSatisfiedIdx >= 0 {
 		lastWS := waitStates[lastSatisfiedIdx]
-		if lastWS.NextStep != "" && !engine.IsTerminalState(lastWS.NextStep) {
-			item.State = daemonstate.WorkItemActive
-			item.CurrentStep = lastWS.NextStep
-			item.Phase = "idle"
-			log.Info("all wait states satisfied, placing at next sync step", "state", lastWS.NextStep)
-			return item
-		}
+		item.State = daemonstate.WorkItemActive
+		item.CurrentStep = lastWS.Name
+		item.Phase = "idle"
+		log.Info("all wait states satisfied, placing at last wait state for re-evaluation", "state", lastWS.Name)
+		return item
 	}
 
 	// If we somehow got here, place at the first wait state as a safe default

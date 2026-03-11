@@ -687,9 +687,10 @@ type WaitStateInfo struct {
 }
 
 // GetOrderedWaitStates returns all wait states reachable from the start state,
-// in BFS order following only the happy-path edges (Next, choices, default).
-// This gives a deterministic order for probing which workflow phases have been
-// completed, which is used by state reconstruction on startup.
+// in BFS order following all outgoing edges (Next, choices, default, error and
+// timeout handlers). This ensures wait states on every reachable path are
+// discovered, giving a deterministic order for probing which workflow phases
+// have been completed during state reconstruction on startup.
 func (e *Engine) GetOrderedWaitStates() []WaitStateInfo {
 	if e.config == nil || e.config.States == nil || e.config.Start == "" {
 		return nil

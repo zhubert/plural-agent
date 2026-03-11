@@ -11,7 +11,6 @@ import (
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
 	"github.com/zhubert/erg/internal/git"
-	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/workflow"
 )
 
@@ -561,12 +560,12 @@ func TestRebuild_OpenPR_ReviewApproved_PlacesAtMerge(t *testing.T) {
 		t.Fatalf("expected 1 active item, got %d", len(items))
 	}
 	// After CI passes and review is approved, the item should be placed at
-	// the merge step (the sync task after the last satisfied wait state).
-	// However, since mock matching is first-match and the review check might
-	// not parse correctly, let's check it's at least past await_ci.
+	// the last satisfied wait state (await_review) rather than the sync step
+	// after it. Normal polling will detect the event has fired and call
+	// executeSyncChain to advance through remaining sync steps.
 	step := items[0].CurrentStep
-	if step != "merge" && step != "await_review" && step != "check_review_result" {
-		t.Errorf("expected step merge or await_review, got %s", step)
+	if step != "await_review" && step != "check_review_result" {
+		t.Errorf("expected step await_review or check_review_result, got %s", step)
 	}
 }
 
@@ -867,5 +866,164 @@ func TestAddRebuiltWorkItem_PreservesState(t *testing.T) {
 	}
 }
 
-// Ensure the issues import is used for type reference.
-var _ = issues.SourceGitHub
+func TestRebuild_OpenPR_PrefersOpenOverMerged(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: mockGitHubIssuesList([]git.GitHubIssue{
+			{Number: 42, Title: "Fix bug", URL: "https://github.com/owner/repo/issues/42"},
+		}),
+	})
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	// Return both a merged PR and an open PR — open should be preferred
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: mockGitHubGraphQL([]git.LinkedPR{
+			{Number: 5, State: git.PRStateMerged, URL: "https://github.com/owner/repo/pull/5", HeadRefName: "old-branch"},
+			{Number: 10, State: git.PRStateOpen, URL: "https://github.com/owner/repo/pull/10", HeadRefName: "new-branch"},
+		}),
+	})
+
+	// CI pending for the open PR
+	prViewJSON, _ := json.Marshal(struct {
+		MergeableStatus string `json:"mergeable"`
+	}{MergeableStatus: "MERGEABLE"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Err: fmt.Errorf("no checks yet"),
+	})
+
+	d, _ := setupRebuildDaemon(t, mockExec)
+	d.rebuildStateFromTracker(context.Background())
+
+	items := d.state.GetActiveWorkItems()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 active item, got %d", len(items))
+	}
+	// Should use the open PR's branch, not the merged one
+	if items[0].Branch != "new-branch" {
+		t.Errorf("expected branch new-branch (open PR), got %s", items[0].Branch)
+	}
+	if items[0].PRURL != "https://github.com/owner/repo/pull/10" {
+		t.Errorf("expected open PR URL, got %s", items[0].PRURL)
+	}
+}
+
+func TestRebuild_MultiRepo_SameIssueNumber_NotSkipped(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Both repos return issue #42
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: mockGitHubIssuesList([]git.GitHubIssue{
+			{Number: 42, Title: "Fix bug", URL: "https://github.com/owner/repo/issues/42"},
+		}),
+	})
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	// No PRs
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: mockGitHubGraphQL(nil),
+	})
+
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo-a", "/test/repo-b"}
+	d := testDaemonWithExec(cfg, mockExec)
+	d.autoMerge = true
+	// Signal multi-repo mode so matchesRepoFilter allows all configured repos
+	d.repoWorkflowFiles = map[string]string{
+		"/test/repo-a": "",
+		"/test/repo-b": "",
+	}
+
+	// Register workflow configs and engines for both repos
+	wfCfg := workflow.DefaultWorkflowConfig()
+	checker := newEventChecker(d)
+	for _, repo := range cfg.Repos {
+		d.workflowConfigs[repo] = wfCfg
+		d.engines[repo] = workflow.NewEngine(wfCfg, d.buildActionRegistry(), checker, discardLogger())
+	}
+
+	d.rebuildStateFromTracker(context.Background())
+
+	// Should have two separate work items, one for each repo
+	items := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 queued items (one per repo), got %d", len(items))
+	}
+
+	// Verify they have different IDs scoped to their repos
+	ids := map[string]bool{}
+	for _, item := range items {
+		ids[item.ID] = true
+	}
+	if !ids["/test/repo-a-42"] {
+		t.Error("expected work item for repo-a issue 42")
+	}
+	if !ids["/test/repo-b-42"] {
+		t.Error("expected work item for repo-b issue 42")
+	}
+}
+
+func TestRebuild_AllWaitStatesSatisfied_PlacesAtLastWaitState(t *testing.T) {
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: mockGitHubIssuesList([]git.GitHubIssue{
+			{Number: 42, Title: "Fix bug", URL: "https://github.com/owner/repo/issues/42"},
+		}),
+	})
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: mockGitHubGraphQL([]git.LinkedPR{
+			{Number: 10, State: git.PRStateOpen, URL: "https://github.com/owner/repo/pull/10", HeadRefName: "fix-bug"},
+		}),
+	})
+
+	// CI passes
+	prViewJSON, _ := json.Marshal(struct {
+		MergeableStatus string `json:"mergeable"`
+	}{MergeableStatus: "MERGEABLE"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Stdout: []byte("check1\tpass\t\t\n"),
+	})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "list"}, exec.MockResponse{
+		Stdout: func() []byte {
+			data, _ := json.Marshal([]struct {
+				HeadRefName  string `json:"headRefName"`
+				State        string `json:"state"`
+				CommentCount int    `json:"comments"`
+			}{
+				{HeadRefName: "fix-bug", State: "OPEN", CommentCount: 0},
+			})
+			return data
+		}(),
+	})
+
+	d, _ := setupRebuildDaemon(t, mockExec)
+	d.rebuildStateFromTracker(context.Background())
+
+	items := d.state.GetActiveWorkItems()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 active item, got %d", len(items))
+	}
+	// Should be at a wait state, NOT at a sync task like "merge"
+	step := items[0].CurrentStep
+	if step == "merge" || step == "check_ci_result" || step == "check_review_result" {
+		t.Errorf("expected item at a wait state, not sync step %s", step)
+	}
+}
