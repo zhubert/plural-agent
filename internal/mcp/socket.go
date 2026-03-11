@@ -173,14 +173,21 @@ func WithHostToolChannels(
 // Unix socket. Used for container sessions where Unix sockets can't cross the
 // Docker container boundary.
 //
-// Binds to 0.0.0.0 (all interfaces) because host.docker.internal may resolve
-// to a non-loopback IP depending on the Docker runtime. For example, Colima
-// routes through the Lima VM bridge rather than loopback. The port is ephemeral
-// and short-lived (session lifetime only).
+// Binds to 127.0.0.1 (loopback only). This function is legacy/unused in the
+// current production container flow: production sessions use a reversed-TCP
+// design where the MCP subprocess inside the container listens and the host
+// dials in via NewDialingSocketServer. The original rationale for binding to
+// 0.0.0.0 — that host.docker.internal may resolve to a non-loopback IP on
+// Colima — no longer applies since the TCP direction was reversed. The host-side
+// server only needs to be reachable locally.
+//
+// Note: if this function is ever reintroduced for the legacy container→host
+// TCP path on Colima (where host.docker.internal resolves to a VM bridge IP),
+// the bind address would need to revert to 0.0.0.0.
 func NewTCPSocketServer(sessionID string, reqCh chan<- PermissionRequest, respCh <-chan PermissionResponse, questCh chan<- QuestionRequest, ansCh <-chan QuestionResponse, planReqCh chan<- PlanApprovalRequest, planRespCh <-chan PlanApprovalResponse, opts ...SocketServerOption) (*SocketServer, error) {
 	log := logger.WithSession(sessionID).With("component", "mcp-socket")
 
-	bindAddr := "0.0.0.0:0"
+	bindAddr := "127.0.0.1:0"
 	listener, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		return nil, err

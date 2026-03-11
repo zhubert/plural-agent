@@ -163,6 +163,17 @@ func (r *Runner) createMCPConfigLocked(socketPath string) (string, error) {
 // The MCP subprocess listens on containerPort and the host dials in.
 // Must be called with mu held.
 func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, error) {
+	// Bind to 0.0.0.0 inside the container (all interfaces) rather than a specific
+	// container IP. This is required for Docker's DNAT port forwarding (-p 0:21120)
+	// to route host connections to the container: Docker forwards to the container's
+	// eth0 IP, not loopback, so binding only to 127.0.0.1 would make the port
+	// unreachable from the host.
+	//
+	// Accepted risk: other containers on the same Docker bridge network could connect
+	// to port 21120. This is mitigated by Docker's default bridge isolation between
+	// sessions, short session lifetimes, and the MCP protocol requiring structured
+	// JSON that is not trivially exploitable. Restricting to a per-session bridge
+	// network would eliminate this risk but is a larger separate change.
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", containerPort)
 	args := []string{"mcp-server", "--listen", listenAddr, "--auto-approve", "--session-id", r.sessionID}
 	if r.hostTools {
