@@ -273,8 +273,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Load workflow configs for all repos
 	d.loadWorkflowConfigs()
 
-	// Recover from any interrupted state
-	d.recoverFromState(ctx)
+	// Rebuild state from the issue tracker. This scans for active issues,
+	// queries the tracker for their actual progress (PR state, CI, review),
+	// and places each work item at the correct workflow step.
+	d.rebuildStateFromTracker(ctx)
 
 	// Immediate first tick
 	d.tick(ctx)

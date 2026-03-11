@@ -459,6 +459,42 @@ func (s *DaemonState) PruneTerminalItems(maxAge time.Duration) int {
 	return pruned
 }
 
+// ClearNonTerminalItems removes all non-terminal (queued and active) work items.
+// Terminal items (completed, failed) are preserved for dashboard display and history.
+// This is used during state reconstruction to wipe stale in-progress items before
+// rebuilding them from the issue tracker.
+func (s *DaemonState) ClearNonTerminalItems() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, item := range s.WorkItems {
+		if !item.IsTerminal() {
+			delete(s.WorkItems, id)
+		}
+	}
+}
+
+// AddRebuiltWorkItem adds a work item that was rebuilt from the issue tracker.
+// Unlike AddWorkItem, this allows setting State and CurrentStep directly
+// (not forced to Queued), and does not overwrite fields already set by the caller.
+func (s *DaemonState) AddRebuiltWorkItem(item *WorkItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.UpdatedAt = now
+	if item.StepEnteredAt.IsZero() {
+		item.StepEnteredAt = now
+	}
+	if item.StepData == nil {
+		item.StepData = make(map[string]any)
+	}
+	s.WorkItems[item.ID] = item
+}
+
 // ClearState removes all daemon state files from disk.
 // Returns nil if no files exist.
 func ClearState() error {

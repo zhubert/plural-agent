@@ -2,23 +2,371 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zhubert/erg/internal/config"
-	"github.com/zhubert/erg/internal/workflow"
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/paths"
+	"github.com/zhubert/erg/internal/workflow"
 )
 
-// reconstructSessions creates minimal config.Session objects for recovered work items
-// whose sessions are missing from the in-memory config. On daemon restart, the config
-// starts empty (AgentConfig.Save() is a no-op), so all sessions are lost. Without
-// reconstruction, GetSession() returns nil and every polling path silently skips
-// recovered items forever.
+// rebuildStateFromTracker scans the issue tracker for active work items and
+// rebuilds daemon state from scratch. Instead of trusting the persisted state
+// file, it queries the tracker to determine what's actually completed, walks
+// the workflow graph, and places each item at the correct step.
+//
+// Terminal items (completed/failed) are preserved from the old state for
+// dashboard display and history. All non-terminal items are discarded and
+// rebuilt from the tracker.
+func (d *Daemon) rebuildStateFromTracker(ctx context.Context) {
+	if d.state == nil {
+		return
+	}
+
+	log := d.logger.With("component", "rebuild")
+
+	// 1. Clear all non-terminal items — we'll rebuild them from the tracker.
+	d.state.ClearNonTerminalItems()
+
+	// 2. For each repo, fetch issues matching the workflow filter and rebuild.
+	repos := d.config.GetRepos()
+
+	// In single-repo mode with a repoFilter but no repos in config yet,
+	// use findRepoPath to discover it.
+	if len(repos) == 0 && d.repoFilter != "" {
+		if rp := d.findRepoPath(ctx); rp != "" {
+			repos = []string{rp}
+		}
+	}
+
+	if len(repos) == 0 {
+		log.Debug("no repos to rebuild state for")
+		return
+	}
+
+	rebuildCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
+	defer cancel()
+
+	for _, repoPath := range repos {
+		if !d.matchesRepoFilter(ctx, repoPath) {
+			continue
+		}
+
+		wfCfg := d.getWorkflowConfig(repoPath)
+		engine := d.getEngine(repoPath)
+		if engine == nil {
+			log.Warn("no workflow engine for repo, skipping rebuild", "repo", repoPath)
+			continue
+		}
+
+		provider := issues.Source(wfCfg.Source.Provider)
+
+		fetchedIssues, err := d.fetchIssuesForProvider(rebuildCtx, repoPath, wfCfg)
+		if err != nil {
+			log.Warn("failed to fetch issues for rebuild", "repo", repoPath, "error", err)
+			continue
+		}
+
+		log.Info("rebuilding state from tracker",
+			"repo", repoPath, "provider", provider, "issues", len(fetchedIssues))
+
+		for _, issue := range fetchedIssues {
+			// Skip if an item already exists for this issue in this repo.
+			// Use the repo-scoped work item ID to avoid collisions when
+			// different repos have issues with the same number.
+			workItemID := fmt.Sprintf("%s-%s", repoPath, issue.ID)
+			if _, exists := d.state.GetWorkItem(workItemID); exists {
+				continue
+			}
+
+			item := d.rebuildWorkItem(rebuildCtx, repoPath, issue, engine, provider)
+			if item != nil {
+				d.state.AddRebuiltWorkItem(item)
+				log.Info("rebuilt work item",
+					"issue", issue.ID, "title", issue.Title,
+					"step", item.CurrentStep, "state", item.State,
+					"branch", item.Branch)
+			}
+		}
+	}
+
+	// 3. Reconstruct sessions for all rebuilt items so GetSession() works.
+	d.reconstructSessions()
+}
+
+// rebuildWorkItem determines the correct workflow position for a single issue
+// by querying the tracker for artifacts (PR, CI, review status) and walking
+// the workflow graph.
+func (d *Daemon) rebuildWorkItem(
+	ctx context.Context,
+	repoPath string,
+	issue issues.Issue,
+	engine *workflow.Engine,
+	provider issues.Source,
+) *daemonstate.WorkItem {
+	log := d.logger.With("component", "rebuild", "issue", issue.ID)
+
+	item := &daemonstate.WorkItem{
+		ID: fmt.Sprintf("%s-%s", repoPath, issue.ID),
+		IssueRef: config.IssueRef{
+			Source: string(provider),
+			ID:     issue.ID,
+			Title:  issue.Title,
+			URL:    issue.URL,
+		},
+		StepData: map[string]any{
+			"_repo_path": repoPath,
+		},
+	}
+	if issue.Body != "" {
+		item.StepData["issue_body"] = issue.Body
+	}
+
+	// For GitHub, check for linked PRs to determine progress.
+	if provider == issues.SourceGitHub {
+		return d.rebuildGitHubWorkItem(ctx, repoPath, issue, engine, item, log)
+	}
+
+	// For non-GitHub providers, use event checkers to probe wait states.
+	return d.rebuildGenericWorkItem(ctx, repoPath, engine, item, log)
+}
+
+// rebuildGitHubWorkItem handles GitHub-specific reconstruction by checking
+// for linked PRs and their state.
+func (d *Daemon) rebuildGitHubWorkItem(
+	ctx context.Context,
+	repoPath string,
+	issue issues.Issue,
+	engine *workflow.Engine,
+	item *daemonstate.WorkItem,
+	log interface{ Info(string, ...any); Debug(string, ...any) },
+) *daemonstate.WorkItem {
+	issueNum, err := strconv.Atoi(issue.ID)
+	if err != nil {
+		// Not a valid GitHub issue number — queue from start
+		item.State = daemonstate.WorkItemQueued
+		return item
+	}
+
+	linkedPRs, err := d.gitService.GetLinkedPRsForIssue(ctx, repoPath, issueNum)
+	if err != nil {
+		log.Debug("failed to check linked PRs, queuing from start", "error", err)
+		item.State = daemonstate.WorkItemQueued
+		return item
+	}
+
+	if len(linkedPRs) == 0 {
+		// No PR exists — start from the beginning
+		item.State = daemonstate.WorkItemQueued
+		return item
+	}
+
+	// Prefer an open PR over a merged one — an open PR represents active
+	// work, whereas a merged PR may be from a previous attempt while a
+	// newer open PR supersedes it.
+	pr := linkedPRs[0]
+	for _, candidate := range linkedPRs {
+		if candidate.State == git.PRStateOpen {
+			pr = candidate
+			break
+		}
+	}
+	item.Branch = pr.HeadRefName
+	item.PRURL = pr.URL
+
+	// PR merged → terminal success
+	if pr.State == git.PRStateMerged {
+		now := time.Now()
+		item.State = daemonstate.WorkItemCompleted
+		item.CurrentStep = "done"
+		item.Phase = "idle"
+		item.CompletedAt = &now
+		return item
+	}
+
+	// PR closed → terminal failure
+	if pr.State == git.PRStateClosed {
+		now := time.Now()
+		item.State = daemonstate.WorkItemFailed
+		item.CurrentStep = "failed"
+		item.Phase = "idle"
+		item.CompletedAt = &now
+		item.ErrorMessage = "PR was closed"
+		return item
+	}
+
+	// PR is open — create a synthetic session so event checkers work,
+	// then walk the workflow to find the correct position.
+	sessionID := uuid.New().String()
+	item.SessionID = sessionID
+
+	var worktreePath string
+	if worktreesDir, err := paths.WorktreesDir(); err == nil {
+		worktreePath = filepath.Join(worktreesDir, sessionID)
+	}
+
+	sess := config.Session{
+		ID:            sessionID,
+		RepoPath:      repoPath,
+		WorkTree:      worktreePath,
+		Branch:        pr.HeadRefName,
+		DaemonManaged: true,
+		Autonomous:    true,
+		Containerized: true,
+		Started:       true,
+		IssueRef: &config.IssueRef{
+			Source: item.IssueRef.Source,
+			ID:     item.IssueRef.ID,
+			Title:  item.IssueRef.Title,
+			URL:    item.IssueRef.URL,
+		},
+	}
+	d.config.AddSession(sess)
+
+	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log)
+}
+
+// rebuildGenericWorkItem handles non-GitHub providers by walking the workflow
+// and probing wait states with event checkers.
+func (d *Daemon) rebuildGenericWorkItem(
+	ctx context.Context,
+	repoPath string,
+	engine *workflow.Engine,
+	item *daemonstate.WorkItem,
+	log interface{ Info(string, ...any); Debug(string, ...any) },
+) *daemonstate.WorkItem {
+	// For non-GitHub providers without a PR concept, we can still probe
+	// wait states using event checkers (e.g., asana.in_section, linear.in_state).
+	// However, we need a session for the event checker to resolve the repo path.
+	// Create a minimal session with Branch and WorkTree populated so
+	// downstream code that inspects the session doesn't get empty values.
+	sessionID := uuid.New().String()
+	item.SessionID = sessionID
+
+	var worktreePath string
+	if worktreesDir, err := paths.WorktreesDir(); err == nil {
+		worktreePath = filepath.Join(worktreesDir, sessionID)
+	}
+
+	sess := config.Session{
+		ID:            sessionID,
+		RepoPath:      repoPath,
+		WorkTree:      worktreePath,
+		Branch:        item.Branch,
+		DaemonManaged: true,
+		Autonomous:    true,
+		Containerized: true,
+		Started:       true,
+		IssueRef: &config.IssueRef{
+			Source: item.IssueRef.Source,
+			ID:     item.IssueRef.ID,
+			Title:  item.IssueRef.Title,
+			URL:    item.IssueRef.URL,
+		},
+	}
+	d.config.AddSession(sess)
+
+	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log)
+}
+
+// walkWorkflowForPosition walks the workflow's wait states in BFS order,
+// probing each with the event checker to determine which have been satisfied.
+// It places the work item at the first unsatisfied wait state.
+func (d *Daemon) walkWorkflowForPosition(
+	ctx context.Context,
+	repoPath string,
+	engine *workflow.Engine,
+	item *daemonstate.WorkItem,
+	log interface{ Info(string, ...any); Debug(string, ...any) },
+) *daemonstate.WorkItem {
+	checker := newEventChecker(d)
+	waitStates := engine.GetOrderedWaitStates()
+
+	if len(waitStates) == 0 {
+		// No wait states in workflow — queue from start
+		item.State = daemonstate.WorkItemQueued
+		return item
+	}
+
+	var lastSatisfiedIdx = -1
+
+	for i, ws := range waitStates {
+		// Build a probe view for this wait state
+		view := &workflow.WorkItemView{
+			ID:        item.ID,
+			SessionID: item.SessionID,
+			RepoPath:  repoPath,
+			Branch:    item.Branch,
+			PRURL:     item.PRURL,
+			CurrentStep: ws.Name,
+			Phase:       "idle",
+			StepData:    item.StepData,
+			StepEnteredAt: time.Now().Add(-1 * time.Hour), // backdate so timeouts don't fire
+		}
+
+		params := workflow.NewParamHelper(ws.Params)
+		fired, data, err := checker.CheckEvent(ctx, ws.Event, params, view)
+		if err != nil {
+			log.Debug("event check error during rebuild", "event", ws.Event, "state", ws.Name, "error", err)
+			// Can't determine — place at this wait state
+			item.State = daemonstate.WorkItemActive
+			item.CurrentStep = ws.Name
+			item.Phase = "idle"
+			return item
+		}
+
+		if !fired {
+			// This wait state hasn't been satisfied — place item here
+			item.State = daemonstate.WorkItemActive
+			item.CurrentStep = ws.Name
+			item.Phase = "idle"
+			log.Info("placing at unsatisfied wait state", "state", ws.Name, "event", ws.Event)
+			return item
+		}
+
+		// Event fired — merge data and continue checking subsequent states
+		if data != nil {
+			for k, v := range data {
+				item.StepData[k] = v
+			}
+		}
+		lastSatisfiedIdx = i
+	}
+
+	// All wait states satisfied — place at the last wait state rather than
+	// the sync task after it. processWaitItems / processCIItems will detect
+	// that the event has already fired, advance the item, and call
+	// executeSyncChain to run any subsequent sync steps (choice, pass, task).
+	// Placing directly at a sync step would leave the item stuck because
+	// normal polling only processes wait states.
+	if lastSatisfiedIdx >= 0 {
+		lastWS := waitStates[lastSatisfiedIdx]
+		item.State = daemonstate.WorkItemActive
+		item.CurrentStep = lastWS.Name
+		item.Phase = "idle"
+		log.Info("all wait states satisfied, placing at last wait state for re-evaluation", "state", lastWS.Name)
+		return item
+	}
+
+	// If we somehow got here, place at the first wait state as a safe default
+	item.State = daemonstate.WorkItemActive
+	item.CurrentStep = waitStates[0].Name
+	item.Phase = "idle"
+	return item
+}
+
+// reconstructSessions creates minimal config.Session objects for work items
+// whose sessions are missing from the in-memory config. On daemon restart,
+// the config starts empty (AgentConfig.Save() is a no-op), so sessions need
+// to be recreated for GetSession() to work during normal polling.
 func (d *Daemon) reconstructSessions() {
-	log := d.logger.With("component", "recovery")
+	log := d.logger.With("component", "rebuild")
 
 	for _, item := range d.state.GetAllWorkItems() {
 		if item.IsTerminal() {
@@ -31,16 +379,11 @@ func (d *Daemon) reconstructSessions() {
 			continue
 		}
 
-		// Reconstruct the worktree path from the session ID. Worktrees follow
-		// a deterministic layout: <worktreesDir>/<sessionID>. Without this,
-		// cleanup operations fail because they try to run `git worktree remove ""`.
 		var worktreePath string
 		if worktreesDir, err := paths.WorktreesDir(); err == nil {
 			worktreePath = filepath.Join(worktreesDir, item.SessionID)
 		}
 
-		// In multi-repo mode d.state.RepoPath is the daemon ID (e.g. "multi-xxx"),
-		// not a real repo path. Prefer the per-item _repo_path from StepData.
 		repoPath := d.state.RepoPath
 		if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
 			repoPath = rp
@@ -58,238 +401,7 @@ func (d *Daemon) reconstructSessions() {
 		}
 		d.config.AddSession(sess)
 
-		log.Info("reconstructed session for recovered work item",
+		log.Info("reconstructed session for work item",
 			"workItem", item.ID, "sessionID", item.SessionID, "branch", item.Branch)
 	}
-}
-
-// recoverFromState reconciles daemon state with reality after a restart.
-func (d *Daemon) recoverFromState(ctx context.Context) {
-	if d.state == nil {
-		return
-	}
-
-	// Reconstruct sessions before recovery so GetSession() works for all items.
-	d.reconstructSessions()
-
-	items := d.state.GetAllWorkItems()
-	if len(items) == 0 {
-		return
-	}
-
-	log := d.logger.With("component", "recovery")
-	log.Info("recovering from previous state", "workItems", len(items))
-
-	for _, item := range items {
-		if item.IsTerminal() {
-			continue
-		}
-
-		log := log.With("workItem", item.ID, "step", item.CurrentStep, "phase", item.Phase, "branch", item.Branch)
-
-		switch item.Phase {
-		case "async_pending":
-			// Worker was running but daemon restarted — no worker exists
-			d.recoverAsyncPending(ctx, &item, log)
-
-		case "addressing_feedback", "pushing":
-			// Worker or push was in-flight — check actual PR state to decide next step
-			d.recoverWaitPhase(ctx, &item, log)
-
-		case "retry_pending":
-			// Was waiting to retry — reset to idle so it retries on next tick
-			log.Info("was retry_pending, resetting to idle for immediate retry")
-			d.state.AdvanceWorkItem(item.ID, item.CurrentStep, "idle")
-
-		default:
-			// "idle" or empty — normal wait/queue state
-			if item.State == daemonstate.WorkItemQueued {
-				log.Info("work item queued, will start on next tick")
-			} else {
-				// Check if this is a sync task state that needs execution
-				// (e.g. after planning cleanup, a move_to_section task is left
-				// in idle and needs to be kicked off).
-				repoPath := d.resolveRepoPath(ctx, item)
-				engine := d.getEngine(repoPath)
-				if engine != nil {
-					state := engine.GetState(item.CurrentStep)
-					if state != nil && state.Type == workflow.StateTypeTask {
-						log.Info("recovering idle task state, executing sync chain")
-						d.executeSyncChain(ctx, item.ID, engine)
-						continue
-					}
-				}
-				log.Info("work item in wait state, resuming polling")
-			}
-		}
-	}
-}
-
-// recoverWaitPhase handles recovery for items that were in addressing_feedback or pushing
-// phase when the daemon stopped. Instead of blindly resetting to idle, it checks the
-// actual PR state on GitHub to determine the correct recovery action.
-func (d *Daemon) recoverWaitPhase(ctx context.Context, item *daemonstate.WorkItem, log interface{ Info(string, ...any) }) {
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		log.Info("session not found, resetting to idle", "phase", item.Phase)
-		d.resetPhaseToIdle(item)
-		return
-	}
-
-	if item.Branch == "" {
-		log.Info("no branch, resetting to idle", "phase", item.Phase)
-		d.resetPhaseToIdle(item)
-		return
-	}
-
-	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
-	defer cancel()
-
-	prState, err := d.gitService.GetPRState(pollCtx, sess.RepoPath, item.Branch)
-	if err != nil {
-		log.Info("could not check PR state, resetting to idle", "phase", item.Phase, "error", err)
-		d.resetPhaseToIdle(item)
-		return
-	}
-
-	if prState == git.PRStateMerged {
-		log.Info("PR already merged, marking completed")
-		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.CurrentStep = "done"
-			it.Phase = "idle"
-			it.State = daemonstate.WorkItemCompleted
-			now := time.Now()
-			it.CompletedAt = &now
-			it.UpdatedAt = now
-		})
-		return
-	}
-
-	if prState == git.PRStateClosed {
-		log.Info("PR was closed, marking failed")
-		d.state.SetErrorMessage(item.ID, "PR was closed while daemon was offline")
-		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.Phase = "idle"
-			it.UpdatedAt = time.Now()
-		})
-		d.state.MarkWorkItemTerminal(item.ID, false)
-		return
-	}
-
-	// PR is open — reset to idle so the normal tick loop can process it.
-	// We intentionally do NOT advance to "merge" here even if the review is
-	// approved, because the merge step is a sync task that requires
-	// executeSyncChain() to run. Recovery only restores state; the tick loop
-	// handles execution.
-	log.Info("PR open, resetting to idle for continued polling", "phase", item.Phase)
-	d.resetPhaseToIdle(item)
-}
-
-// resetPhaseToIdle resets a work item's phase to idle while preserving its current step.
-func (d *Daemon) resetPhaseToIdle(item *daemonstate.WorkItem) {
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		now := time.Now()
-		it.Phase = "idle"
-		if it.StepEnteredAt.IsZero() {
-			it.StepEnteredAt = now
-		}
-		it.UpdatedAt = now
-	})
-}
-
-// recoverAsyncPending handles recovery when a worker was active but daemon restarted.
-func (d *Daemon) recoverAsyncPending(ctx context.Context, item *daemonstate.WorkItem, log interface{ Info(string, ...any) }) {
-	if item.Branch == "" {
-		log.Info("no branch, re-queuing")
-		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.State = daemonstate.WorkItemQueued
-			it.CurrentStep = ""
-			it.Phase = "idle"
-			it.UpdatedAt = time.Now()
-		})
-		return
-	}
-
-	// Skip items that have a live worker — recovery should not interfere with
-	// an actively running session. After a daemon restart d.workers is always
-	// empty (all workers were killed), so this check correctly allows recovery
-	// to proceed for every orphaned item.
-	d.mu.Lock()
-	_, hasWorker := d.workers[item.ID]
-	d.mu.Unlock()
-	if hasWorker {
-		log.Info("worker still running, skipping recovery",
-			"updatedAt", item.UpdatedAt)
-		return
-	}
-
-	sess := d.config.GetSession(item.SessionID)
-	if sess == nil {
-		log.Info("session not found, re-queuing")
-		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-			it.State = daemonstate.WorkItemQueued
-			it.CurrentStep = ""
-			it.Phase = "idle"
-			it.UpdatedAt = time.Now()
-		})
-		return
-	}
-
-	// Check if PR was already created
-	pollCtx, cancel := context.WithTimeout(ctx, timeoutQuickAPI)
-	defer cancel()
-
-	prState, err := d.gitService.GetPRState(pollCtx, sess.RepoPath, item.Branch)
-	if err == nil && (prState == git.PRStateOpen || prState == git.PRStateMerged) {
-		if prState == git.PRStateMerged {
-			log.Info("PR merged, marking completed")
-			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-				it.CurrentStep = "done"
-				it.Phase = "idle"
-				it.State = daemonstate.WorkItemCompleted
-				now := time.Now()
-				it.CompletedAt = &now
-				it.UpdatedAt = now
-			})
-		} else {
-			// Determine recovery target using the workflow engine so that custom
-			// workflows with non-default step names are handled correctly.
-			engine := d.getEngine(sess.RepoPath)
-			recoveryStep := engine.FindRecoveryWaitStep(item.CurrentStep)
-			if recoveryStep == "" {
-				// No wait state found — re-queue to restart from the beginning.
-				log.Info("no wait state found for recovery, re-queuing")
-				d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-					it.State = daemonstate.WorkItemQueued
-					it.CurrentStep = ""
-					it.Phase = "idle"
-					it.UpdatedAt = time.Now()
-				})
-				return
-			}
-			log.Info("PR exists, advancing to wait state", "recoveryStep", recoveryStep)
-			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-				now := time.Now()
-				it.CurrentStep = recoveryStep
-				it.Phase = "idle"
-				// Must set State to non-queued so GetActiveWorkItems() includes
-				// this item for CI/review polling. Without this, the item stays
-				// WorkItemQueued and startQueuedItems() resets it to "coding"
-				// on every tick, creating an infinite loop.
-				it.State = daemonstate.WorkItemActive
-				it.StepEnteredAt = now
-				it.UpdatedAt = now
-			})
-		}
-		return
-	}
-
-	// No PR — re-queue to restart coding
-	log.Info("no PR found, re-queuing")
-	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-		it.State = daemonstate.WorkItemQueued
-		it.CurrentStep = ""
-		it.Phase = "idle"
-		it.UpdatedAt = time.Now()
-	})
 }

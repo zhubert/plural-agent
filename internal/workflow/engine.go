@@ -677,6 +677,61 @@ func stateOutgoing(state *State) []string {
 	return nexts
 }
 
+// WaitStateInfo describes a wait state discovered during a graph walk.
+type WaitStateInfo struct {
+	Name   string         // State name in the workflow graph
+	Event  string         // Event type (e.g. "ci.complete", "pr.reviewed")
+	Params map[string]any // Parameters for the event checker
+	// NextStep is the state to transition to when the event fires (the "next" edge).
+	NextStep string
+}
+
+// GetOrderedWaitStates returns all wait states reachable from the start state,
+// in BFS order following all outgoing edges (Next, choices, default, error and
+// timeout handlers). This ensures wait states on every reachable path are
+// discovered, giving a deterministic order for probing which workflow phases
+// have been completed during state reconstruction on startup.
+func (e *Engine) GetOrderedWaitStates() []WaitStateInfo {
+	if e.config == nil || e.config.States == nil || e.config.Start == "" {
+		return nil
+	}
+
+	var result []WaitStateInfo
+	seen := map[string]bool{}
+	queue := []string{e.config.Start}
+	visited := map[string]bool{e.config.Start: true}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		state, ok := e.config.States[cur]
+		if !ok || state.Type == StateTypeSucceed || state.Type == StateTypeFail {
+			continue
+		}
+
+		if state.Type == StateTypeWait && !seen[cur] {
+			seen[cur] = true
+			result = append(result, WaitStateInfo{
+				Name:     cur,
+				Event:    state.Event,
+				Params:   state.Params,
+				NextStep: state.Next,
+			})
+		}
+
+		// Follow all outgoing edges to ensure we find wait states on every path
+		for _, next := range stateOutgoing(state) {
+			if !visited[next] {
+				visited[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+
+	return result
+}
+
 // GetState returns the state definition for a given state name.
 func (e *Engine) GetState(name string) *State {
 	if e.config.States == nil {
