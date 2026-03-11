@@ -89,6 +89,25 @@ func TestStripHiddenHTMLBlocks(t *testing.T) {
 			input: `<DIV STYLE="DISPLAY:NONE">hidden</DIV>`,
 			want:  "",
 		},
+		{
+			// Regression: hidden element that follows a visible element of the same
+			// tag type must still be stripped. The old code broke out of the scan
+			// loop on the first non-hidden tag, leaving subsequent hidden elements
+			// untouched.
+			name:  "hidden div after visible div",
+			input: `<div class="visible">hi</div><div style="display:none">INJECT</div>`,
+			want:  `<div class="visible">hi</div>`,
+		},
+		{
+			name:  "multiple hidden divs with visible div between them",
+			input: `<div style="display:none">first</div><div>ok</div><div style="visibility:hidden">second</div>`,
+			want:  `<div>ok</div>`,
+		},
+		{
+			name:  "two consecutive hidden divs",
+			input: `<div style="display:none">a</div><div style="display:none">b</div>`,
+			want:  "",
+		},
 	}
 
 	for _, tt := range tests {

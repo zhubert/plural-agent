@@ -53,6 +53,7 @@ func WithAuthExecutor(e iexec.CommandExecutor) ServerOption {
 
 const authCacheTTL     = 5 * time.Minute
 const authFetchTimeout = 10 * time.Second
+const maxTailLines     = 10_000 // upper bound on ?tail= to limit memory usage
 
 // Server is the dashboard HTTP server with SSE support.
 type Server struct {
@@ -209,6 +210,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	tailN := 200
 	if t := r.URL.Query().Get("tail"); t != "" {
 		if n, err := strconv.Atoi(t); err == nil && n > 0 {
+			if n > maxTailLines {
+				n = maxTailLines
+			}
 			tailN = n
 		}
 	}
@@ -260,12 +264,22 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(info)
 }
 
+// validateItemID rejects empty, path-separator-containing, or traversal item IDs
+// consistent with the sessionID validation in handleLogs.
+func validateItemID(id string) bool {
+	return id != "" && !strings.ContainsAny(id, "/\\") && !strings.Contains(id, "..")
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if s.controller == nil {
 		http.Error(w, "control not available", http.StatusServiceUnavailable)
 		return
 	}
 	itemID := r.PathValue("itemID")
+	if !validateItemID(itemID) {
+		http.Error(w, "invalid item ID", http.StatusBadRequest)
+		return
+	}
 	if err := s.controller.StopSession(itemID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -279,6 +293,10 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemID := r.PathValue("itemID")
+	if !validateItemID(itemID) {
+		http.Error(w, "invalid item ID", http.StatusBadRequest)
+		return
+	}
 	if err := s.controller.RetryWorkItem(itemID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -297,6 +315,10 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemID := r.PathValue("itemID")
+	if !validateItemID(itemID) {
+		http.Error(w, "invalid item ID", http.StatusBadRequest)
+		return
+	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
 	if err != nil {
@@ -375,8 +397,13 @@ func validateLoopback(addr string) error {
 	if err != nil {
 		return fmt.Errorf("invalid address %q: %w", addr, err)
 	}
-	if host == "" || host == "localhost" {
-		return nil // Go's net.Listen binds "" to loopback
+	if host == "" {
+		// An empty host causes net.Listen to bind on all interfaces (0.0.0.0),
+		// not loopback. Require an explicit loopback address.
+		return fmt.Errorf("address %q uses an empty host which binds to all interfaces; use localhost or 127.0.0.1", addr)
+	}
+	if host == "localhost" {
+		return nil
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {

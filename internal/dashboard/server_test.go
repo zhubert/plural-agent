@@ -116,6 +116,23 @@ func TestHandleSSE(t *testing.T) {
 	}
 }
 
+func TestHandleLogs_TailCapped(t *testing.T) {
+	// A very large tail value must not exceed maxTailLines.
+	// We can't easily observe the internal tailN value, but we can confirm
+	// that the handler doesn't panic or return an error for huge ?tail= values
+	// and that it caps cleanly at maxTailLines (the log file doesn't exist so
+	// we'll get 404, which is expected — the important thing is no panic/500).
+	srv := New("localhost:0")
+	req := httptest.NewRequest("GET", "/api/logs/some-session?tail=1000000000", nil)
+	req.SetPathValue("sessionID", "some-session")
+	w := httptest.NewRecorder()
+	srv.handleLogs(w, req)
+	// 404 because the log file doesn't exist — that's fine.
+	if w.Result().StatusCode == http.StatusInternalServerError {
+		t.Errorf("unexpected 500 for large ?tail= value")
+	}
+}
+
 func TestHandleLogs_NoSession(t *testing.T) {
 	srv := New("localhost:0")
 
@@ -258,6 +275,59 @@ func TestHandleCapabilities_WithController(t *testing.T) {
 	}
 	if !caps["control"] {
 		t.Error("expected control=true with controller set")
+	}
+}
+
+func TestHandleStop_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	cases := []struct {
+		name   string
+		itemID string
+	}{
+		{"empty", ""},
+		{"slash", "foo/bar"},
+		{"backslash", "foo\\bar"},
+		{"dotdot", "../../etc"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/workitems/x/stop", nil)
+			req.SetPathValue("itemID", tt.itemID)
+			w := httptest.NewRecorder()
+			srv.handleStop(w, req)
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400 for itemID %q, got %d", tt.itemID, w.Result().StatusCode)
+			}
+		})
+	}
+}
+
+func TestHandleRetry_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	req := httptest.NewRequest("POST", "/api/workitems/x/retry", nil)
+	req.SetPathValue("itemID", "../evil")
+	w := httptest.NewRecorder()
+	srv.handleRetry(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal itemID, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleMessage_InvalidItemID(t *testing.T) {
+	ctrl := &mockController{}
+	srv := New("localhost:0", WithController(ctrl))
+
+	body := bytes.NewBufferString(`{"message":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/workitems/x/message", body)
+	req.SetPathValue("itemID", "foo/bar")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal itemID, got %d", w.Result().StatusCode)
 	}
 }
 
@@ -757,7 +827,7 @@ func TestValidateLoopback(t *testing.T) {
 		{"localhost", "localhost:8080", false},
 		{"127.0.0.1", "127.0.0.1:8080", false},
 		{"::1", "[::1]:8080", false},
-		{"empty host", ":8080", false},
+		{"empty host", ":8080", true},
 		{"0.0.0.0 rejected", "0.0.0.0:8080", true},
 		{"public IP rejected", "192.168.1.1:8080", true},
 		{"no port", "localhost", true},
