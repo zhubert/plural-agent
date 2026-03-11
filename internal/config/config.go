@@ -190,8 +190,10 @@ func (c *Config) Save() error {
 	}
 
 	// Atomic write: temp file + rename
+	// Remove any stale tmp file first to ensure 0600 is applied even if it exists with looser permissions.
 	tmpFile := c.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	os.Remove(tmpFile)
+	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
 		return fmt.Errorf("failed to write temp config file: %w", err)
 	}
 	if err := os.Rename(tmpFile, c.filePath); err != nil {
