@@ -116,7 +116,14 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 
-	allowedOrigin := buildOrigin(ln.Addr().String())
+	// Build the allowed origin from the configured bind host (preserving
+	// "localhost" when the user configured "localhost:PORT") combined with the
+	// OS-assigned port from the listener.  Using ln.Addr().String() directly
+	// would map "localhost" → "127.0.0.1" and cause the browser's
+	// "Origin: http://localhost:PORT" to be rejected.
+	configHost, _, _ := net.SplitHostPort(s.addr)
+	_, resolvedPort, _ := net.SplitHostPort(ln.Addr().String())
+	allowedOrigin := buildOrigin(net.JoinHostPort(configHost, resolvedPort))
 	srv := &http.Server{
 		Addr:    s.addr,
 		Handler: corsMiddleware(allowedOrigin)(mux),
@@ -348,7 +355,7 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 			}
 			// Origin matches — set CORS headers and handle preflight.
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Credentials", "false")
+			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			if r.Method == http.MethodOptions {

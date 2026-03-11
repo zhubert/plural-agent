@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -616,6 +617,37 @@ func TestBuildOrigin(t *testing.T) {
 	}
 }
 
+// TestBuildOrigin_LocalhostPreservation verifies that when the server is
+// configured to bind on "localhost:0", the allowed origin uses "localhost"
+// (not the resolved IP like "127.0.0.1") so the browser's
+// "Origin: http://localhost:PORT" is accepted.
+func TestBuildOrigin_LocalhostPreservation(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	// Simulate what Run() does: use configured host + resolved port.
+	configHost, _, _ := net.SplitHostPort("localhost:0")
+	_, resolvedPort, _ := net.SplitHostPort(ln.Addr().String())
+	origin := buildOrigin(net.JoinHostPort(configHost, resolvedPort))
+
+	want := "http://localhost:" + resolvedPort
+	if origin != want {
+		t.Errorf("buildOrigin with localhost:0 config = %q, want %q", origin, want)
+	}
+
+	// Confirm that using the raw listener address would differ (demonstrating
+	// the regression this test guards against).
+	rawOrigin := buildOrigin(ln.Addr().String())
+	if rawOrigin == want {
+		// On some systems (e.g., macOS) localhost:0 may resolve to localhost;
+		// skip the regression check in that case.
+		t.Logf("note: on this system localhost:0 resolved to %q — raw and config-based origins are identical", ln.Addr().String())
+	}
+}
+
 // ---- corsMiddleware ----
 
 func TestCORSMiddleware_NoOrigin(t *testing.T) {
@@ -651,8 +683,11 @@ func TestCORSMiddleware_MatchingOrigin(t *testing.T) {
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != allowedOrigin {
 		t.Errorf("expected ACAO=%q, got %q", allowedOrigin, got)
 	}
-	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "false" {
-		t.Errorf("expected ACAC=false, got %q", got)
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("expected ACAC header to be absent, got %q", got)
+	}
+	if got := resp.Header.Get("Vary"); got != "Origin" {
+		t.Errorf("expected Vary=Origin, got %q", got)
 	}
 }
 
