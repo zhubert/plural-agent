@@ -8,7 +8,7 @@ import (
 	"github.com/zhubert/erg/internal/paths"
 )
 
-// setupAuthTest sets up isolated temp dirs so auth functions use temp config dir.
+// setupAuthTest sets up isolated temp dirs so auth functions use temp state dir.
 func setupAuthTest(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -20,9 +20,9 @@ func setupAuthTest(t *testing.T) string {
 	paths.Reset()
 	t.Cleanup(func() { paths.Reset() })
 
-	configDir := filepath.Join(tmpDir, "config", "erg")
-	os.MkdirAll(configDir, 0o755)
-	return configDir
+	stateDir := filepath.Join(tmpDir, "state", "erg")
+	os.MkdirAll(stateDir, 0o755)
+	return stateDir
 }
 
 func TestFindAuthFiles_Empty(t *testing.T) {

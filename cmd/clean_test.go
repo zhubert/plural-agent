@@ -214,21 +214,16 @@ func TestRunAgentClean_RemovesEphemeralFiles(t *testing.T) {
 	logger.Reset()
 	t.Cleanup(func() { logger.Reset() })
 
-	// dataDir is tmpDir/data/erg, so go up two levels to get tmpDir
-	tmpDir := filepath.Dir(filepath.Dir(dataDir))
-	configDir := filepath.Join(tmpDir, "config", "erg")
-	os.MkdirAll(configDir, 0o755)
-
-	// Create auth files in config dir
+	// Create auth files in state dir
 	for _, name := range []string{"erg-auth-sess1", "erg-auth-sess2", "erg-auth-sess3"} {
-		if err := os.WriteFile(filepath.Join(configDir, name), []byte("KEY=val"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(stateDir, name), []byte("KEY=val"), 0o600); err != nil {
 			t.Fatalf("failed to create auth file: %v", err)
 		}
 	}
 
-	// Create MCP config files in config dir
+	// Create MCP config files in state dir
 	for _, name := range []string{"erg-mcp-sess1.json", "erg-mcp-sess2.json"} {
-		if err := os.WriteFile(filepath.Join(configDir, name), []byte("{}"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(stateDir, name), []byte("{}"), 0o600); err != nil {
 			t.Fatalf("failed to create MCP config file: %v", err)
 		}
 	}
@@ -260,13 +255,13 @@ func TestRunAgentClean_RemovesEphemeralFiles(t *testing.T) {
 	}
 
 	// Verify auth files removed
-	authFiles, _ := filepath.Glob(filepath.Join(configDir, "erg-auth-*"))
+	authFiles, _ := filepath.Glob(filepath.Join(stateDir, "erg-auth-*"))
 	if len(authFiles) != 0 {
 		t.Errorf("expected 0 auth files, got %d", len(authFiles))
 	}
 
 	// Verify MCP config files removed
-	mcpFiles, _ := filepath.Glob(filepath.Join(configDir, "erg-mcp-*.json"))
+	mcpFiles, _ := filepath.Glob(filepath.Join(stateDir, "erg-mcp-*.json"))
 	if len(mcpFiles) != 0 {
 		t.Errorf("expected 0 MCP config files, got %d", len(mcpFiles))
 	}
