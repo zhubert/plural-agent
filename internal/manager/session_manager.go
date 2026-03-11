@@ -17,6 +17,7 @@ import (
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/logger"
 	"github.com/zhubert/erg/internal/mcp"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // Compile-time interface satisfaction check.
@@ -507,13 +508,13 @@ func createSyntheticClaudeSessionFile(parentSessionID, childWorktree string, mes
 		return fmt.Errorf("no messages to create synthetic session from")
 	}
 
-	homeDir, err := os.UserHomeDir()
+	claudeDir, err := paths.ClaudeConfigDir()
 	if err != nil {
 		return err
 	}
 
 	childEscaped := escapeClaudePath(childWorktree)
-	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects")
+	claudeProjectsDir := filepath.Join(claudeDir, "projects")
 	childProjectDir := filepath.Join(claudeProjectsDir, childEscaped)
 	dstFile := filepath.Join(childProjectDir, parentSessionID+".jsonl")
 
@@ -585,7 +586,7 @@ func escapeClaudePath(path string) string {
 // and when forking with --resume <parent-id> --fork-session, it looks for the parent
 // session in the CURRENT working directory's project path, not the parent's.
 func copyClaudeSessionForFork(parentSessionID, parentWorktree, childWorktree string) error {
-	homeDir, err := os.UserHomeDir()
+	claudeDir, err := paths.ClaudeConfigDir()
 	if err != nil {
 		return err
 	}
@@ -593,7 +594,7 @@ func copyClaudeSessionForFork(parentSessionID, parentWorktree, childWorktree str
 	parentEscaped := escapeClaudePath(parentWorktree)
 	childEscaped := escapeClaudePath(childWorktree)
 
-	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects")
+	claudeProjectsDir := filepath.Join(claudeDir, "projects")
 	parentProjectDir := filepath.Join(claudeProjectsDir, parentEscaped)
 	childProjectDir := filepath.Join(claudeProjectsDir, childEscaped)
 

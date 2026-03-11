@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/logger"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // MCP server timeout constants
@@ -864,12 +865,12 @@ func (s *Server) readPlanFromPath(planPath string) string {
 // This prevents path traversal attacks where a malicious filePath argument
 // could read arbitrary files from the filesystem.
 func validatePlanPath(planPath string) error {
-	homeDir, err := os.UserHomeDir()
+	claudeDir, err := paths.ClaudeConfigDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return fmt.Errorf("cannot determine Claude config directory: %w", err)
 	}
 
-	allowedDir := filepath.Join(homeDir, ".claude", "plans")
+	allowedDir := filepath.Join(claudeDir, "plans")
 
 	// Clean and resolve the path to eliminate ../ traversal
 	absPath, err := filepath.Abs(planPath)

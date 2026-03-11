@@ -325,6 +325,51 @@ func TestManifestPath_XDG(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigDirDefault(t *testing.T) {
+	home := setupTestHome(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("ClaudeConfigDir: %v", err)
+	}
+	if want := filepath.Join(home, ".claude"); got != want {
+		t.Errorf("ClaudeConfigDir = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeConfigDirEnvVar(t *testing.T) {
+	setupTestHome(t)
+	customDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", customDir)
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("ClaudeConfigDir: %v", err)
+	}
+
+	// The result should be an absolute path equal to customDir
+	absCustomDir, _ := filepath.Abs(customDir)
+	if got != absCustomDir {
+		t.Errorf("ClaudeConfigDir = %q, want %q", got, absCustomDir)
+	}
+}
+
+func TestClaudeConfigDirEnvVarRelative(t *testing.T) {
+	setupTestHome(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative/path")
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("ClaudeConfigDir: %v", err)
+	}
+
+	// Should be converted to an absolute path
+	if !filepath.IsAbs(got) {
+		t.Errorf("ClaudeConfigDir = %q, want an absolute path", got)
+	}
+}
+
 func TestLegacyFileNotDir(t *testing.T) {
 	home := setupTestHome(t)
 	// Create ~/.erg as a file, not a directory — should NOT be treated as legacy

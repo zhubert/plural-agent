@@ -220,6 +220,24 @@ func ManifestPath() (string, error) {
 	return filepath.Join(dir, "daemon.yaml"), nil
 }
 
+// ClaudeConfigDir returns the Claude Code configuration directory.
+// If CLAUDE_CONFIG_DIR is set, it returns that value (converted to an absolute path).
+// Otherwise, it defaults to ~/.claude.
+func ClaudeConfigDir() (string, error) {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		return abs, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude"), nil
+}
+
 // IsLegacyLayout returns true if using the ~/.erg/ flat layout.
 func IsLegacyLayout() bool {
 	r, err := resolve()
