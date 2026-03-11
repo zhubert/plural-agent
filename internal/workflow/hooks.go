@@ -6,7 +6,36 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 )
+
+// sensitiveEnvVars lists environment variable names that must not be passed to
+// user-defined hook scripts to prevent accidental credential exfiltration.
+var sensitiveEnvVars = []string{
+	"ANTHROPIC_API_KEY",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"LINEAR_API_KEY",
+	"ASANA_PAT",
+	"GITHUB_TOKEN",
+	"GH_TOKEN",
+}
+
+// filteredEnv returns os.Environ() with sensitive credential variables removed.
+func filteredEnv() []string {
+	blocked := make(map[string]bool, len(sensitiveEnvVars))
+	for _, name := range sensitiveEnvVars {
+		blocked[name] = true
+	}
+	env := os.Environ()
+	result := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		if !blocked[key] {
+			result = append(result, kv)
+		}
+	}
+	return result
+}
 
 // HookContext provides environment variables for hook execution.
 type HookContext struct {
@@ -45,7 +74,7 @@ func RunHooks(ctx context.Context, hooks []HookConfig, hookCtx HookContext, logg
 
 		cmd := exec.CommandContext(ctx, "sh", "-c", hook.Run)
 		cmd.Dir = hookCtx.RepoPath
-		cmd.Env = append(os.Environ(), hookCtx.envVars()...)
+		cmd.Env = append(filteredEnv(), hookCtx.envVars()...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -74,7 +103,7 @@ func RunBeforeHooks(ctx context.Context, hooks []HookConfig, hookCtx HookContext
 
 		cmd := exec.CommandContext(ctx, "sh", "-c", hook.Run)
 		cmd.Dir = hookCtx.RepoPath
-		cmd.Env = append(os.Environ(), hookCtx.envVars()...)
+		cmd.Env = append(filteredEnv(), hookCtx.envVars()...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -232,6 +233,135 @@ func TestRunBeforeHooks_MultipleSuccess(t *testing.T) {
 		if _, err := os.Stat(f); err != nil {
 			t.Errorf("expected file %s to exist", f)
 		}
+	}
+}
+
+func TestFilteredEnv_SecretVarsAreRemoved(t *testing.T) {
+	secrets := []struct{ key, value string }{
+		{"ANTHROPIC_API_KEY", "sk-ant-secret"},
+		{"GITHUB_TOKEN", "ghp_secret"},
+		{"GH_TOKEN", "ghp_alt_secret"},
+		{"ASANA_PAT", "asana_secret"},
+		{"LINEAR_API_KEY", "linear_secret"},
+		{"CLAUDE_CODE_OAUTH_TOKEN", "oauth_secret"},
+	}
+	for _, s := range secrets {
+		t.Setenv(s.key, s.value)
+	}
+
+	env := filteredEnv()
+
+	envMap := make(map[string]string, len(env))
+	for _, kv := range env {
+		key, val, _ := strings.Cut(kv, "=")
+		envMap[key] = val
+	}
+
+	for _, s := range secrets {
+		if _, found := envMap[s.key]; found {
+			t.Errorf("sensitive env var %s should have been filtered out", s.key)
+		}
+	}
+}
+
+func TestFilteredEnv_NonSecretVarsAreKept(t *testing.T) {
+	t.Setenv("MY_CUSTOM_VAR", "keep_me")
+	t.Setenv("ANTHROPIC_API_KEY", "strip_me")
+
+	env := filteredEnv()
+
+	envMap := make(map[string]string, len(env))
+	for _, kv := range env {
+		key, val, _ := strings.Cut(kv, "=")
+		envMap[key] = val
+	}
+
+	if got, ok := envMap["MY_CUSTOM_VAR"]; !ok || got != "keep_me" {
+		t.Errorf("non-secret env var MY_CUSTOM_VAR should be present, got %q", got)
+	}
+	if _, found := envMap["ANTHROPIC_API_KEY"]; found {
+		t.Error("ANTHROPIC_API_KEY should have been filtered out")
+	}
+}
+
+func TestRunHooks_SecretsNotPassedToHook(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "secret_check.txt")
+
+	t.Setenv("ANTHROPIC_API_KEY", "super_secret_key")
+	t.Setenv("GITHUB_TOKEN", "ghp_super_secret")
+
+	hooks := []HookConfig{
+		{Run: "echo \"$ANTHROPIC_API_KEY $GITHUB_TOKEN\" > " + outFile},
+	}
+
+	hookCtx := HookContext{RepoPath: dir, Branch: "test"}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	RunHooks(context.Background(), hooks, hookCtx, logger)
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("hook output file not created: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "super_secret_key") {
+		t.Error("ANTHROPIC_API_KEY value leaked into hook environment")
+	}
+	if strings.Contains(content, "ghp_super_secret") {
+		t.Error("GITHUB_TOKEN value leaked into hook environment")
+	}
+}
+
+func TestRunBeforeHooks_SecretsNotPassedToHook(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "secret_check.txt")
+
+	t.Setenv("ANTHROPIC_API_KEY", "super_secret_key")
+	t.Setenv("GITHUB_TOKEN", "ghp_super_secret")
+
+	hooks := []HookConfig{
+		{Run: "echo \"$ANTHROPIC_API_KEY $GITHUB_TOKEN\" > " + outFile},
+	}
+
+	hookCtx := HookContext{RepoPath: dir, Branch: "test"}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if err := RunBeforeHooks(context.Background(), hooks, hookCtx, logger); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("hook output file not created: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "super_secret_key") {
+		t.Error("ANTHROPIC_API_KEY value leaked into before hook environment")
+	}
+	if strings.Contains(content, "ghp_super_secret") {
+		t.Error("GITHUB_TOKEN value leaked into before hook environment")
+	}
+}
+
+func TestRunHooks_ErgVarsStillPassedAfterFiltering(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "erg_check.txt")
+
+	t.Setenv("ANTHROPIC_API_KEY", "should_be_stripped")
+
+	hooks := []HookConfig{
+		{Run: "echo $ERG_BRANCH > " + outFile},
+	}
+
+	hookCtx := HookContext{RepoPath: dir, Branch: "feature/my-branch"}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	RunHooks(context.Background(), hooks, hookCtx, logger)
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("hook output file not created: %v", err)
+	}
+	if got := string(data); got != "feature/my-branch\n" {
+		t.Errorf("ERG_BRANCH should be available in hook env, got %q", got)
 	}
 }
 
