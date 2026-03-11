@@ -21,6 +21,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -222,18 +223,24 @@ func ManifestPath() (string, error) {
 
 // ClaudeConfigDir returns the Claude Code configuration directory.
 // If CLAUDE_CONFIG_DIR is set, it returns that value (converted to an absolute path).
+// A leading ~ or ~/ is expanded to the user's home directory.
 // Otherwise, it defaults to ~/.claude.
 func ClaudeConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		if dir == "~" {
+			dir = home
+		} else if strings.HasPrefix(dir, "~/") {
+			dir = filepath.Join(home, dir[2:])
+		}
 		abs, err := filepath.Abs(dir)
 		if err != nil {
 			return "", err
 		}
 		return abs, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
 	}
 	return filepath.Join(home, ".claude"), nil
 }

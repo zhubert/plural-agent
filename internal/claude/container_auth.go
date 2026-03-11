@@ -68,7 +68,7 @@ func buildContainerRunArgs(config ProcessConfig, claudeArgs []string) (container
 		// No env var or keychain credentials, but .credentials.json exists on the host.
 		// The entrypoint copies it into the container's ~/.claude/, so Claude CLI
 		// will find it and handle token refresh natively. No --env-file needed.
-		auth.Source = "~/.claude/.credentials.json (OAuth via claude login)"
+		auth.Source = "$CLAUDE_CONFIG_DIR/.credentials.json (OAuth via claude login)"
 	}
 
 	// Mount MCP config for AskUserQuestion/ExitPlanMode support.
@@ -148,7 +148,7 @@ func ContainerAuthSource() string {
 		return cred.Source
 	}
 	if credentialsFileExists() {
-		return "~/.claude/.credentials.json (OAuth via claude login)"
+		return "$CLAUDE_CONFIG_DIR/.credentials.json (OAuth via claude login)"
 	}
 	return ""
 }
@@ -158,7 +158,7 @@ func ContainerAuthSource() string {
 //   - ANTHROPIC_API_KEY environment variable
 //   - CLAUDE_CODE_OAUTH_TOKEN environment variable (long-lived token from "claude setup-token")
 //   - "anthropic_api_key", "Claude Code", or "Claude Code-credentials" macOS keychain entry
-//   - ~/.claude/.credentials.json file (from "claude login" interactive OAuth)
+//   - $CLAUDE_CONFIG_DIR/.credentials.json file (from "claude login" interactive OAuth; defaults to ~/.claude)
 func ContainerAuthAvailable() bool {
 	return ContainerAuthSource() != ""
 }

@@ -349,7 +349,10 @@ func TestClaudeConfigDirEnvVar(t *testing.T) {
 	}
 
 	// The result should be an absolute path equal to customDir
-	absCustomDir, _ := filepath.Abs(customDir)
+	absCustomDir, err := filepath.Abs(customDir)
+	if err != nil {
+		t.Fatalf("filepath.Abs(%q): %v", customDir, err)
+	}
 	if got != absCustomDir {
 		t.Errorf("ClaudeConfigDir = %q, want %q", got, absCustomDir)
 	}
@@ -367,6 +370,21 @@ func TestClaudeConfigDirEnvVarRelative(t *testing.T) {
 	// Should be converted to an absolute path
 	if !filepath.IsAbs(got) {
 		t.Errorf("ClaudeConfigDir = %q, want an absolute path", got)
+	}
+}
+
+func TestClaudeConfigDirEnvVarTilde(t *testing.T) {
+	home := setupTestHome(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", "~/.claude-alt")
+
+	got, err := ClaudeConfigDir()
+	if err != nil {
+		t.Fatalf("ClaudeConfigDir: %v", err)
+	}
+
+	want := filepath.Join(home, ".claude-alt")
+	if got != want {
+		t.Errorf("ClaudeConfigDir = %q, want %q (tilde should expand to home dir)", got, want)
 	}
 }
 

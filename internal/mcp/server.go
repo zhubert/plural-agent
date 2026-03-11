@@ -861,9 +861,10 @@ func (s *Server) readPlanFromPath(planPath string) string {
 	return string(content)
 }
 
-// validatePlanPath ensures the given path resolves to within ~/.claude/plans/.
-// This prevents path traversal attacks where a malicious filePath argument
-// could read arbitrary files from the filesystem.
+// validatePlanPath ensures the given path resolves to within the Claude config
+// plans directory ($CLAUDE_CONFIG_DIR/plans, defaulting to ~/.claude/plans).
+// This prevents path traversal and symlink escape attacks where a malicious
+// filePath argument could read arbitrary files from the filesystem.
 func validatePlanPath(planPath string) error {
 	claudeDir, err := paths.ClaudeConfigDir()
 	if err != nil {
@@ -881,9 +882,23 @@ func validatePlanPath(planPath string) error {
 
 	// Ensure the resolved path is within the allowed directory.
 	// We append os.PathSeparator to prevent prefix matches like
-	// ~/.claude/plans-evil/ matching ~/.claude/plans
+	// <claudeDir>/plans-evil/ matching <claudeDir>/plans
 	if !strings.HasPrefix(cleanPath, allowedDir+string(os.PathSeparator)) && cleanPath != allowedDir {
 		return fmt.Errorf("path must be within %s", allowedDir)
+	}
+
+	// Resolve symlinks to prevent symlink escape attacks where a symlink
+	// inside <claudeDir>/plans could point outside the allowed directory.
+	// Only performed when the path exists — non-existent paths are harmless
+	// because any subsequent read will fail with "file not found".
+	realPath, err := filepath.EvalSymlinks(cleanPath)
+	if err == nil {
+		realAllowedDir, err := filepath.EvalSymlinks(allowedDir)
+		if err == nil {
+			if !strings.HasPrefix(realPath, realAllowedDir+string(os.PathSeparator)) && realPath != realAllowedDir {
+				return fmt.Errorf("path must be within %s", allowedDir)
+			}
+		}
 	}
 
 	return nil
