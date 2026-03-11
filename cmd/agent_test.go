@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -428,4 +429,68 @@ func TestDaemonize_LockPreventsRace(t *testing.T) {
 		t.Fatalf("AcquireLock after release failed: %v", err)
 	}
 	defer lock2.Release()
+}
+
+func TestEnsureDockerHost_AlreadySet(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///custom/docker.sock")
+	ensureDockerHost()
+	if got := os.Getenv("DOCKER_HOST"); got != "unix:///custom/docker.sock" {
+		t.Errorf("DOCKER_HOST changed when already set: got %q", got)
+	}
+}
+
+func TestEnsureDockerHost_FindsSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+
+	// Override the default socket path so the early-return check doesn't
+	// short-circuit on CI runners that have /var/run/docker.sock.
+	origDefault := defaultSocketPath
+	defer func() { defaultSocketPath = origDefault }()
+	defaultSocketPath = "/nonexistent/default.sock"
+
+	// Create a real UNIX domain socket to simulate a runtime socket.
+	// Use a short path under /tmp to avoid exceeding the ~104-char unix socket limit.
+	tmp, err := os.MkdirTemp("/tmp", "erg-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmp)
+	fakeSock := filepath.Join(tmp, "d.sock")
+	l, err := net.Listen("unix", fakeSock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	// Override dockerSocketPaths via a helper that injects our fake path.
+	origPaths := dockerSocketPathsFunc
+	defer func() { dockerSocketPathsFunc = origPaths }()
+	dockerSocketPathsFunc = func() []string {
+		return []string{"/nonexistent/docker.sock", fakeSock}
+	}
+
+	ensureDockerHost()
+	want := "unix://" + fakeSock
+	if got := os.Getenv("DOCKER_HOST"); got != want {
+		t.Errorf("DOCKER_HOST = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureDockerHost_NoSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+
+	origDefault := defaultSocketPath
+	defer func() { defaultSocketPath = origDefault }()
+	defaultSocketPath = "/nonexistent/default.sock"
+
+	origPaths := dockerSocketPathsFunc
+	defer func() { dockerSocketPathsFunc = origPaths }()
+	dockerSocketPathsFunc = func() []string {
+		return []string{"/nonexistent/a.sock", "/nonexistent/b.sock"}
+	}
+
+	ensureDockerHost()
+	if got := os.Getenv("DOCKER_HOST"); got != "" {
+		t.Errorf("DOCKER_HOST should remain empty when no socket found, got %q", got)
+	}
 }
