@@ -225,18 +225,21 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuth returns cached auth info, fetching fresh data if the cache is
-// absent or stale. When the subprocess fails the endpoint returns an empty
-// JSON object so the dashboard never breaks due to a missing `claude` binary.
+// absent or stale. When the subprocess fails, any previously-cached value is
+// returned. If no value has been cached yet, an empty JSON object is returned.
+// Either way the fetch attempt time is recorded so failures are rate-limited
+// to authCacheTTL and do not hammer the system during outages.
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	s.authMu.Lock()
-	if s.authCache == nil || time.Since(s.authFetchAt) > authCacheTTL {
+	if time.Since(s.authFetchAt) > authCacheTTL {
 		ctx, cancel := context.WithTimeout(r.Context(), authFetchTimeout)
 		fresh, err := FetchAuthInfo(ctx, s.authExec)
 		cancel()
+		now := time.Now()
 		if err == nil {
 			s.authCache = fresh
-			s.authFetchAt = time.Now()
 		}
+		s.authFetchAt = now
 	}
 	info := s.authCache
 	s.authMu.Unlock()
@@ -396,14 +399,14 @@ func (s *Server) poll(ctx context.Context) {
 			}
 		case <-authRefresh.C:
 			authCtx, cancel := context.WithTimeout(ctx, authFetchTimeout)
+			s.authMu.Lock()
 			info, err := FetchAuthInfo(authCtx, s.authExec)
-			cancel()
 			if err == nil {
-				s.authMu.Lock()
 				s.authCache = info
 				s.authFetchAt = time.Now()
-				s.authMu.Unlock()
 			}
+			s.authMu.Unlock()
+			cancel()
 		}
 	}
 }

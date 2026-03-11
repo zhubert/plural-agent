@@ -530,6 +530,66 @@ func TestHandleAuth_CommandFails(t *testing.T) {
 	}
 }
 
+func TestHandleAuth_FetchErrorRateLimited(t *testing.T) {
+	ex := iexec.NewMockExecutor(nil)
+	ex.AddExactMatch("claude", []string{"auth", "status"}, iexec.MockResponse{
+		Err: fmt.Errorf("claude not found"),
+	})
+
+	srv := New("localhost:0", WithAuthExecutor(ex))
+	// Zero authFetchAt so cache is considered absent/stale.
+
+	req := httptest.NewRequest("GET", "/api/auth", nil)
+	w := httptest.NewRecorder()
+	srv.handleAuth(w, req)
+
+	// authFetchAt must be updated even though the fetch failed.
+	srv.authMu.Lock()
+	fetchAt := srv.authFetchAt
+	srv.authMu.Unlock()
+	if fetchAt.IsZero() {
+		t.Error("expected authFetchAt to be set even after a failed fetch")
+	}
+
+	// A second request within the TTL must not trigger another subprocess call.
+	req2 := httptest.NewRequest("GET", "/api/auth", nil)
+	w2 := httptest.NewRecorder()
+	srv.handleAuth(w2, req2)
+
+	if calls := ex.GetCalls(); len(calls) != 1 {
+		t.Errorf("expected exactly 1 subprocess call across both requests, got %d", len(calls))
+	}
+}
+
+func TestHandleAuth_StaleCacheReturnedOnError(t *testing.T) {
+	ex := iexec.NewMockExecutor(nil)
+	ex.AddExactMatch("claude", []string{"auth", "status"}, iexec.MockResponse{
+		Err: fmt.Errorf("claude not found"),
+	})
+
+	srv := New("localhost:0", WithAuthExecutor(ex))
+	// Pre-populate a stale cache so we can verify it is returned on fetch error.
+	srv.authCache = &AuthInfo{Email: "stale@example.com", IsLoggedIn: true}
+	srv.authFetchAt = time.Now().Add(-10 * time.Minute)
+
+	req := httptest.NewRequest("GET", "/api/auth", nil)
+	w := httptest.NewRecorder()
+	srv.handleAuth(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var info AuthInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	// The stale cache value should be returned, not an empty object.
+	if info.Email != "stale@example.com" {
+		t.Errorf("expected stale@example.com from cache, got %q", info.Email)
+	}
+}
+
 // ---- validateLoopback ----
 
 func TestValidateLoopback(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 // AuthInfo holds the parsed output of `claude auth status`.
 type AuthInfo struct {
 	Email        string    `json:"email,omitempty"`
-	AccountUUID  string    `json:"account_uuid,omitempty"`
+	AccountUUID  string    `json:"-"`
 	Subscription string    `json:"subscription,omitempty"`
 	IsLoggedIn   bool      `json:"is_logged_in"`
 	FetchedAt    time.Time `json:"fetched_at"`
