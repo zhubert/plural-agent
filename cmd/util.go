@@ -35,11 +35,46 @@ func hasContainerRuntime() bool {
 	return false
 }
 
+// dockerSocketPathsFunc returns well-known Docker socket paths to probe when
+// DOCKER_HOST is not set. This handles environments like launchd where the
+// Docker CLI context configuration may not be available.
+// Overridden in tests.
+var dockerSocketPathsFunc = func() []string {
+	home, _ := os.UserHomeDir()
+	return []string{
+		filepath.Join(home, ".colima/default/docker.sock"),              // Colima
+		filepath.Join(home, ".orbstack/run/docker.sock"),                // OrbStack
+		filepath.Join(home, ".docker/run/docker.sock"),                  // Docker Desktop (macOS)
+		"/var/run/docker.sock",                                          // Standard default
+	}
+}
+
+// ensureDockerHost sets DOCKER_HOST if it is not already set and the default
+// socket (/var/run/docker.sock) does not exist. It probes well-known socket
+// paths for Colima, OrbStack, and Docker Desktop so that erg works correctly
+// under launchd and other environments that lack Docker CLI context config.
+func ensureDockerHost() {
+	if os.Getenv("DOCKER_HOST") != "" {
+		return
+	}
+	// If the default socket exists, Docker CLI will find it on its own.
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+		return
+	}
+	for _, sock := range dockerSocketPathsFunc() {
+		if _, err := os.Stat(sock); err == nil {
+			os.Setenv("DOCKER_HOST", "unix://"+sock)
+			return
+		}
+	}
+}
+
 // checkDockerDaemon verifies a container runtime daemon is reachable, not just
 // that the binary exists. This catches the case where a Docker-compatible container
 // runtime is installed but not running, which would otherwise cause silent per-session failures.
 // Works with OrbStack, Docker Desktop, and Colima since all expose a Docker-compatible API.
 func checkDockerDaemon() error {
+	ensureDockerHost()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "docker", "info").Run(); err != nil {

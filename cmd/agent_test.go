@@ -429,3 +429,50 @@ func TestDaemonize_LockPreventsRace(t *testing.T) {
 	}
 	defer lock2.Release()
 }
+
+func TestEnsureDockerHost_AlreadySet(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///custom/docker.sock")
+	ensureDockerHost()
+	if got := os.Getenv("DOCKER_HOST"); got != "unix:///custom/docker.sock" {
+		t.Errorf("DOCKER_HOST changed when already set: got %q", got)
+	}
+}
+
+func TestEnsureDockerHost_FindsSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+
+	// Create a temp dir with a fake socket file to simulate a runtime socket.
+	tmp := t.TempDir()
+	fakeSock := filepath.Join(tmp, "docker.sock")
+	if err := os.WriteFile(fakeSock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override dockerSocketPaths via a helper that injects our fake path.
+	origPaths := dockerSocketPathsFunc
+	defer func() { dockerSocketPathsFunc = origPaths }()
+	dockerSocketPathsFunc = func() []string {
+		return []string{"/nonexistent/docker.sock", fakeSock}
+	}
+
+	ensureDockerHost()
+	want := "unix://" + fakeSock
+	if got := os.Getenv("DOCKER_HOST"); got != want {
+		t.Errorf("DOCKER_HOST = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureDockerHost_NoSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+
+	origPaths := dockerSocketPathsFunc
+	defer func() { dockerSocketPathsFunc = origPaths }()
+	dockerSocketPathsFunc = func() []string {
+		return []string{"/nonexistent/a.sock", "/nonexistent/b.sock"}
+	}
+
+	ensureDockerHost()
+	if got := os.Getenv("DOCKER_HOST"); got != "" {
+		t.Errorf("DOCKER_HOST should remain empty when no socket found, got %q", got)
+	}
+}
