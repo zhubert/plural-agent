@@ -9,9 +9,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
+
+// validVersionRe matches well-formed version strings: "20", "1.23", "3.3.0", etc.
+// Rejects anything containing shell metacharacters, letters, or other separators.
+var validVersionRe = regexp.MustCompile(`^\d+(?:\.\d+)*$`)
+
+func isValidVersion(v string) bool {
+	return validVersionRe.MatchString(v)
+}
+
+// validRustVersionRe matches well-formed Rust toolchain specs:
+//   - numeric releases:     "1.77", "1.77.0"
+//   - named channels:       "stable", "beta", "nightly"
+//   - date-pinned channels: "nightly-2024-01-01", "beta-2024-01-01"
+var validRustVersionRe = regexp.MustCompile(`^(?:\d+(?:\.\d+)*|(?:stable|beta|nightly)(?:-\d{4}-\d{2}-\d{2})?)$`)
+
+func isValidRustVersion(v string) bool {
+	return validRustVersionRe.MatchString(v)
+}
 
 // defaultVersions are used when a version cannot be parsed from the repo.
 var defaultVersions = map[Language]string{
@@ -50,7 +69,7 @@ func releaseArch() string {
 // from the GitHub release and installed as /usr/local/bin/erg.
 // When devBinaryHash is non-empty, the binary is COPYed from the build context
 // instead of downloaded, and a label is added to bust the image cache.
-func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) string {
+func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) (string, error) {
 	var b strings.Builder
 
 	// Determine Node version: use detected version if present, else default
@@ -62,6 +81,10 @@ func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) str
 		}
 	}
 
+	if !isValidVersion(nodeVersion) {
+		return "", fmt.Errorf("invalid node version %q", nodeVersion)
+	}
+
 	// Base layer: node Alpine image + essential tools + Claude Code.
 	// Alpine is significantly smaller than Ubuntu (~5MB vs ~80MB base).
 	// Node.js is always required for Claude Code, so node:XX-alpine is the natural base.
@@ -71,15 +94,22 @@ func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) str
 
 	// Add language-specific install blocks
 	for _, l := range langs {
-		block := languageInstallBlock(l)
+		block, err := languageInstallBlock(l)
+		if err != nil {
+			return "", err
+		}
 		if block != "" {
 			b.WriteString(block)
 		}
 	}
 
 	// Install Ruby/Python via mise (if detected)
-	if block := miseInstallBlock(langs); block != "" {
-		b.WriteString(block)
+	miseBlock, err := miseInstallBlock(langs)
+	if err != nil {
+		return "", err
+	}
+	if miseBlock != "" {
+		b.WriteString(miseBlock)
 	}
 
 	// Install the erg binary.
@@ -109,12 +139,12 @@ func GenerateDockerfile(langs []DetectedLang, version, devBinaryHash string) str
 	b.WriteString("    && chmod +x /usr/local/bin/entrypoint.sh\n")
 	b.WriteString("ENTRYPOINT [\"/usr/local/bin/entrypoint.sh\"]\n")
 
-	return b.String()
+	return b.String(), nil
 }
 
 // languageInstallBlock returns the Dockerfile RUN instruction for a language.
 // Returns empty string if the language is handled in the base layer (Node) or unknown.
-func languageInstallBlock(l DetectedLang) string {
+func languageInstallBlock(l DetectedLang) (string, error) {
 	v := l.Version
 	if v == "" {
 		v = defaultVersions[l.Lang]
@@ -122,37 +152,52 @@ func languageInstallBlock(l DetectedLang) string {
 
 	switch l.Lang {
 	case LangGo:
+		if !isValidVersion(v) {
+			return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+		}
 		return fmt.Sprintf(""+
 			"RUN curl -fsSL https://go.dev/dl/go%s.0.linux-%s.tar.gz | tar -C /usr/local -xz\n"+
 			"ENV PATH=\"/usr/local/go/bin:/root/go/bin:${PATH}\"\n",
-			v, goArch())
+			v, goArch()), nil
 	case LangRuby:
+		if !isValidVersion(v) {
+			return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+		}
 		// Build dependencies only — mise handles the actual Ruby install.
-		return "RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev linux-headers\n"
+		return "RUN apk add --no-cache autoconf bison openssl-dev yaml-dev readline-dev zlib-dev libffi-dev linux-headers\n", nil
 	case LangPython:
+		if !isValidVersion(v) {
+			return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+		}
 		// Build dependencies only — mise handles the actual Python install.
-		return "RUN apk add --no-cache libffi-dev openssl-dev bzip2-dev xz-dev readline-dev sqlite-dev\n"
+		return "RUN apk add --no-cache libffi-dev openssl-dev bzip2-dev xz-dev readline-dev sqlite-dev\n", nil
 	case LangRust:
+		if !isValidRustVersion(v) {
+			return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+		}
 		return fmt.Sprintf(""+
 			"RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain %s\n"+
 			"ENV PATH=\"/root/.cargo/bin:${PATH}\"\n",
-			v)
+			v), nil
 	case LangJava:
+		if !isValidVersion(v) {
+			return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+		}
 		return fmt.Sprintf(""+
 			"RUN apk add --no-cache openjdk%s-jdk\n",
-			v)
+			v), nil
 	case LangPHP:
 		// Alpine uses versioned PHP package names (e.g., php83, php83-cli).
 		// Default to PHP 8.3; php83-phar and php83-openssl are required by Composer.
 		return "" +
 			"RUN apk add --no-cache php83 php83-cli php83-mbstring php83-xml php83-phar php83-openssl \\\n" +
 			"    && ln -s /usr/bin/php83 /usr/bin/php \\\n" +
-			"    && curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n"
+			"    && curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer\n", nil
 	case LangNode:
 		// Handled in base layer
-		return ""
+		return "", nil
 	default:
-		return ""
+		return "", nil
 	}
 }
 
@@ -160,7 +205,7 @@ func languageInstallBlock(l DetectedLang) string {
 // via mise (https://mise.jdx.dev). Returns empty string if no mise-managed languages
 // are present. Mise provides reproducible, version-pinned installs without the
 // complexity of ruby-install/pyenv.
-func miseInstallBlock(langs []DetectedLang) string {
+func miseInstallBlock(langs []DetectedLang) (string, error) {
 	type miseEntry struct {
 		tool    string
 		version string
@@ -173,13 +218,19 @@ func miseInstallBlock(langs []DetectedLang) string {
 		}
 		switch l.Lang {
 		case LangRuby:
+			if !isValidVersion(v) {
+				return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+			}
 			entries = append(entries, miseEntry{tool: "ruby", version: v})
 		case LangPython:
+			if !isValidVersion(v) {
+				return "", fmt.Errorf("invalid version string %q for language %s", v, l.Lang)
+			}
 			entries = append(entries, miseEntry{tool: "python", version: v})
 		}
 	}
 	if len(entries) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var b strings.Builder
@@ -194,7 +245,7 @@ func miseInstallBlock(langs []DetectedLang) string {
 
 	// Add mise shims to PATH so Ruby/Python are available without eval
 	s += "ENV PATH=\"/root/.local/share/mise/shims:/root/.local/bin:${PATH}\"\n"
-	return s
+	return s, nil
 }
 
 // ImageTag returns a deterministic image tag based on the Dockerfile content.
@@ -305,7 +356,10 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 		}
 	}
 
-	dockerfile := GenerateDockerfile(langs, version, devBinaryHash)
+	dockerfile, err := GenerateDockerfile(langs, version, devBinaryHash)
+	if err != nil {
+		return "", false, fmt.Errorf("invalid language version: %w", err)
+	}
 	tag := ImageTag(dockerfile)
 
 	// Check if image already exists (cached)
@@ -338,7 +392,7 @@ func EnsureImage(ctx context.Context, langs []DetectedLang, version string, logg
 		buildContextDir = emptyDir
 	}
 
-	_, err := dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", buildContextDir)
+	_, err = dockerCommandFunc(ctx, dockerfile, "build", "-t", tag, "-f-", buildContextDir)
 	if err != nil {
 		return "", false, fmt.Errorf("docker build failed: %w", err)
 	}

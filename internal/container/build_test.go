@@ -11,9 +11,12 @@ import (
 )
 
 func TestGenerateDockerfile_GoWithVersion(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: "1.23"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	expectedArch := goArch()
 	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", expectedArch)
 	if !strings.Contains(df, expected) {
@@ -25,11 +28,14 @@ func TestGenerateDockerfile_GoWithVersion(t *testing.T) {
 }
 
 func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: "1.22"},
 		{Lang: LangRuby, Version: "3.3"},
 		{Lang: LangNode, Version: "20"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	expected := fmt.Sprintf("go1.22.0.linux-%s.tar.gz", goArch())
 	if !strings.Contains(df, expected) {
 		t.Errorf("expected %s in Dockerfile", expected)
@@ -43,7 +49,10 @@ func TestGenerateDockerfile_MultiLanguage(t *testing.T) {
 }
 
 func TestGenerateDockerfile_NoLanguages(t *testing.T) {
-	df := GenerateDockerfile(nil, "0.2.11", "")
+	df, err := GenerateDockerfile(nil, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "node:20-alpine") {
 		t.Error("expected alpine base image with default Node 20")
 	}
@@ -63,7 +72,10 @@ func TestGenerateDockerfile_AlwaysIncludesClaudeCode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11", "")
+			df, err := GenerateDockerfile(tt.langs, "0.2.11", "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !strings.Contains(df, "@anthropic-ai/claude-code") {
 				t.Error("expected Claude Code install in every Dockerfile")
 			}
@@ -82,7 +94,10 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11", "")
+			df, err := GenerateDockerfile(tt.langs, "0.2.11", "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !strings.Contains(df, "entrypoint.sh") {
 				t.Error("expected entrypoint script in every Dockerfile")
 			}
@@ -103,9 +118,12 @@ func TestGenerateDockerfile_AlwaysIncludesEntrypoint(t *testing.T) {
 }
 
 func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangGo, Version: ""},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Should use default Go version 1.23
 	expected := fmt.Sprintf("go1.23.0.linux-%s.tar.gz", goArch())
 	if !strings.Contains(df, expected) {
@@ -114,9 +132,12 @@ func TestGenerateDockerfile_EmptyVersionUsesDefault(t *testing.T) {
 }
 
 func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPython, Version: "3.11"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "mise install python@3.11") {
 		t.Error("expected mise install python@3.11 in Dockerfile")
 	}
@@ -126,9 +147,12 @@ func TestGenerateDockerfile_PythonWithVersion(t *testing.T) {
 }
 
 func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangRust, Version: "1.77.0"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "--default-toolchain 1.77.0") {
 		t.Error("expected Rust 1.77.0 toolchain in Dockerfile")
 	}
@@ -138,18 +162,24 @@ func TestGenerateDockerfile_RustWithVersion(t *testing.T) {
 }
 
 func TestGenerateDockerfile_JavaWithVersion(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangJava, Version: "21"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "openjdk21-jdk") {
 		t.Error("expected OpenJDK 21 JDK install in Dockerfile")
 	}
 }
 
 func TestGenerateDockerfile_PHP(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangPHP},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "php83-cli") {
 		t.Error("expected php83-cli install in Dockerfile")
 	}
@@ -176,7 +206,10 @@ func TestGenerateDockerfile_IncludesErgBinary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			df := GenerateDockerfile(tt.langs, "0.2.11", "")
+			df, err := GenerateDockerfile(tt.langs, "0.2.11", "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			expected := fmt.Sprintf("erg/releases/download/v0.2.11/erg_Linux_%s.tar.gz", expectedArch)
 			if !strings.Contains(df, expected) {
 				t.Errorf("expected release download URL in Dockerfile, got:\n%s", df)
@@ -191,7 +224,10 @@ func TestGenerateDockerfile_IncludesErgBinary(t *testing.T) {
 func TestGenerateDockerfile_DevVersionUsesLatestRelease(t *testing.T) {
 	for _, version := range []string{"dev", ""} {
 		t.Run("version="+version, func(t *testing.T) {
-			df := GenerateDockerfile(nil, version, "")
+			df, err := GenerateDockerfile(nil, version, "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if strings.Contains(df, "/releases/download/v") {
 				t.Error("dev version should not use pinned release URL")
 			}
@@ -211,8 +247,14 @@ func TestGenerateDockerfile_Deterministic(t *testing.T) {
 		{Lang: LangNode, Version: "20"},
 		{Lang: LangRuby, Version: "3.3"},
 	}
-	df1 := GenerateDockerfile(langs, "0.2.11", "")
-	df2 := GenerateDockerfile(langs, "0.2.11", "")
+	df1, err := GenerateDockerfile(langs, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	df2, err := GenerateDockerfile(langs, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if df1 != df2 {
 		t.Error("GenerateDockerfile should be deterministic for the same input")
 	}
@@ -220,9 +262,12 @@ func TestGenerateDockerfile_Deterministic(t *testing.T) {
 
 func TestGenerateDockerfile_NodeVersionOverride(t *testing.T) {
 	// When Node is detected with a specific version, it should use that version
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangNode, Version: "22"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "node:22-alpine") {
 		t.Error("expected detected Node version 22 to override default in base image")
 	}
@@ -404,7 +449,10 @@ func TestEnsureImage_DevUsesCaching(t *testing.T) {
 
 func TestGenerateDockerfile_DevBinaryHash(t *testing.T) {
 	hash := "abc123def456"
-	df := GenerateDockerfile(nil, "dev", hash)
+	df, err := GenerateDockerfile(nil, "dev", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(df, "COPY erg /usr/local/bin/erg") {
 		t.Error("dev build with hash should use COPY instead of curl")
@@ -418,8 +466,14 @@ func TestGenerateDockerfile_DevBinaryHash(t *testing.T) {
 }
 
 func TestGenerateDockerfile_DevBinaryHashChangesTag(t *testing.T) {
-	df1 := GenerateDockerfile(nil, "dev", "hash_aaa")
-	df2 := GenerateDockerfile(nil, "dev", "hash_bbb")
+	df1, err := GenerateDockerfile(nil, "dev", "hash_aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	df2, err := GenerateDockerfile(nil, "dev", "hash_bbb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tag1 := ImageTag(df1)
 	tag2 := ImageTag(df2)
 	if tag1 == tag2 {
@@ -428,7 +482,10 @@ func TestGenerateDockerfile_DevBinaryHashChangesTag(t *testing.T) {
 }
 
 func TestGenerateDockerfile_DevNoHashFallsBackToLatest(t *testing.T) {
-	df := GenerateDockerfile(nil, "dev", "")
+	df, err := GenerateDockerfile(nil, "dev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(df, "COPY erg") {
 		t.Error("dev build without hash should not use COPY")
 	}
@@ -561,10 +618,13 @@ func TestEnsureImage_ReleaseBuildSkipsCrossCompile(t *testing.T) {
 }
 
 func TestMiseInstallBlock_RubyAndPython(t *testing.T) {
-	block := miseInstallBlock([]DetectedLang{
+	block, err := miseInstallBlock([]DetectedLang{
 		{Lang: LangRuby, Version: "3.3"},
 		{Lang: LangPython, Version: "3.12"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(block, "mise install ruby@3.3") {
 		t.Error("expected mise install ruby@3.3")
 	}
@@ -583,39 +643,226 @@ func TestMiseInstallBlock_RubyAndPython(t *testing.T) {
 }
 
 func TestMiseInstallBlock_NoMiseLanguages(t *testing.T) {
-	block := miseInstallBlock([]DetectedLang{
+	block, err := miseInstallBlock([]DetectedLang{
 		{Lang: LangGo, Version: "1.23"},
 		{Lang: LangNode, Version: "20"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if block != "" {
 		t.Errorf("expected empty block for non-mise languages, got: %s", block)
 	}
 }
 
 func TestMiseInstallBlock_DefaultVersion(t *testing.T) {
-	block := miseInstallBlock([]DetectedLang{
+	block, err := miseInstallBlock([]DetectedLang{
 		{Lang: LangRuby, Version: ""},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(block, "mise install ruby@3.3") {
 		t.Errorf("expected default Ruby version 3.3, got: %s", block)
 	}
 }
 
 func TestMiseInstallBlock_Empty(t *testing.T) {
-	block := miseInstallBlock(nil)
+	block, err := miseInstallBlock(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if block != "" {
 		t.Errorf("expected empty block for nil langs, got: %s", block)
 	}
 }
 
 func TestGenerateDockerfile_MiseShimsInPath(t *testing.T) {
-	df := GenerateDockerfile([]DetectedLang{
+	df, err := GenerateDockerfile([]DetectedLang{
 		{Lang: LangRuby, Version: "3.3"},
 	}, "0.2.11", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(df, "/root/.local/share/mise/shims") {
 		t.Error("expected mise shims in PATH")
 	}
 	if !strings.Contains(df, "/root/.local/bin") {
 		t.Error("expected mise bin dir in PATH")
+	}
+}
+
+func TestIsValidVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		valid   bool
+	}{
+		// Valid versions
+		{"20", true},
+		{"1.23", true},
+		{"3.3.0", true},
+		{"21", true},
+		{"1.77", true},
+		{"1.77.0", true},
+		{"3.12", true},
+		// Invalid versions
+		{"", false},
+		{"1.23 && echo hi", false},
+		{"1.2.3 ; rm -rf /", false},
+		{"abc", false},
+		{"1.", false},
+		{".23", false},
+		{"ruby-3.3", false},
+		{">=3.0", false},
+		{"1.2.3-beta", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got := isValidVersion(tt.version)
+			if got != tt.valid {
+				t.Errorf("isValidVersion(%q) = %v, want %v", tt.version, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestIsValidRustVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		valid   bool
+	}{
+		// Numeric releases
+		{"1.77", true},
+		{"1.77.0", true},
+		{"1.23", true},
+		// Named channels
+		{"stable", true},
+		{"beta", true},
+		{"nightly", true},
+		// Date-pinned channels
+		{"nightly-2024-01-01", true},
+		{"beta-2024-01-01", true},
+		// Invalid
+		{"", false},
+		{"stable && echo hi", false},
+		{"nightly; rm -rf /", false},
+		{"nightly-latest", false},
+		{"1.77 && evil", false},
+		{"abc", false},
+		{"1.", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got := isValidRustVersion(tt.version)
+			if got != tt.valid {
+				t.Errorf("isValidRustVersion(%q) = %v, want %v", tt.version, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestGenerateDockerfile_RustChannelVersions(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+	}{
+		{"stable channel", "stable"},
+		{"beta channel", "beta"},
+		{"nightly channel", "nightly"},
+		{"date-pinned nightly", "nightly-2024-01-01"},
+		{"date-pinned beta", "beta-2024-01-01"},
+		{"numeric version", "1.77.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			df, err := GenerateDockerfile([]DetectedLang{
+				{Lang: LangRust, Version: tt.version},
+			}, "0.2.11", "")
+			if err != nil {
+				t.Fatalf("unexpected error for Rust version %q: %v", tt.version, err)
+			}
+			if !strings.Contains(df, "--default-toolchain "+tt.version) {
+				t.Errorf("expected --default-toolchain %s in Dockerfile", tt.version)
+			}
+		})
+	}
+}
+
+func TestGenerateDockerfile_RejectsInvalidVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		langs []DetectedLang
+	}{
+		{
+			"go with injection",
+			[]DetectedLang{{Lang: LangGo, Version: "1.23 && malicious_command"}},
+		},
+		{
+			"rust with injection",
+			[]DetectedLang{{Lang: LangRust, Version: "1.77 && malicious_command"}},
+		},
+		{
+			"ruby with injection",
+			[]DetectedLang{{Lang: LangRuby, Version: "3.3 ; rm -rf /"}},
+		},
+		{
+			"python with injection",
+			[]DetectedLang{{Lang: LangPython, Version: "3.12 && echo hi"}},
+		},
+		{
+			"node with injection",
+			[]DetectedLang{{Lang: LangNode, Version: "20 && evil"}},
+		},
+		{
+			"java with injection",
+			[]DetectedLang{{Lang: LangJava, Version: "21 && evil"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateDockerfile(tt.langs, "0.2.11", "")
+			if err == nil {
+				t.Error("expected error for invalid version string, got nil")
+			}
+		})
+	}
+}
+
+func TestLanguageInstallBlock_RejectsInvalidVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		lang DetectedLang
+	}{
+		{"go injection", DetectedLang{Lang: LangGo, Version: "1.23 && evil"}},
+		{"rust injection", DetectedLang{Lang: LangRust, Version: "1.77 && evil"}},
+		{"ruby injection", DetectedLang{Lang: LangRuby, Version: "3.3 ; rm -rf /"}},
+		{"python injection", DetectedLang{Lang: LangPython, Version: "3.12 && echo hi"}},
+		{"java injection", DetectedLang{Lang: LangJava, Version: "21 && evil"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := languageInstallBlock(tt.lang)
+			if err == nil {
+				t.Errorf("expected error for invalid version %q, got nil", tt.lang.Version)
+			}
+		})
+	}
+}
+
+func TestMiseInstallBlock_RejectsInvalidVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		langs []DetectedLang
+	}{
+		{"ruby injection", []DetectedLang{{Lang: LangRuby, Version: "3.3 && evil"}}},
+		{"python injection", []DetectedLang{{Lang: LangPython, Version: "3.12 ; rm -rf /"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := miseInstallBlock(tt.langs)
+			if err == nil {
+				t.Errorf("expected error for invalid version, got nil")
+			}
+		})
 	}
 }
