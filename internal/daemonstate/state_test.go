@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -554,6 +555,9 @@ func TestLoadDaemonState_MigratesLegacyStates(t *testing.T) {
 }
 
 func TestDaemonState_SavePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not supported on Windows")
+	}
 	tmpDir := t.TempDir()
 	fp := filepath.Join(tmpDir, "subdir", "daemon-state.json")
 

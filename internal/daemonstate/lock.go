@@ -42,6 +42,12 @@ func AcquireLock(repoPath string) (*DaemonLock, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
+	// Tighten permissions on existing directories (MkdirAll ignores mode if dir exists).
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("failed to set permissions on lock directory: %w", err)
+		}
+	}
 
 	// Try up to 2 times: once normally, once after stale lock cleanup.
 	for attempt := range 2 {
