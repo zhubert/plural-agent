@@ -3677,3 +3677,122 @@ func TestCheckGateApproved_GuidanceCommentNotSelfApproved(t *testing.T) {
 		t.Error("guidance comment must not trigger gate.approved (would auto-approve gate)")
 	}
 }
+
+// TestCheckPlanUserReplied_ApprovalBeforeStepEnteredAt is a regression test:
+// if a user approves the plan after the plan comment is posted but before the
+// workflow transitions to await_plan_feedback (setting StepEnteredAt), the
+// approval must still be detected. The cutoff should use the last erg system
+// comment timestamp, not StepEnteredAt.
+func TestCheckPlanUserReplied_ApprovalBeforeStepEnteredAt(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+
+	// Timeline:
+	//   T+0m: planning session starts
+	//   T+1m: erg posts plan comment (system comment)
+	//   T+2m: user approves
+	//   T+3m: planning session finishes, StepEnteredAt set
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{
+				Author:    "erg-bot",
+				Body:      "Here is the plan.\n<!-- erg:step=await_plan_feedback -->",
+				CreatedAt: now.Add(1 * time.Minute),
+			},
+			{
+				Author:    "alice",
+				Body:      "LGTM",
+				CreatedAt: now.Add(2 * time.Minute),
+			},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-100"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_plan_feedback",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{
+		"approval_pattern": `(?i)(LGTM|looks good|approved?|proceed|go ahead|ship it)`,
+	})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	// StepEnteredAt is AFTER the user's approval comment
+	view.StepEnteredAt = now.Add(3 * time.Minute)
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Fatal("expected fired=true: approval posted after plan comment but before StepEnteredAt should be detected")
+	}
+	if data["plan_approved"] != true {
+		t.Errorf("expected plan_approved=true, got %v", data["plan_approved"])
+	}
+	if data["user_feedback_author"] != "alice" {
+		t.Errorf("expected user_feedback_author=alice, got %v", data["user_feedback_author"])
+	}
+}
+
+// TestCheckGateApproved_CommentBeforeStepEnteredAt is the same regression test
+// for the gate.approved event's comment_match trigger.
+func TestCheckGateApproved_CommentBeforeStepEnteredAt(t *testing.T) {
+	cfg := testConfig()
+	now := time.Now()
+
+	provider := &mockGateProvider{
+		src: issues.SourceAsana,
+		comments: []issues.IssueComment{
+			{
+				Author:    "erg-bot",
+				Body:      "Reply with LGTM to proceed.\n<!-- erg:step=await_gate -->",
+				CreatedAt: now.Add(1 * time.Minute),
+			},
+			{
+				Author:    "bob",
+				Body:      "LGTM",
+				CreatedAt: now.Add(2 * time.Minute),
+			},
+		},
+	}
+	d := testDaemonWithGateProvider(cfg, provider)
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "asana", ID: "task-gid-200"},
+		SessionID:   "sess-1",
+		CurrentStep: "await_gate",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{
+		"trigger":         "comment_match",
+		"comment_pattern": `(?i)LGTM`,
+	})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = now.Add(3 * time.Minute)
+
+	fired, data, err := checker.checkGateApproved(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Fatal("expected fired=true: approval posted after guidance but before StepEnteredAt should be detected")
+	}
+	if data["gate_approved"] != true {
+		t.Errorf("expected gate_approved=true, got %v", data["gate_approved"])
+	}
+}
