@@ -42,7 +42,7 @@ var osExecutable = os.Executable
 
 func init() {
 	rootCmd.RunE = runAgent
-	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
+	rootCmd.Flags().BoolVar(&agentOnce, "once", false, "Run one tick and exit (vs continuous orchestrator)")
 	rootCmd.Flags().StringVar(&agentRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	rootCmd.Flags().BoolVar(&agentDaemonMode, "_daemon", false, "Internal: run as detached daemon child")
 	rootCmd.Flags().StringVar(&agentWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
@@ -196,7 +196,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	// Acquire exclusive lock BEFORE spawning child to prevent race conditions.
 	lock, err := daemonstate.AcquireLock(lockKey)
 	if err != nil {
-		return fmt.Errorf("daemon already running or lock held: %w", err)
+		return fmt.Errorf("orchestrator already running or lock held: %w", err)
 	}
 	lockReleased := false
 	defer func() {
@@ -230,7 +230,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		if stderrFile != nil {
 			stderrFile.Close()
 		}
-		return fmt.Errorf("failed to start daemon: %w", err)
+		return fmt.Errorf("failed to start orchestrator: %w", err)
 	}
 	// Close parent's copy of the fd; child inherits its own
 	if stderrFile != nil {
@@ -247,17 +247,17 @@ func daemonize(cmd *cobra.Command, args []string) error {
 
 	// Detach — we don't wait for the child
 	if err := child.Process.Release(); err != nil {
-		return fmt.Errorf("failed to detach daemon process: %w", err)
+		return fmt.Errorf("failed to detach orchestrator process: %w", err)
 	}
 
 	// Brief wait to confirm child didn't exit immediately
 	time.Sleep(500 * time.Millisecond)
 	if _, running := daemonstate.ReadLockStatus(lockKey); !running {
-		return fmt.Errorf("daemon child exited immediately (PID %d)", childPID)
+		return fmt.Errorf("orchestrator child exited immediately (PID %d)", childPID)
 	}
 
 	logPath, _ := logger.DefaultLogPath()
-	fmt.Printf("erg daemon started (PID %d)\nLogs: %s\n", childPID, logPath)
+	fmt.Printf("erg orchestrator started (PID %d)\nLogs: %s\n", childPID, logPath)
 	return nil
 }
 
@@ -312,7 +312,7 @@ func runDaemonChild(_ *cobra.Command, _ []string) error {
 	// The parent wrote our PID into the lock file before detaching.
 	lock, err := daemonstate.AdoptLock(lockKey)
 	if err != nil {
-		return fmt.Errorf("failed to adopt daemon lock: %w", err)
+		return fmt.Errorf("failed to adopt orchestrator lock: %w", err)
 	}
 	// Safety net: release if runDaemonWithLogger fails before daemon.Run takes over.
 	// Release is idempotent, so the daemon's own defer releaseLock is harmless.
@@ -769,7 +769,7 @@ func uptimeFromLockFile(repo string) time.Duration {
 func displaySummary(repo string) error {
 	pid, running := daemonstate.ReadLockStatus(repo)
 	if !running && pid == 0 {
-		fmt.Println("Daemon: not running")
+		fmt.Println("Orchestrator: not running")
 		return nil
 	}
 
@@ -784,7 +784,7 @@ func displaySummary(repo string) error {
 		uptimeStr = fmt.Sprintf(", uptime %s", formatUptime(uptime))
 	}
 
-	fmt.Printf("Daemon: %s (PID %d%s)\n", status, pid, uptimeStr)
+	fmt.Printf("Orchestrator: %s (PID %d%s)\n", status, pid, uptimeStr)
 	fmt.Printf("Repo:   %s\n", repo)
 
 	// Load state for counts

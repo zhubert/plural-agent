@@ -23,9 +23,9 @@ var (
 
 var statusCmd = &cobra.Command{
 	Use:     "status",
-	Short:   "Show daemon status summary",
+	Short:   "Show orchestrator status",
 	GroupID: "daemon",
-	Long: `Shows a one-shot summary of the daemon status including PID, uptime,
+	Long: `Shows a one-shot summary of the orchestrator status including PID, uptime,
 and work item counts.
 
 Examples:
@@ -365,9 +365,9 @@ func printFooter(w io.Writer, slotCount, maxConcurrent, queuedCount, pid int, ru
 		if !running {
 			status = "dead"
 		}
-		parts = append(parts, fmt.Sprintf("Daemon PID: %d (%s)", pid, status))
+		parts = append(parts, fmt.Sprintf("Orchestrator PID: %d (%s)", pid, status))
 	} else {
-		parts = append(parts, "Daemon: not running")
+		parts = append(parts, "Orchestrator: not running")
 	}
 	fmt.Fprintln(w, strings.Join(parts, "  |  "))
 }

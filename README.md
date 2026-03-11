@@ -1,6 +1,6 @@
 # erg
 
-**Workflow-driven autonomous coding daemon for Claude Code.**
+**Complete workflow orchestrator for Claude Code.**
 
 **Docs: [zhubert.com/erg](https://zhubert.com/erg/)** — setup, workflow configuration, CLI reference, and more.
 
@@ -28,7 +28,7 @@ If you installed via Homebrew, run erg as a persistent background service that s
 brew services start erg
 ```
 
-See the [docs](https://zhubert.com/erg/) for daemon config and the full list of `brew services` commands.
+See the [docs](https://zhubert.com/erg/) for orchestrator config and the full list of `brew services` commands.
 
 ## Build from Source
 

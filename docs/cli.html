@@ -6,7 +6,7 @@
     <title>CLI commands — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1209,11 +1209,11 @@
           <tbody>
             <tr>
               <td><code>erg start</code></td>
-              <td>Start daemon using <code>~/.erg/daemon.yaml</code> or current repo</td>
+              <td>Start orchestrator using <code>~/.erg/daemon.yaml</code> or current repo</td>
             </tr>
             <tr>
               <td><code>erg start --repo owner/repo</code></td>
-              <td>Start daemon in the background for a specific repo</td>
+              <td>Start orchestrator in the background for a specific repo</td>
             </tr>
             <tr>
               <td><code>erg start -f --repo owner/repo</code></td>
@@ -1222,7 +1222,7 @@
             <tr>
               <td><code>erg start --config config.yaml</code></td>
               <td>
-                Start daemon watching multiple repos defined in a
+                Start orchestrator watching multiple repos defined in a
                 <a href="multi-repo.html#multi-repo">config file</a>
               </td>
             </tr>
@@ -1232,11 +1232,11 @@
             </tr>
             <tr>
               <td><code>erg stop</code></td>
-              <td>Gracefully shut down the running daemon (auto-detects which one)</td>
+              <td>Gracefully shut down the running orchestrator (auto-detects which one)</td>
             </tr>
             <tr>
               <td><code>erg status</code></td>
-              <td>Show daemon status (auto-detects which daemon)</td>
+              <td>Show orchestrator status (auto-detects which orchestrator)</td>
             </tr>
             <tr>
               <td><code>erg status --tail</code></td>
@@ -1287,7 +1287,7 @@
           Executes the full workflow for a single issue synchronously in the foreground.
           Fetches the issue from the configured provider, runs the workflow in a
           containerized Claude Code session, and exits when complete. Uses a distinct
-          lock key so it won't conflict with a running daemon on the same repo.
+          lock key so it won't conflict with a running orchestrator on the same repo.
         </p>
         <p>
           Useful for testing workflows, one-off tasks, or CI/CD integration.
@@ -1320,7 +1320,7 @@
 
         <h3 id="cli-stats">erg stats</h3>
         <p>
-          Displays aggregate performance analytics from the daemon's persisted
+          Displays aggregate performance analytics from the orchestrator's persisted
           state. Stats reflect only items still in the state file &mdash; terminal
           items older than the configured max age (default 7 days) are pruned.
         </p>

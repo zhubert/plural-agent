@@ -6,7 +6,7 @@
     <title>Multi-repo — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1197,9 +1197,9 @@
         <!-- Multi-repo -->
         <h2 id="multi-repo">Multi-repo</h2>
         <p>
-          A single erg daemon can watch multiple repositories, each with its own
+          A single erg orchestrator can watch multiple repositories, each with its own
           workflow configuration. All repos share a global pool of concurrency
-          slots &mdash; when a slot is free, the daemon picks up the next issue
+          slots &mdash; when a slot is free, the orchestrator picks up the next issue
           from any repo.
         </p>
 
@@ -1207,7 +1207,7 @@
         <p>
           Create a YAML config file that lists the repos and an optional global
           <code>max_concurrent</code> limit. Each repo can specify a
-          <code>workflow</code> path; if omitted the daemon looks for the
+          <code>workflow</code> path; if omitted the orchestrator looks for the
           default <code>&lt;repo&gt;/.erg/workflow.yaml</code>.
         </p>
         <div class="code-block">
@@ -1223,7 +1223,7 @@
   - <span class="ck">path:</span> <span class="cv">/home/user/local-project</span></pre>
         </div>
 
-        <h3>Starting the daemon</h3>
+        <h3>Starting the orchestrator</h3>
         <p>
           Pass the config file to <code>erg start</code> with the
           <code>--config</code> flag. The flag is mutually exclusive with
@@ -1322,7 +1322,7 @@
 
         <h3>Setup</h3>
         <p>
-          First, create a daemon config file at <code>~/.erg/daemon.yaml</code>
+          First, create an orchestrator config file at <code>~/.erg/daemon.yaml</code>
           listing the repos you want erg to watch. This uses the same format as
           the <a href="#multi-repo">multi-repo config</a>:
         </p>
@@ -1381,7 +1381,7 @@
 
         <h3>Default config auto-discovery</h3>
         <p>
-          When <code>~/.erg/daemon.yaml</code> exists, several commands work
+          When <code>~/.erg/daemon.yaml</code> exists (the default orchestrator config), several commands work
           without any flags:
         </p>
         <ul>
@@ -1389,7 +1389,7 @@
             <code>erg start</code> — automatically uses the default config
           </li>
           <li>
-            <code>erg stop</code> — finds the running daemon by scanning lock
+            <code>erg stop</code> — finds the running orchestrator by scanning lock
             files
           </li>
           <li>
@@ -1397,7 +1397,7 @@
           </li>
         </ul>
         <p>
-          If multiple daemons are running, <code>stop</code> and
+          If multiple orchestrators are running, <code>stop</code> and
           <code>status</code> will list them and ask you to specify
           <code>--repo</code>.
         </p>

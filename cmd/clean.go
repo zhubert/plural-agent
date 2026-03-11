@@ -17,13 +17,13 @@ var agentCleanSkipConfirm bool
 
 var agentCleanCmd = &cobra.Command{
 	Use:     "clean",
-	Short:   "Remove all daemon state and ephemeral files",
+	Short:   "Remove all orchestrator state and ephemeral files",
 	GroupID: "setup",
-	Long: `Clears daemon state (work item tracking), removes lock files, worktrees,
+	Long: `Clears orchestrator state (work item tracking), removes lock files, worktrees,
 session message files, container auth files (erg-auth-*),
 MCP config files (erg-mcp-*.json), and log files (erg.log, mcp-*.log, stream-*.log).
 
-This is useful when the daemon state becomes stale or corrupted,
+This is useful when the orchestrator state becomes stale or corrupted,
 when a lock file is left behind after an unclean shutdown,
 or when orphaned files accumulate over time.
 
@@ -91,16 +91,16 @@ func runAgentCleanWithReader(input io.Reader) error {
 	// Print summary
 	fmt.Println("This will clean:")
 	if stateExists {
-		fmt.Println("  - Daemon state file (daemon-state.json)")
+		fmt.Println("  - Orchestrator state file (daemon-state.json)")
 	}
 	if len(lockFiles) > 0 {
-		fmt.Printf("  - %d daemon lock file(s)\n", len(lockFiles))
+		fmt.Printf("  - %d orchestrator lock file(s)\n", len(lockFiles))
 		for _, lf := range lockFiles {
 			fmt.Printf("      %s\n", lf)
 		}
 		fmt.Println()
-		fmt.Println("  Warning: lock files indicate a daemon may be running.")
-		fmt.Println("  Cleaning while a daemon is active can cause issues.")
+		fmt.Println("  Warning: lock files indicate an orchestrator may be running.")
+		fmt.Println("  Cleaning while an orchestrator is active can cause issues.")
 	}
 	if len(wtEntries) > 0 {
 		fmt.Printf("  - %d worktree(s)\n", len(wtEntries))
@@ -181,7 +181,7 @@ func runAgentCleanWithReader(input io.Reader) error {
 	fmt.Println()
 	fmt.Println("Cleaned:")
 	if stateRemoved {
-		fmt.Println("  - Daemon state file removed")
+		fmt.Println("  - Orchestrator state file removed")
 	}
 	if locksRemoved > 0 {
 		fmt.Printf("  - %d lock file(s) removed\n", locksRemoved)

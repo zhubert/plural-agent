@@ -6,7 +6,7 @@
     <title>Dashboard — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1197,7 +1197,7 @@
         <h2 id="dashboard">Dashboard</h2>
         <p>
           The erg dashboard provides a real-time web interface for monitoring all
-          running daemons and their work items. It uses Server-Sent Events (SSE)
+          running orchestrators and their work items. It uses Server-Sent Events (SSE)
           for live streaming updates.
         </p>
 
@@ -1248,11 +1248,11 @@
         <ul>
           <li>
             <strong>Summary bar</strong> &mdash; aggregate counts across all
-            daemons: daemon count, active/queued/completed/failed items, total
+            orchestrators: orchestrator count, active/queued/completed/failed items, total
             spend, and token usage
           </li>
           <li>
-            <strong>Per-daemon sections</strong> &mdash; each running daemon gets
+            <strong>Per-orchestrator sections</strong> &mdash; each running orchestrator gets
             its own section showing repo name, PID, uptime, slot count, and cost
           </li>
           <li>

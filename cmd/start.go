@@ -22,9 +22,9 @@ var (
 
 var startCmd = &cobra.Command{
 	Use:     "start",
-	Short:   "Start the daemon",
+	Short:   "Start the orchestrator",
 	GroupID: "daemon",
-	Long: `Start the erg daemon for the given repository or set of repositories.
+	Long: `Start the erg orchestrator for the given repository or set of repositories.
 
 By default, forks into the background and detaches from the terminal.
 Use -f/--foreground to stay attached with a live status display.
@@ -39,18 +39,18 @@ service management (includes the dashboard automatically).
 
 Examples:
   erg start                           # Start using default config or current repo
-  erg start --repo owner/repo         # Start daemon for specific repo
+  erg start --repo owner/repo         # Start orchestrator for specific repo
   erg start -f --repo owner/repo      # Foreground with live status display
   erg start --once --repo owner/repo  # Run one tick, then exit
   erg start --config config.yaml       # Watch multiple repos
-  erg start --dashboard               # Start daemon with embedded web dashboard`,
+  erg start --dashboard               # Start orchestrator with embedded web dashboard`,
 	RunE: runStart,
 }
 
 func init() {
 	startCmd.Flags().StringVar(&startRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	startCmd.Flags().BoolVarP(&startForeground, "foreground", "f", false, "Stay in foreground with live status display")
-	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
+	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous orchestrator)")
 	startCmd.Flags().StringVar(&startWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
 	startCmd.Flags().StringVar(&startConfigFile, "config", "", "Path to config file for multi-repo mode")
 	startCmd.Flags().StringVar(&startDashboardAddr, "dashboard-addr", "", "Start an embedded dashboard server at this address (e.g. localhost:21122)")

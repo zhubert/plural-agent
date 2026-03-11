@@ -6,7 +6,7 @@
     <title>Workflow configuration — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1205,7 +1205,7 @@
           defaults.
         </p>
         <p>
-          The <code>settings</code> block controls daemon-level behaviour:
+          The <code>settings</code> block controls orchestrator-level behaviour:
           concurrency limits, branch naming, merge strategy, and session
           constraints. The <code>source</code> block selects the issue provider
           and filter. The <code>states</code> block is the flowchart itself.
@@ -1319,7 +1319,7 @@
         <h3 id="settings">settings block reference</h3>
         <p>
           The optional <code>settings</code> block at the top level of
-          <code>workflow.yaml</code> controls daemon-level behaviour for the
+          <code>workflow.yaml</code> controls orchestrator-level behaviour for the
           repo. All fields are optional — omit any field to use the default.
         </p>
         <table class="cli-table">
@@ -1529,7 +1529,7 @@
 
         <h3 id="state-wait">wait</h3>
         <p>
-          A <code>wait</code> state polls for an external event on each daemon
+          A <code>wait</code> state polls for an external event on each orchestrator
           tick. It does not advance until the event fires. Always set a
           <code>timeout</code> to prevent indefinite waits &mdash; use
           <code>timeout_next</code> to route the timeout to a dedicated state

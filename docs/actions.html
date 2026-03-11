@@ -6,7 +6,7 @@
     <title>Action reference — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1212,7 +1212,7 @@
           </div>
           <p class="action-desc">
             Starts an autonomous Claude Code session that reads the issue,
-            writes code, runs tests, and commits changes locally. The daemon
+            writes code, runs tests, and commits changes locally. The orchestrator
             waits for the session to complete before advancing.
           </p>
           <div class="param-section">
@@ -1272,7 +1272,7 @@
                   <td>string</td>
                   <td>Apply auto-formatting</td>
                   <td>
-                    Commit message used when the daemon commits the post-coding
+                    Commit message used when the orchestrator commits the post-coding
                     format pass. Only used when
                     <code>format_command</code> is set.
                   </td>
@@ -1293,7 +1293,7 @@
           <div class="param-section">
             <div class="param-section-title">Output data</div>
             <p class="param-none">
-              None. Session completion is signalled internally; the daemon
+              None. Session completion is signalled internally; the orchestrator
               advances the state machine when the worker exits.
             </p>
           </div>
@@ -1372,7 +1372,7 @@
                   <td>string</td>
                   <td>Apply auto-formatting</td>
                   <td>
-                    Commit message used when the daemon commits the
+                    Commit message used when the orchestrator commits the
                     post-fix-round format pass. Only used when
                     <code>format_command</code> is set (directly or inherited).
                   </td>
@@ -1421,7 +1421,7 @@
           </div>
           <p class="action-desc">
             Fetches PR review comments and resumes the coding session to address
-            them. Daemon-managed transcript comments are filtered out so Claude
+            them. Orchestrator-managed transcript comments are filtered out so Claude
             only sees human feedback. Increments <code>review_rounds</code> on
             each invocation; returns an error when the max is reached.
           </p>
@@ -1647,7 +1647,7 @@
             <div class="param-section-title">Output data</div>
             <p class="param-none">
               None. The plan is posted as an issue comment by Claude during the
-              session. The daemon advances the state machine when the worker
+              session. The orchestrator advances the state machine when the worker
               exits.
             </p>
           </div>
@@ -3010,7 +3010,7 @@ https://github.com/your-org/your-repo/pull/99</pre
           </div>
           <p class="action-desc">
             Pauses workflow execution for a configurable duration. Cancels
-            cleanly on daemon shutdown. Useful as a delay between polling cycles
+            cleanly on orchestrator shutdown. Useful as a delay between polling cycles
             or before time-sensitive operations.
           </p>
           <div class="param-section">

@@ -21,20 +21,20 @@ var findDaemonPIDsFunc = findDaemonPIDs
 
 var stopCmd = &cobra.Command{
 	Use:     "stop",
-	Short:   "Stop the daemon gracefully",
+	Short:   "Stop the orchestrator gracefully",
 	GroupID: "daemon",
-	Long: `Send SIGTERM to the running daemon to trigger a graceful shutdown.
+	Long: `Send SIGTERM to the running orchestrator to trigger a graceful shutdown.
 
-The daemon will finish in-flight work before exiting.
+The orchestrator will finish in-flight work before exiting.
 
 Examples:
-  erg stop                       # Stop daemon for current repo
-  erg stop --repo owner/repo     # Stop daemon for specific repo`,
+  erg stop                       # Stop orchestrator for current repo
+  erg stop --repo owner/repo     # Stop orchestrator for specific repo`,
 	RunE: runStop,
 }
 
 func init() {
-	stopCmd.Flags().StringVar(&stopRepo, "repo", "", "Repo whose daemon to stop (owner/repo or filesystem path)")
+	stopCmd.Flags().StringVar(&stopRepo, "repo", "", "Repo whose orchestrator to stop (owner/repo or filesystem path)")
 	rootCmd.AddCommand(stopCmd)
 }
 
@@ -70,11 +70,11 @@ func runStop(cmd *cobra.Command, args []string) error {
 	// Fallback: scan for daemon processes matching this repo
 	pids := findDaemonPIDsFunc(repo)
 	if len(pids) == 0 {
-		fmt.Println("Daemon is not running")
+		fmt.Println("Orchestrator is not running")
 		return nil
 	}
 
-	fmt.Printf("Found %d orphaned daemon process(es) via process scan\n", len(pids))
+	fmt.Printf("Found %d orphaned orchestrator process(es) via process scan\n", len(pids))
 	for _, p := range pids {
 		if err := signalDaemon(p); err != nil {
 			fmt.Printf("  Warning: failed to signal PID %d: %v\n", p, err)
@@ -95,7 +95,7 @@ func signalDaemon(pid int) error {
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
 	}
-	fmt.Printf("Sent SIGTERM to daemon (PID %d)\n", pid)
+	fmt.Printf("Sent SIGTERM to orchestrator (PID %d)\n", pid)
 	return nil
 }
 

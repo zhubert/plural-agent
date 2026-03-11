@@ -6,7 +6,7 @@
     <title>Wait events — erg</title>
     <meta
       name="description"
-      content="erg — workflow-driven autonomous coding daemon for Claude Code."
+      content="erg — workflow-driven autonomous coding orchestrator for Claude Code."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1198,7 +1198,7 @@
         <h2 id="events">Wait events</h2>
         <p>
           Events are used in <code>wait</code> states via the
-          <code>event:</code> key. The daemon polls on each tick and advances
+          <code>event:</code> key. The orchestrator polls on each tick and advances
           the state machine when the event fires. All wait states support
           <code>timeout</code> and <code>timeout_next</code>.
         </p>
@@ -1211,7 +1211,7 @@
           </div>
           <p class="action-desc">
             Fires when the pull request receives a formal approval. While
-            waiting, the daemon automatically resumes Claude to address new
+            waiting, the orchestrator automatically resumes Claude to address new
             review comments (configurable via <code>auto_address</code>).
           </p>
           <div class="param-section">
@@ -1260,7 +1260,7 @@
                   <td>string</td>
                   <td>Apply auto-formatting</td>
                   <td>
-                    Commit message used when the daemon commits the
+                    Commit message used when the orchestrator commits the
                     post-feedback format pass. Only used when
                     <code>format_command</code> is set (directly or inherited).
                   </td>
@@ -1289,7 +1289,7 @@
                   <td>bool</td>
                   <td>
                     Set to <code>true</code> if the PR was merged outside the
-                    daemon.
+                    orchestrator.
                   </td>
                 </tr>
               </tbody>
@@ -1363,7 +1363,7 @@
                 <tr>
                   <td>pr_merged_externally</td>
                   <td>bool</td>
-                  <td>True if the PR was merged outside the daemon.</td>
+                  <td>True if the PR was merged outside the orchestrator.</td>
                 </tr>
               </tbody>
             </table>
@@ -1499,7 +1499,7 @@
           </div>
           <p class="action-desc">
             Fires when a human comments on the issue after
-            <code>ai.plan</code> posts an implementation plan. The daemon checks
+            <code>ai.plan</code> posts an implementation plan. The orchestrator checks
             whether the comment matches an approval pattern. If it does,
             <code>plan_approved</code> is <code>true</code> and the workflow can
             proceed to <code>ai.code</code>. Non-matching comments are treated

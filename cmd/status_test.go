@@ -222,8 +222,8 @@ func TestPrintFooter_WithMaxConcurrent(t *testing.T) {
 	if !strings.Contains(out, "Queued: 1") {
 		t.Errorf("expected 'Queued: 1' in output: %q", out)
 	}
-	if !strings.Contains(out, "Daemon PID: 48291 (running)") {
-		t.Errorf("expected daemon PID in output: %q", out)
+	if !strings.Contains(out, "Orchestrator PID: 48291 (running)") {
+		t.Errorf("expected 'Orchestrator PID' in output: %q", out)
 	}
 }
 
@@ -234,8 +234,8 @@ func TestPrintFooter_NoMaxConcurrent(t *testing.T) {
 	if !strings.Contains(out, "Slots: 1 active") {
 		t.Errorf("expected 'Slots: 1 active' in output: %q", out)
 	}
-	if !strings.Contains(out, "Daemon: not running") {
-		t.Errorf("expected 'Daemon: not running' in output: %q", out)
+	if !strings.Contains(out, "Orchestrator: not running") {
+		t.Errorf("expected 'Orchestrator: not running' in output: %q", out)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestPrintFooter_DeadDaemon(t *testing.T) {
 	var buf bytes.Buffer
 	printFooter(&buf, 0, 0, 0, 12345, false, 0, 0)
 	out := buf.String()
-	if !strings.Contains(out, "Daemon PID: 12345 (dead)") {
+	if !strings.Contains(out, "Orchestrator PID: 12345 (dead)") {
 		t.Errorf("expected '(dead)' indicator in output: %q", out)
 	}
 }
@@ -868,8 +868,8 @@ func TestDisplaySummary_NotRunning(t *testing.T) {
 	buf.ReadFrom(r)
 	out := buf.String()
 
-	if !strings.Contains(out, "Daemon: not running") {
-		t.Errorf("expected 'Daemon: not running' in output, got: %q", out)
+	if !strings.Contains(out, "Orchestrator: not running") {
+		t.Errorf("expected 'Orchestrator: not running' in output, got: %q", out)
 	}
 }
 
@@ -908,8 +908,8 @@ func TestDisplaySummary_Running(t *testing.T) {
 	buf.ReadFrom(r)
 	out := buf.String()
 
-	if !strings.Contains(out, "Daemon: running") {
-		t.Errorf("expected 'Daemon: running' in output, got: %q", out)
+	if !strings.Contains(out, "Orchestrator: running") {
+		t.Errorf("expected 'Orchestrator: running' in output, got: %q", out)
 	}
 	if !strings.Contains(out, fmt.Sprintf("PID %d", os.Getpid())) {
 		t.Errorf("expected PID in output, got: %q", out)

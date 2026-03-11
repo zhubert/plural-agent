@@ -26,11 +26,11 @@ and merges when CI passes and reviewers approve.
 
 Configure with .erg/workflow.yaml in your repository.
 State is persisted to ~/.erg/ and survives restarts.`,
-	Example: `  erg start                        # Start daemon for current repo
-  erg start --repo owner/repo      # Start daemon for specific repo
+	Example: `  erg start                        # Start orchestrator for current repo
+  erg start --repo owner/repo      # Start orchestrator for specific repo
   erg start -f --repo owner/repo   # Foreground with live status display
-  erg status                       # Show daemon status summary
-  erg stop                         # Stop the daemon gracefully`,
+  erg status                       # Show orchestrator status
+  erg stop                         # Stop the orchestrator gracefully`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -41,7 +41,7 @@ func init() {
 
 	// Command groups
 	rootCmd.AddGroup(
-		&cobra.Group{ID: "daemon", Title: "Daemon Commands:"},
+		&cobra.Group{ID: "daemon", Title: "Orchestrator Commands:"},
 		&cobra.Group{ID: "setup", Title: "Setup Commands:"},
 	)
 

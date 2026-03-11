@@ -21,7 +21,7 @@ func TestFindSingleRunningDaemon_NoLocks(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no locks exist")
 	}
-	if !strings.Contains(err.Error(), "no running daemon found") {
+	if !strings.Contains(err.Error(), "no running orchestrator found") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -47,7 +47,7 @@ func TestFindSingleRunningDaemon_OneDead(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when daemon is dead")
 	}
-	if !strings.Contains(err.Error(), "no running daemon found") {
+	if !strings.Contains(err.Error(), "no running orchestrator found") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
