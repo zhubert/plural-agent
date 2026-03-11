@@ -54,6 +54,7 @@ type WorkItemInfo struct {
 	UpdatedAt         time.Time       `json:"updated_at"`
 	CompletedAt       *time.Time      `json:"completed_at,omitempty"`
 	StepEnteredAt     time.Time       `json:"step_entered_at"`
+	Repo              string          `json:"repo,omitempty"`
 }
 
 // CollectAll discovers all running daemons and gathers their state.
@@ -75,8 +76,17 @@ func CollectAll() (*Snapshot, error) {
 		}
 
 		costUSD, outputTokens, inputTokens := state.GetSpend()
+
+		// Prefer human-readable labels (e.g. "zhubert/erg, zhubert/plural") over
+		// raw filesystem paths or opaque daemon IDs.
+		repoDisplay := state.RepoPath
+		repoLabels, repoPathLabels := state.GetRepoLabels()
+		if len(repoLabels) > 0 {
+			repoDisplay = strings.Join(repoLabels, ", ")
+		}
+
 		info := DaemonInfo{
-			Repo:          state.RepoPath,
+			Repo:          repoDisplay,
 			PID:           d.PID,
 			Running:       true,
 			UptimeSeconds: int(time.Since(state.StartedAt).Seconds()),
@@ -90,6 +100,15 @@ func CollectAll() (*Snapshot, error) {
 		allItems := state.GetAllWorkItems()
 		info.WorkItems = make([]WorkItemInfo, 0, len(allItems))
 		for _, item := range allItems {
+			// Resolve per-item repo label from the _repo_path stored in StepData.
+			itemRepo := ""
+			if rp, ok := item.StepData["_repo_path"].(string); ok && rp != "" {
+				if label, ok := repoPathLabels[rp]; ok && label != "" {
+					itemRepo = label
+				} else {
+					itemRepo = rp
+				}
+			}
 			info.WorkItems = append(info.WorkItems, WorkItemInfo{
 				ID:                item.ID,
 				IssueRef:          item.IssueRef,
@@ -110,6 +129,7 @@ func CollectAll() (*Snapshot, error) {
 				UpdatedAt:         item.UpdatedAt,
 				CompletedAt:       item.CompletedAt,
 				StepEnteredAt:     item.StepEnteredAt,
+				Repo:              itemRepo,
 			})
 		}
 

@@ -3007,3 +3007,64 @@ func TestUpsertIssueComment_GitHubFallbackUpdatesExisting(t *testing.T) {
 		t.Error("expected PATCH call to update comment 999")
 	}
 }
+
+func TestResolveAndSaveRepoLabels_MapsRemoteURL(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/home/user/code/erg", "/home/user/code/plural"}
+
+	mockExec := exec.NewMockExecutor(nil)
+	// Return a GitHub SSH remote URL for /home/user/code/erg
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 3 && args[0] == "remote" && args[1] == "get-url" && dir == "/home/user/code/erg"
+	}, exec.MockResponse{Stdout: []byte("git@github.com:zhubert/erg.git\n")})
+	// Return an HTTPS remote URL for /home/user/code/plural
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		return name == "git" && len(args) >= 3 && args[0] == "remote" && args[1] == "get-url" && dir == "/home/user/code/plural"
+	}, exec.MockResponse{Stdout: []byte("https://github.com/zhubert/plural.git\n")})
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.state = daemonstate.NewDaemonState("multi-abc123")
+
+	d.resolveAndSaveRepoLabels(context.Background())
+
+	labels, pathLabels := d.state.GetRepoLabels()
+	if len(labels) != 2 {
+		t.Fatalf("expected 2 labels, got %d: %v", len(labels), labels)
+	}
+	if labels[0] != "zhubert/erg" {
+		t.Errorf("labels[0] = %q, want %q", labels[0], "zhubert/erg")
+	}
+	if labels[1] != "zhubert/plural" {
+		t.Errorf("labels[1] = %q, want %q", labels[1], "zhubert/plural")
+	}
+	if pathLabels["/home/user/code/erg"] != "zhubert/erg" {
+		t.Errorf("pathLabel for erg = %q", pathLabels["/home/user/code/erg"])
+	}
+	if pathLabels["/home/user/code/plural"] != "zhubert/plural" {
+		t.Errorf("pathLabel for plural = %q", pathLabels["/home/user/code/plural"])
+	}
+}
+
+func TestResolveAndSaveRepoLabels_FallsBackOnError(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/no/remote/here"}
+
+	mockExec := exec.NewMockExecutor(nil)
+	// No rule registered → git remote get-url will fail
+
+	d := testDaemonWithExec(cfg, mockExec)
+	d.state = daemonstate.NewDaemonState("multi-abc123")
+
+	d.resolveAndSaveRepoLabels(context.Background())
+
+	labels, pathLabels := d.state.GetRepoLabels()
+	if len(labels) != 1 {
+		t.Fatalf("expected 1 label, got %d", len(labels))
+	}
+	if labels[0] != "/no/remote/here" {
+		t.Errorf("expected raw path fallback, got %q", labels[0])
+	}
+	if pathLabels["/no/remote/here"] != "/no/remote/here" {
+		t.Errorf("expected raw path fallback in pathLabels, got %q", pathLabels["/no/remote/here"])
+	}
+}

@@ -1104,3 +1104,93 @@ func TestPruneTerminalItems_EmptyState(t *testing.T) {
 		t.Errorf("expected 0 items pruned from empty state, got %d", pruned)
 	}
 }
+
+func TestSetRepoLabels(t *testing.T) {
+	state := NewDaemonState("multi-abc123")
+
+	labels := []string{"zhubert/erg", "zhubert/plural"}
+	pathLabels := map[string]string{
+		"/home/user/code/erg":    "zhubert/erg",
+		"/home/user/code/plural": "zhubert/plural",
+	}
+
+	state.SetRepoLabels(labels, pathLabels)
+
+	gotLabels, gotPathLabels := state.GetRepoLabels()
+	if len(gotLabels) != 2 {
+		t.Fatalf("expected 2 labels, got %d", len(gotLabels))
+	}
+	if gotLabels[0] != "zhubert/erg" || gotLabels[1] != "zhubert/plural" {
+		t.Errorf("unexpected labels: %v", gotLabels)
+	}
+	if gotPathLabels["/home/user/code/erg"] != "zhubert/erg" {
+		t.Errorf("expected path label for erg, got %q", gotPathLabels["/home/user/code/erg"])
+	}
+	if gotPathLabels["/home/user/code/plural"] != "zhubert/plural" {
+		t.Errorf("expected path label for plural, got %q", gotPathLabels["/home/user/code/plural"])
+	}
+}
+
+func TestSetRepoLabels_JSONRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	state := &DaemonState{
+		Version:   stateVersion,
+		RepoPath:  "multi-abc123",
+		WorkItems: make(map[string]*WorkItem),
+		StartedAt: time.Now().Truncate(time.Millisecond),
+		filePath:  filepath.Join(tmpDir, "daemon-state.json"),
+	}
+
+	labels := []string{"zhubert/erg", "zhubert/plural"}
+	pathLabels := map[string]string{
+		"/home/user/code/erg":    "zhubert/erg",
+		"/home/user/code/plural": "zhubert/plural",
+	}
+	state.SetRepoLabels(labels, pathLabels)
+
+	if err := state.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	data, err := os.ReadFile(state.filePath)
+	if err != nil {
+		t.Fatalf("failed to read state file: %v", err)
+	}
+
+	var loaded DaemonState
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(loaded.RepoLabels) != 2 {
+		t.Fatalf("expected 2 RepoLabels after round-trip, got %d", len(loaded.RepoLabels))
+	}
+	if loaded.RepoLabels[0] != "zhubert/erg" {
+		t.Errorf("unexpected first label: %q", loaded.RepoLabels[0])
+	}
+	if loaded.RepoPathLabels["/home/user/code/plural"] != "zhubert/plural" {
+		t.Errorf("unexpected path label: %q", loaded.RepoPathLabels["/home/user/code/plural"])
+	}
+}
+
+func TestSetRepoLabels_ThreadSafe(t *testing.T) {
+	state := NewDaemonState("multi-abc123")
+
+	// Concurrent writes and reads must not race.
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			state.SetRepoLabels([]string{"label"}, map[string]string{"/path": "label"})
+			_ = n
+		}(i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			state.GetRepoLabels()
+		}()
+	}
+	wg.Wait()
+}

@@ -2,12 +2,48 @@ package dashboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/zhubert/erg/internal/config"
+	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/paths"
 )
+
+// writeFakeLockAndState writes a lock file (with the current process PID so it
+// appears alive) and a matching state file for the given repoKey using
+// daemonstate's path helpers, with the repoKey embedded in the state.
+func writeFakeLockAndState(t *testing.T, tmpDir, repoKey string, mutate func(*daemonstate.DaemonState)) {
+	t.Helper()
+
+	ergDir := filepath.Join(tmpDir, ".erg")
+	if err := os.MkdirAll(ergDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	state := daemonstate.NewDaemonState(repoKey)
+	state.StartedAt = time.Now()
+	if mutate != nil {
+		mutate(state)
+	}
+
+	statePath := daemonstate.StateFilePath(repoKey)
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lockPath := daemonstate.LockFilePath(repoKey)
+	if err := os.WriteFile(lockPath, fmt.Appendf(nil, "%d", os.Getpid()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCollectAll_NoDaemons(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -336,6 +372,144 @@ func TestReadSessionLog_BracesInStringValues(t *testing.T) {
 	}
 	if lines[1].Type != "text" || lines[1].Text != "Done running the loop" {
 		t.Errorf("line 1: %+v", lines[1])
+	}
+}
+
+func TestCollectAll_UsesRepoLabels(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	repoKey := "multi-abc123"
+	writeFakeLockAndState(t, tmpDir, repoKey, func(s *daemonstate.DaemonState) {
+		s.SetRepoLabels(
+			[]string{"zhubert/erg", "zhubert/plural"},
+			map[string]string{
+				"/home/user/code/erg":    "zhubert/erg",
+				"/home/user/code/plural": "zhubert/plural",
+			},
+		)
+	})
+
+	snap, err := CollectAll()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snap.Daemons) != 1 {
+		t.Fatalf("expected 1 daemon, got %d", len(snap.Daemons))
+	}
+
+	d := snap.Daemons[0]
+	want := "zhubert/erg, zhubert/plural"
+	if d.Repo != want {
+		t.Errorf("DaemonInfo.Repo = %q, want %q", d.Repo, want)
+	}
+}
+
+func TestCollectAll_FallsBackToRepoPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	repoKey := "/home/user/code/erg"
+	writeFakeLockAndState(t, tmpDir, repoKey, nil /* no labels set */)
+
+	snap, err := CollectAll()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snap.Daemons) != 1 {
+		t.Fatalf("expected 1 daemon, got %d", len(snap.Daemons))
+	}
+
+	d := snap.Daemons[0]
+	if d.Repo != repoKey {
+		t.Errorf("DaemonInfo.Repo = %q, want %q (fallback to RepoPath)", d.Repo, repoKey)
+	}
+}
+
+func TestCollectAll_WorkItemRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	repoKey := "multi-abc123"
+	writeFakeLockAndState(t, tmpDir, repoKey, func(s *daemonstate.DaemonState) {
+		s.SetRepoLabels(
+			[]string{"zhubert/erg"},
+			map[string]string{"/home/user/code/erg": "zhubert/erg"},
+		)
+		s.AddWorkItem(&daemonstate.WorkItem{
+			ID:       "wi-1",
+			IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Test issue"},
+			StepData: map[string]any{"_repo_path": "/home/user/code/erg"},
+		})
+		// Item without _repo_path should have empty Repo
+		s.AddWorkItem(&daemonstate.WorkItem{
+			ID:       "wi-2",
+			IssueRef: config.IssueRef{Source: "github", ID: "43", Title: "No repo"},
+		})
+	})
+
+	snap, err := CollectAll()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snap.Daemons) != 1 {
+		t.Fatalf("expected 1 daemon, got %d", len(snap.Daemons))
+	}
+
+	items := snap.Daemons[0].WorkItems
+	if len(items) != 2 {
+		t.Fatalf("expected 2 work items, got %d", len(items))
+	}
+
+	// Find items by ID
+	itemsByID := make(map[string]WorkItemInfo)
+	for _, item := range items {
+		itemsByID[item.ID] = item
+	}
+
+	wi1 := itemsByID["wi-1"]
+	if wi1.Repo != "zhubert/erg" {
+		t.Errorf("wi-1 Repo = %q, want %q", wi1.Repo, "zhubert/erg")
+	}
+
+	wi2 := itemsByID["wi-2"]
+	if wi2.Repo != "" {
+		t.Errorf("wi-2 Repo = %q, want empty (no _repo_path)", wi2.Repo)
+	}
+}
+
+func TestCollectAll_WorkItemRepo_FallbackToRawPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	paths.Reset()
+
+	repoKey := "multi-abc123"
+	writeFakeLockAndState(t, tmpDir, repoKey, func(s *daemonstate.DaemonState) {
+		// No path labels set → fallback to raw path
+		s.AddWorkItem(&daemonstate.WorkItem{
+			ID:       "wi-1",
+			IssueRef: config.IssueRef{Source: "github", ID: "42"},
+			StepData: map[string]any{"_repo_path": "/home/user/code/erg"},
+		})
+	})
+
+	snap, err := CollectAll()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snap.Daemons) != 1 {
+		t.Fatalf("expected 1 daemon, got %d", len(snap.Daemons))
+	}
+
+	items := snap.Daemons[0].WorkItems
+	if len(items) != 1 {
+		t.Fatalf("expected 1 work item, got %d", len(items))
+	}
+	if items[0].Repo != "/home/user/code/erg" {
+		t.Errorf("Repo = %q, want %q (raw path fallback)", items[0].Repo, "/home/user/code/erg")
 	}
 }
 

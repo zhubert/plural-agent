@@ -241,6 +241,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Reset spend tracking so it reflects only the current daemon run.
 	d.state.ResetSpend()
+
+	// Resolve human-readable owner/repo labels from git remote URLs and persist them
+	// so the dashboard can display "zhubert/erg" instead of raw filesystem paths or
+	// opaque daemon IDs.
+	d.resolveAndSaveRepoLabels(ctx)
+
 	if err := d.state.Save(); err != nil {
 		d.logger.Warn("failed to save state after resetting spend", "error", err)
 	}
@@ -375,6 +381,30 @@ func (d *Daemon) stateKey() string {
 		return d.daemonID
 	}
 	return d.repoFilter
+}
+
+// resolveAndSaveRepoLabels resolves owner/repo display labels for all repos this daemon
+// manages by reading the git remote origin URL for each local path. Failures are logged and
+// fall back to the raw path so the dashboard always has something to display.
+func (d *Daemon) resolveAndSaveRepoLabels(ctx context.Context) {
+	repos := d.config.GetRepos()
+	labels := make([]string, 0, len(repos))
+	pathLabels := make(map[string]string, len(repos))
+
+	for _, repoPath := range repos {
+		label := repoPath // fallback
+		remoteURL, err := d.gitService.GetRemoteOriginURL(ctx, repoPath)
+		if err != nil {
+			d.logger.Debug("could not get remote URL for repo label", "repo", repoPath, "error", err)
+		} else if ownerRepo := git.ExtractOwnerRepo(remoteURL); ownerRepo != "" {
+			label = ownerRepo
+		}
+		labels = append(labels, label)
+		pathLabels[repoPath] = label
+	}
+
+	d.state.SetRepoLabels(labels, pathLabels)
+	d.logger.Debug("resolved repo labels", "labels", labels)
 }
 
 // loadWorkflowConfigs loads workflow configs and creates engines for all registered repos.

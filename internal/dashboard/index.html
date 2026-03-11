@@ -798,6 +798,8 @@ var Idiomorph=function(){"use strict";let o=new Set;let n={morphStyle:"outerHTML
     const label = issueLabel(item);
     const phase = item.phase || 'idle';
     const step = item.current_step || '\u2014';
+    // Prefer the per-item repo label (e.g. "zhubert/erg") over the daemon-level label.
+    const itemRepo = item.repo || repo;
     const age = formatAge(item.step_entered_at);
 
     let titleHtml = escapeHtml(label);
@@ -875,9 +877,9 @@ var Idiomorph=function(){"use strict";let o=new Set;let n={morphStyle:"outerHTML
           <span class="item-state-badge ${item.state}">${item.state}</span>
         </div>
         <div class="item-meta">
-          ${repo ? `<div class="meta-item">
+          ${itemRepo ? `<div class="meta-item">
             <span class="meta-label">repo</span>
-            <span class="meta-value">${escapeHtml(repoDisplayName(repo))}</span>
+            <span class="meta-value">${escapeHtml(repoDisplayName(itemRepo))}</span>
           </div>` : ''}
           <div class="meta-item">
             <span class="meta-label">step</span>
