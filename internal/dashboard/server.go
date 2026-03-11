@@ -107,11 +107,6 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/workitems/{itemID}/retry", s.handleRetry)
 	mux.HandleFunc("POST /api/workitems/{itemID}/message", s.handleMessage)
 
-	srv := &http.Server{
-		Addr:    s.addr,
-		Handler: mux,
-	}
-
 	// Start background poller
 	go s.poll(ctx)
 
@@ -119,6 +114,19 @@ func (s *Server) Run(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+
+	// Build the allowed origin from the configured bind host (preserving
+	// "localhost" when the user configured "localhost:PORT") combined with the
+	// OS-assigned port from the listener.  Using ln.Addr().String() directly
+	// would map "localhost" → "127.0.0.1" and cause the browser's
+	// "Origin: http://localhost:PORT" to be rejected.
+	configHost, _, _ := net.SplitHostPort(s.addr)
+	_, resolvedPort, _ := net.SplitHostPort(ln.Addr().String())
+	allowedOrigin := buildOrigin(net.JoinHostPort(configHost, resolvedPort))
+	srv := &http.Server{
+		Addr:    s.addr,
+		Handler: corsMiddleware(allowedOrigin)(mux),
 	}
 
 	go func() {
@@ -310,6 +318,53 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// buildOrigin converts a resolved TCP address (host:port) to an HTTP origin
+// string. Wildcard/unspecified bind addresses (empty, 0.0.0.0, ::) are mapped
+// to "localhost" so the origin matches what a browser sends.
+func buildOrigin(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+// corsMiddleware returns an HTTP middleware that blocks cross-origin requests.
+// Requests with no Origin header (direct navigation, CLI tools) pass through
+// unchanged. Requests whose Origin matches allowedOrigin pass through and
+// receive the appropriate CORS response headers. All other origins receive
+// 403 Forbidden, preventing malicious websites from making cross-origin
+// requests to the dashboard.
+func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// No Origin header — direct navigation, CLI tools, etc.
+				next.ServeHTTP(w, r)
+				return
+			}
+			if origin != allowedOrigin {
+				http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+				return
+			}
+			// Origin matches — set CORS headers and handle preflight.
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // validateLoopback ensures the given address resolves to a loopback interface.

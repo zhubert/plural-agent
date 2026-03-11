@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -587,6 +588,161 @@ func TestHandleAuth_StaleCacheReturnedOnError(t *testing.T) {
 	// The stale cache value should be returned, not an empty object.
 	if info.Email != "stale@example.com" {
 		t.Errorf("expected stale@example.com from cache, got %q", info.Email)
+	}
+}
+
+// ---- buildOrigin ----
+
+func TestBuildOrigin(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{"localhost", "localhost:8080", "http://localhost:8080"},
+		{"127.0.0.1", "127.0.0.1:21122", "http://127.0.0.1:21122"},
+		{"::1", "[::1]:8080", "http://[::1]:8080"},
+		{"empty host", ":8080", "http://localhost:8080"},
+		{"0.0.0.0", "0.0.0.0:8080", "http://localhost:8080"},
+		{"::", "[::]:8080", "http://localhost:8080"},
+		{"invalid", "notanaddr", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildOrigin(tt.addr)
+			if got != tt.want {
+				t.Errorf("buildOrigin(%q) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildOrigin_LocalhostPreservation verifies that when the server is
+// configured to bind on "localhost:0", the allowed origin uses "localhost"
+// (not the resolved IP like "127.0.0.1") so the browser's
+// "Origin: http://localhost:PORT" is accepted.
+func TestBuildOrigin_LocalhostPreservation(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	// Simulate what Run() does: use configured host + resolved port.
+	configHost, _, _ := net.SplitHostPort("localhost:0")
+	_, resolvedPort, _ := net.SplitHostPort(ln.Addr().String())
+	origin := buildOrigin(net.JoinHostPort(configHost, resolvedPort))
+
+	want := "http://localhost:" + resolvedPort
+	if origin != want {
+		t.Errorf("buildOrigin with localhost:0 config = %q, want %q", origin, want)
+	}
+
+	// Confirm that using the raw listener address would differ (demonstrating
+	// the regression this test guards against).
+	rawOrigin := buildOrigin(ln.Addr().String())
+	if rawOrigin == want {
+		// On some systems (e.g., macOS) localhost:0 may resolve to localhost;
+		// skip the regression check in that case.
+		t.Logf("note: on this system localhost:0 resolved to %q — raw and config-based origins are identical", ln.Addr().String())
+	}
+}
+
+// ---- corsMiddleware ----
+
+func TestCORSMiddleware_NoOrigin(t *testing.T) {
+	allowedOrigin := "http://localhost:21122"
+	handler := corsMiddleware(allowedOrigin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for no-origin request, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestCORSMiddleware_MatchingOrigin(t *testing.T) {
+	allowedOrigin := "http://localhost:21122"
+	handler := corsMiddleware(allowedOrigin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	req.Header.Set("Origin", allowedOrigin)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for matching origin, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+		t.Errorf("expected ACAO=%q, got %q", allowedOrigin, got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("expected ACAC header to be absent, got %q", got)
+	}
+	if got := resp.Header.Get("Vary"); got != "Origin" {
+		t.Errorf("expected Vary=Origin, got %q", got)
+	}
+}
+
+func TestCORSMiddleware_NonMatchingOrigin(t *testing.T) {
+	allowedOrigin := "http://localhost:21122"
+	handler := corsMiddleware(allowedOrigin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	req.Header.Set("Origin", "http://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for non-matching origin, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestCORSMiddleware_OptionsPreflightMatchingOrigin(t *testing.T) {
+	allowedOrigin := "http://localhost:21122"
+	handler := corsMiddleware(allowedOrigin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("OPTIONS", "/api/state", nil)
+	req.Header.Set("Origin", allowedOrigin)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204 for OPTIONS preflight with matching origin, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+		t.Errorf("expected ACAO=%q, got %q", allowedOrigin, got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Methods"); got == "" {
+		t.Error("expected Access-Control-Allow-Methods to be set")
+	}
+}
+
+func TestCORSMiddleware_OptionsPreflightNonMatchingOrigin(t *testing.T) {
+	allowedOrigin := "http://localhost:21122"
+	handler := corsMiddleware(allowedOrigin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("OPTIONS", "/api/state", nil)
+	req.Header.Set("Origin", "http://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for OPTIONS preflight with non-matching origin, got %d", w.Result().StatusCode)
 	}
 }
 
