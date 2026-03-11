@@ -822,7 +822,7 @@ var Idiomorph=function(){"use strict";let o=new Set;let n={morphStyle:"outerHTML
     if (controlEnabled) {
       const id = escapeHtml(item.id);
       const isActive = item.state === 'active';
-      const isFailed = item.state === 'failed' || item.state === 'completed';
+      const isFailed = item.state === 'failed';
       const hasSession = !!item.session_id;
 
       let buttons = '';
