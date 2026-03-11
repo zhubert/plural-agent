@@ -22,22 +22,22 @@ type containerRunResult struct {
 // buildContainerRunArgs constructs the arguments for `docker run` that wraps
 // the Claude CLI process inside a Docker container.
 func buildContainerRunArgs(config ProcessConfig, claudeArgs []string) (containerRunResult, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return containerRunResult{}, fmt.Errorf("failed to determine home directory: %w", err)
-	}
-
 	containerName := "erg-" + config.SessionID
 	image := config.ContainerImage
 	if image == "" {
 		image = "ghcr.io/zhubert/erg"
 	}
 
+	claudeDir, err := paths.ClaudeConfigDir()
+	if err != nil {
+		return containerRunResult{}, fmt.Errorf("failed to determine Claude config dir: %w", err)
+	}
+
 	args := []string{
 		"run", "-i", "--rm",
 		"--name", containerName,
 		"-v", config.WorkingDir + ":/workspace",
-		"-v", homeDir + "/.claude:/home/claude/.claude-host:ro",
+		"-v", claudeDir + ":/home/claude/.claude-host:ro",
 		"-w", "/workspace",
 	}
 
@@ -68,7 +68,7 @@ func buildContainerRunArgs(config ProcessConfig, claudeArgs []string) (container
 		// No env var or keychain credentials, but .credentials.json exists on the host.
 		// The entrypoint copies it into the container's ~/.claude/, so Claude CLI
 		// will find it and handle token refresh natively. No --env-file needed.
-		auth.Source = "~/.claude/.credentials.json (OAuth via claude login)"
+		auth.Source = "$CLAUDE_CONFIG_DIR/.credentials.json (OAuth via claude login)"
 	}
 
 	// Mount MCP config for AskUserQuestion/ExitPlanMode support.
@@ -148,7 +148,7 @@ func ContainerAuthSource() string {
 		return cred.Source
 	}
 	if credentialsFileExists() {
-		return "~/.claude/.credentials.json (OAuth via claude login)"
+		return "$CLAUDE_CONFIG_DIR/.credentials.json (OAuth via claude login)"
 	}
 	return ""
 }
@@ -158,7 +158,7 @@ func ContainerAuthSource() string {
 //   - ANTHROPIC_API_KEY environment variable
 //   - CLAUDE_CODE_OAUTH_TOKEN environment variable (long-lived token from "claude setup-token")
 //   - "anthropic_api_key", "Claude Code", or "Claude Code-credentials" macOS keychain entry
-//   - ~/.claude/.credentials.json file (from "claude login" interactive OAuth)
+//   - $CLAUDE_CONFIG_DIR/.credentials.json file (from "claude login" interactive OAuth; defaults to ~/.claude)
 func ContainerAuthAvailable() bool {
 	return ContainerAuthSource() != ""
 }
@@ -244,15 +244,15 @@ func KeychainNeedsRefresh() bool {
 	return oauthNeedsRefresh(creds)
 }
 
-// credentialsFileExists checks whether ~/.claude/.credentials.json exists.
+// credentialsFileExists checks whether .credentials.json exists in the Claude config directory.
 // This file is created by "claude login" (interactive OAuth) and contains
 // refresh tokens that Claude CLI can use to obtain access tokens.
 func credentialsFileExists() bool {
-	home, err := os.UserHomeDir()
+	claudeDir, err := paths.ClaudeConfigDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(home, ".claude", ".credentials.json"))
+	_, err = os.Stat(filepath.Join(claudeDir, ".credentials.json"))
 	return err == nil
 }
 
