@@ -396,13 +396,39 @@ func gitConfigEnvVars(name, email string) []string {
 	return envs
 }
 
-// FindAuthFiles returns the paths of all erg-auth-* files in the config directory.
+// FindAuthFiles returns the paths of all erg-auth-* files in the state directory.
+// It also searches the config directory to clean up files written by older versions of erg.
 func FindAuthFiles() ([]string, error) {
-	dir := containerAuthDir()
-	if dir == "" {
-		return nil, nil
+	var all []string
+	seen := map[string]bool{}
+
+	// Primary: state dir (current location)
+	if stateDir := containerAuthDir(); stateDir != "" {
+		matches, err := filepath.Glob(filepath.Join(stateDir, "erg-auth-*"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			seen[m] = true
+			all = append(all, m)
+		}
 	}
-	return filepath.Glob(filepath.Join(dir, "erg-auth-*"))
+
+	// Legacy: config dir (used by older versions of erg)
+	if configDir, err := paths.ConfigDir(); err == nil && configDir != "" {
+		matches, err := filepath.Glob(filepath.Join(configDir, "erg-auth-*"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				all = append(all, m)
+			}
+		}
+	}
+
+	return all, nil
 }
 
 // ClearAuthFiles removes all erg-auth-* files from the config directory.

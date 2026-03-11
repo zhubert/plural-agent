@@ -187,20 +187,19 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 		return "", err
 	}
 
-	// Write to ~/.local/state/erg (under $HOME) instead of os.TempDir() (/var/folders/ on macOS).
-	// Colima shares $HOME with the Docker VM by default, but /var/folders/ is NOT shared.
-	// When Docker can't access the host file, it creates an empty directory at the mount
-	// point inside the container, causing Claude CLI to hang trying to read a directory
-	// as a JSON file.
-	configDir, err := paths.StateDir()
+	// Write to paths.StateDir() (typically ~/.local/state/erg or ~/.erg) instead of
+	// os.TempDir() (/var/folders/ on macOS). Colima shares $HOME with the Docker VM by
+	// default, but /var/folders/ is NOT shared. When Docker can't access the host file,
+	// it creates an empty directory at the mount point inside the container, causing
+	// Claude CLI to hang trying to read a directory as a JSON file.
+	stateDir, err := paths.StateDir()
 	if err != nil {
-		// Fall back to temp dir if state dir is unavailable
-		configDir = os.TempDir()
+		return "", fmt.Errorf("get state dir: %w", err)
 	}
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return "", fmt.Errorf("create config dir: %w", err)
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		return "", fmt.Errorf("create state dir: %w", err)
 	}
-	configPath := filepath.Join(configDir, fmt.Sprintf("erg-mcp-%s.json", r.sessionID))
+	configPath := filepath.Join(stateDir, fmt.Sprintf("erg-mcp-%s.json", r.sessionID))
 	if err := os.WriteFile(configPath, configJSON, 0600); err != nil {
 		return "", err
 	}
@@ -209,12 +208,28 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 }
 
 // FindMCPConfigFiles returns the paths of all erg-mcp-*.json files in the state directory.
+// It also searches the config directory to clean up files written by older versions of erg.
 func FindMCPConfigFiles() ([]string, error) {
-	dir, err := paths.StateDir()
-	if err != nil {
-		return nil, nil
+	var all []string
+	seen := map[string]bool{}
+
+	for _, dirFn := range []func() (string, error){paths.StateDir, paths.ConfigDir} {
+		dir, err := dirFn()
+		if err != nil {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, "erg-mcp-*.json"))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				all = append(all, m)
+			}
+		}
 	}
-	return filepath.Glob(filepath.Join(dir, "erg-mcp-*.json"))
+	return all, nil
 }
 
 // ClearMCPConfigFiles removes all erg-mcp-*.json files from the config directory.
