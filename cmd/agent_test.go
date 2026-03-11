@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -447,12 +448,19 @@ func TestEnsureDockerHost_FindsSocket(t *testing.T) {
 	defer func() { defaultSocketPath = origDefault }()
 	defaultSocketPath = "/nonexistent/default.sock"
 
-	// Create a temp dir with a fake socket file to simulate a runtime socket.
-	tmp := t.TempDir()
-	fakeSock := filepath.Join(tmp, "docker.sock")
-	if err := os.WriteFile(fakeSock, nil, 0o600); err != nil {
+	// Create a real UNIX domain socket to simulate a runtime socket.
+	// Use a short path under /tmp to avoid exceeding the ~104-char unix socket limit.
+	tmp, err := os.MkdirTemp("/tmp", "erg-test-")
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(tmp)
+	fakeSock := filepath.Join(tmp, "d.sock")
+	l, err := net.Listen("unix", fakeSock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
 
 	// Override dockerSocketPaths via a helper that injects our fake path.
 	origPaths := dockerSocketPathsFunc

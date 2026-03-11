@@ -49,7 +49,7 @@ var dockerSocketPathsFunc = func() []string {
 			filepath.Join(home, ".docker/run/docker.sock"),     // Docker Desktop (macOS)
 		)
 	}
-	paths = append(paths, "/var/run/docker.sock") // Standard default
+	paths = append(paths, defaultSocketPath) // Standard default
 	return paths
 }
 
@@ -69,7 +69,7 @@ func ensureDockerHost() {
 		return
 	}
 	for _, sock := range dockerSocketPathsFunc() {
-		if _, err := os.Stat(sock); err == nil {
+		if fi, err := os.Stat(sock); err == nil && fi.Mode()&os.ModeSocket != 0 {
 			os.Setenv("DOCKER_HOST", "unix://"+sock)
 			return
 		}
