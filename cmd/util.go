@@ -71,7 +71,7 @@ func runtimeStartHint() string {
 func findSingleRunningDaemon() (string, error) {
 	locks, err := daemonstate.FindLocks()
 	if err != nil || len(locks) == 0 {
-		return "", fmt.Errorf("no running daemon found\n\nStart one with 'erg start' or specify --repo")
+		return "", fmt.Errorf("no running orchestrator found\n\nStart one with 'erg start' or specify --repo")
 	}
 
 	var running []string
@@ -87,11 +87,11 @@ func findSingleRunningDaemon() (string, error) {
 
 	switch len(running) {
 	case 0:
-		return "", fmt.Errorf("no running daemon found\n\nStart one with 'erg start' or specify --repo")
+		return "", fmt.Errorf("no running orchestrator found\n\nStart one with 'erg start' or specify --repo")
 	case 1:
 		return running[0], nil
 	default:
-		return "", fmt.Errorf("multiple daemons running — specify --repo:\n  %s", strings.Join(running, "\n  "))
+		return "", fmt.Errorf("multiple orchestrators running — specify --repo:\n  %s", strings.Join(running, "\n  "))
 	}
 }
 

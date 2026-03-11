@@ -223,7 +223,7 @@ func TestPrintFooter_WithMaxConcurrent(t *testing.T) {
 		t.Errorf("expected 'Queued: 1' in output: %q", out)
 	}
 	if !strings.Contains(out, "Orchestrator PID: 48291 (running)") {
-		t.Errorf("expected daemon PID in output: %q", out)
+		t.Errorf("expected 'Orchestrator PID' in output: %q", out)
 	}
 }
 

@@ -196,7 +196,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 	// Acquire exclusive lock BEFORE spawning child to prevent race conditions.
 	lock, err := daemonstate.AcquireLock(lockKey)
 	if err != nil {
-		return fmt.Errorf("daemon already running or lock held: %w", err)
+		return fmt.Errorf("orchestrator already running or lock held: %w", err)
 	}
 	lockReleased := false
 	defer func() {
@@ -230,7 +230,7 @@ func daemonize(cmd *cobra.Command, args []string) error {
 		if stderrFile != nil {
 			stderrFile.Close()
 		}
-		return fmt.Errorf("failed to start daemon: %w", err)
+		return fmt.Errorf("failed to start orchestrator: %w", err)
 	}
 	// Close parent's copy of the fd; child inherits its own
 	if stderrFile != nil {
@@ -247,13 +247,13 @@ func daemonize(cmd *cobra.Command, args []string) error {
 
 	// Detach — we don't wait for the child
 	if err := child.Process.Release(); err != nil {
-		return fmt.Errorf("failed to detach daemon process: %w", err)
+		return fmt.Errorf("failed to detach orchestrator process: %w", err)
 	}
 
 	// Brief wait to confirm child didn't exit immediately
 	time.Sleep(500 * time.Millisecond)
 	if _, running := daemonstate.ReadLockStatus(lockKey); !running {
-		return fmt.Errorf("daemon child exited immediately (PID %d)", childPID)
+		return fmt.Errorf("orchestrator child exited immediately (PID %d)", childPID)
 	}
 
 	logPath, _ := logger.DefaultLogPath()

@@ -130,7 +130,7 @@ func TestRunStop_OrphanedProcessFound(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "orphaned daemon process") {
+	if !strings.Contains(out, "orphaned orchestrator process") {
 		t.Errorf("expected orphaned process message, got: %s", out)
 	}
 }

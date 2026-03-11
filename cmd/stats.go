@@ -22,7 +22,7 @@ var statsCmd = &cobra.Command{
 	Use:     "stats",
 	Short:   "Show aggregate session performance analytics",
 	GroupID: "daemon",
-	Long: `Displays aggregate performance analytics from the daemon's persisted state,
+	Long: `Displays aggregate performance analytics from the orchestrator's persisted state,
 including session history, cost tracking, failure analysis, and feedback stats.
 
 Note: stats reflect only items still in the state file. Terminal items older
@@ -56,7 +56,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 	state, err := daemonstate.LoadDaemonState(repo)
 	if err != nil {
-		return fmt.Errorf("failed to load daemon state: %w", err)
+		return fmt.Errorf("failed to load orchestrator state: %w", err)
 	}
 
 	items := state.GetAllWorkItems()

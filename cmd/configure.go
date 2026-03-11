@@ -124,7 +124,7 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	}
 
 	fmt.Fprintln(output)
-	fmt.Fprintln(output, "Setup complete! Start the daemon:")
+	fmt.Fprintln(output, "Setup complete! Start the orchestrator:")
 	fmt.Fprintln(output, "  erg start")
 
 	return nil

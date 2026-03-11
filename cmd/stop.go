@@ -74,7 +74,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Found %d orphaned daemon process(es) via process scan\n", len(pids))
+	fmt.Printf("Found %d orphaned orchestrator process(es) via process scan\n", len(pids))
 	for _, p := range pids {
 		if err := signalDaemon(p); err != nil {
 			fmt.Printf("  Warning: failed to signal PID %d: %v\n", p, err)
@@ -95,7 +95,7 @@ func signalDaemon(pid int) error {
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
 	}
-	fmt.Printf("Sent SIGTERM to daemon (PID %d)\n", pid)
+	fmt.Printf("Sent SIGTERM to orchestrator (PID %d)\n", pid)
 	return nil
 }
 

@@ -50,7 +50,7 @@ Examples:
 func init() {
 	startCmd.Flags().StringVar(&startRepo, "repo", "", "Repo to poll (owner/repo or filesystem path)")
 	startCmd.Flags().BoolVarP(&startForeground, "foreground", "f", false, "Stay in foreground with live status display")
-	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous daemon)")
+	startCmd.Flags().BoolVar(&startOnce, "once", false, "Run one tick and exit (vs continuous orchestrator)")
 	startCmd.Flags().StringVar(&startWorkflowFile, "workflow", "", "Path to workflow config file (default: <repo>/.erg/workflow.yaml)")
 	startCmd.Flags().StringVar(&startConfigFile, "config", "", "Path to config file for multi-repo mode")
 	startCmd.Flags().StringVar(&startDashboardAddr, "dashboard-addr", "", "Start an embedded dashboard server at this address (e.g. localhost:21122)")
