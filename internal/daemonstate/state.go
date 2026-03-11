@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -167,13 +168,23 @@ func (s *DaemonState) Save() error {
 	}
 
 	dir := filepath.Dir(s.filePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
+	// Tighten permissions on existing directories (MkdirAll ignores mode if dir exists).
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("failed to set state directory permissions: %w", err)
+		}
+	}
 
-	// Atomic write: temp file + rename
+	// Atomic write: temp file + rename.
+	// Remove any stale tmp file first — WriteFile does not update permissions on existing files.
 	tmpFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0o644); err != nil {
+	if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing temp state file: %w", err)
+	}
+	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp state file: %w", err)
 	}
 	if err := os.Rename(tmpFile, s.filePath); err != nil {
