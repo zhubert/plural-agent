@@ -330,8 +330,9 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	// review feedback, causing push conflicts.
 	if d.isClaimedByOther(ctx, repoPath, issue, issues.SourceGitHub) {
 		log.Debug("skipping PR adoption, issue claimed by another daemon", "pr", pr.Number)
-		// Remove the work item we just added so HasWorkItemForIssue doesn't
-		// block this issue on the next poll cycle.
+		// Mark the work item terminal so this skipped adoption is recorded.
+		// HasWorkItemForIssue will ignore it after the fail cooldown, at which
+		// point the issue becomes eligible for re-adoption.
 		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
 			log.Debug("failed to mark skipped adoption terminal", "error", err)
 		}
