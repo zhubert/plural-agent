@@ -140,7 +140,7 @@ func NewSocketServer(sessionID string, reqCh chan<- PermissionRequest, respCh <-
 	}
 	socketPath := filepath.Join(socketDir, socketName)
 	if len(socketPath) > maxSocketPathLen {
-		return nil, fmt.Errorf("socket path exceeds %d-char limit (%d chars): %s", maxSocketPathLen, len(socketPath), socketPath)
+		return nil, fmt.Errorf("socket path exceeds %d-byte limit (%d bytes): %s", maxSocketPathLen, len(socketPath), socketPath)
 	}
 	log := logger.WithSession(sessionID).With("component", "mcp-socket")
 

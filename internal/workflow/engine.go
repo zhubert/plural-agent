@@ -490,14 +490,15 @@ func retryDelay(retry RetryConfig, attempt int) time.Duration {
 		rate = 1.0
 	}
 	// Delay = interval * backoff_rate^(attempt-1)
-	delay := base
+	// Compute in float64 to avoid overflow during intermediate multiplication.
+	delay := float64(base)
 	for i := 1; i < attempt; i++ {
-		delay = time.Duration(float64(delay) * rate)
-		if delay > maxRetryDelay {
+		delay *= rate
+		if delay > float64(maxRetryDelay) {
 			return maxRetryDelay
 		}
 	}
-	return delay
+	return time.Duration(delay)
 }
 
 // matchesErrors checks if an error string matches any of the given patterns.

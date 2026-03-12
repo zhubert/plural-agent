@@ -561,7 +561,7 @@ func ensureRepoImage(ctx context.Context, repoPath, workflowFile string, buildLo
 		buildLogger.Info("auto-detected languages", "languages", detected, "repo", repoPath)
 		image, _, err := container.EnsureImage(ctx, detected, version, buildLogger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to auto-build container image for %s: %w", repoPath, err)
+			return nil, fmt.Errorf("failed to auto-build container image for %s: %w\nTo skip auto-build, set `settings.container_image` in .erg/workflow.yaml to a pre-built image.", repoPath, err)
 		}
 		if wfCfg.Settings == nil {
 			wfCfg.Settings = &workflow.SettingsConfig{}
