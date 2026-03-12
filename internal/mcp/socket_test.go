@@ -4,8 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhubert/erg/internal/paths"
 )
 
 func TestSocketMessage_Types(t *testing.T) {
@@ -1009,4 +1014,88 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestNewSocketServer_PrivateDirectory(t *testing.T) {
+	// Use a short HOME so the socket path fits within the Unix 104-char limit.
+	// t.TempDir() on macOS produces very long paths, so we create a short one manually.
+	shortHome, err := os.MkdirTemp("/tmp", "erg")
+	if err != nil {
+		t.Fatalf("failed to create short home dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(shortHome) })
+	t.Setenv("HOME", shortHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	paths.Reset()
+	t.Cleanup(paths.Reset)
+
+	permReqCh := make(chan PermissionRequest, 1)
+	permRespCh := make(chan PermissionResponse, 1)
+	questReqCh := make(chan QuestionRequest, 1)
+	questRespCh := make(chan QuestionResponse, 1)
+	planReqCh := make(chan PlanApprovalRequest, 1)
+	planRespCh := make(chan PlanApprovalResponse, 1)
+
+	server, err := NewSocketServer("short-sess-id", permReqCh, permRespCh, questReqCh, questRespCh, planReqCh, planRespCh)
+	if err != nil {
+		t.Fatalf("NewSocketServer failed: %v", err)
+	}
+	defer server.Close()
+
+	sockPath := server.SocketPath()
+	socketsDir := filepath.Join(shortHome, ".erg", "sockets")
+
+	// Socket should be in the private sockets directory, not os.TempDir()
+	if !strings.HasPrefix(sockPath, socketsDir+string(os.PathSeparator)) {
+		t.Errorf("SocketPath = %q, want prefix %q (should use private dir)", sockPath, socketsDir)
+	}
+
+	// Verify the sockets directory has 0700 permissions
+	info, statErr := os.Stat(socketsDir)
+	if statErr != nil {
+		t.Fatalf("stat sockets dir: %v", statErr)
+	}
+	if perm := info.Mode().Perm(); perm != 0700 {
+		t.Errorf("sockets dir permissions = %o, want 0700", perm)
+	}
+}
+
+func TestNewSocketServer_FallsBackToTmpDir(t *testing.T) {
+	// Use a very long HOME path that would make the socket path exceed the limit
+	baseDir := t.TempDir()
+	// Create a deeply nested path to make socket path > 104 chars
+	longSubdir := strings.Repeat("x", 80)
+	longHome := filepath.Join(baseDir, longSubdir)
+	if err := os.MkdirAll(longHome, 0700); err != nil {
+		t.Fatalf("failed to create long home dir: %v", err)
+	}
+	t.Setenv("HOME", longHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	paths.Reset()
+	t.Cleanup(paths.Reset)
+
+	permReqCh := make(chan PermissionRequest, 1)
+	permRespCh := make(chan PermissionResponse, 1)
+	questReqCh := make(chan QuestionRequest, 1)
+	questRespCh := make(chan QuestionResponse, 1)
+	planReqCh := make(chan PlanApprovalRequest, 1)
+	planRespCh := make(chan PlanApprovalResponse, 1)
+
+	server, err := NewSocketServer("fallback-sess", permReqCh, permRespCh, questReqCh, questRespCh, planReqCh, planRespCh)
+	if err != nil {
+		t.Fatalf("NewSocketServer failed: %v", err)
+	}
+	defer server.Close()
+
+	sockPath := server.SocketPath()
+	// Should have fallen back to os.TempDir() since the private dir path was too long
+	tmpDir := filepath.Clean(os.TempDir())
+	if !strings.HasPrefix(sockPath, tmpDir+string(os.PathSeparator)) {
+		t.Errorf("SocketPath = %q, expected to be in os.TempDir() %q when private dir path too long",
+			sockPath, tmpDir)
+	}
 }

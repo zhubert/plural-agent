@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zhubert/erg/internal/secrets"
 )
 
 // pmCaptureLogger creates a logger that captures output to a buffer for assertions
@@ -3227,5 +3229,40 @@ func TestIsChannelClosed(t *testing.T) {
 
 	if !isChannelClosed(ch) {
 		t.Error("closed channel should be reported as closed")
+	}
+}
+
+func TestFilteredEnv_RemovesSecrets(t *testing.T) {
+	// Set known secret env vars
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("GITHUB_TOKEN", "ghp_test")
+	t.Setenv("GH_TOKEN", "gho_test")
+	t.Setenv("LINEAR_API_KEY", "lin_test")
+	t.Setenv("ASANA_PAT", "asana_test")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth_test")
+
+	// Set a non-secret env var
+	t.Setenv("HOME", "/tmp/test-home")
+
+	env := filteredEnv()
+
+	// Check that secrets are filtered out
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		if _, isSecret := secrets.KnownSecretEnvVarsSet[key]; isSecret {
+			t.Errorf("filteredEnv() should not contain %s", key)
+		}
+	}
+
+	// Check that non-secret vars are preserved
+	found := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "HOME=") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("filteredEnv() should preserve non-secret env vars like HOME")
 	}
 }

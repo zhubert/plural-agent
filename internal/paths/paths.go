@@ -212,6 +212,15 @@ func WorktreesDir() (string, error) {
 	return filepath.Join(dir, "worktrees"), nil
 }
 
+// SocketsDir returns the directory for Unix domain sockets.
+func SocketsDir() (string, error) {
+	dir, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "sockets"), nil
+}
+
 // ManifestPath returns the default path for the daemon manifest config file.
 func ManifestPath() (string, error) {
 	dir, err := ConfigDir()

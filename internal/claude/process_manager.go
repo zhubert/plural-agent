@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zhubert/erg/internal/secrets"
 )
 
 // errChannelFull is returned when the response channel is full for too long.
@@ -297,6 +299,21 @@ func BuildCommandArgs(config ProcessConfig) []string {
 	return args
 }
 
+// filteredEnv returns os.Environ() with known secret credentials removed.
+// This prevents tokens from leaking to child processes (e.g., the Claude CLI)
+// where they could be exfiltrated via prompt injection.
+func filteredEnv() []string {
+	env := os.Environ()
+	result := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		if _, blocked := secrets.KnownSecretEnvVarsSet[key]; !blocked {
+			result = append(result, kv)
+		}
+	}
+	return result
+}
+
 // Start starts the persistent Claude CLI process.
 func (pm *ProcessManager) Start() error {
 	pm.mu.Lock()
@@ -356,7 +373,7 @@ func (pm *ProcessManager) Start() error {
 	// Set git identity env vars so Claude Code uses the host's identity
 	// instead of inventing one (e.g., "erg agent"). These env vars override
 	// any git config and prevent Claude from writing to the repo's .git/config.
-	cmd.Env = appendGitIdentityEnv(os.Environ())
+	cmd.Env = appendGitIdentityEnv(filteredEnv())
 
 	// Get stdin pipe for writing messages
 	stdin, err := cmd.StdinPipe()

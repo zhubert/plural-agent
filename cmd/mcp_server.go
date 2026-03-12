@@ -256,7 +256,7 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// extractSessionID extracts the session ID from a socket path like /tmp/pl-<session-id>.sock
+// extractSessionID extracts the session ID from a socket path like .../pl-<session-id>.sock
 func extractSessionID(socketPath string) string {
 	base := filepath.Base(socketPath)
 	// Remove .sock extension

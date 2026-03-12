@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zhubert/erg/internal/logger"
+	"github.com/zhubert/erg/internal/paths"
 )
 
 // Socket communication constants
@@ -37,6 +38,10 @@ const (
 	// The host then dials into the container, reversing the TCP direction so that
 	// macOS firewall rules (which block inbound connections to the host) are avoided.
 	ContainerMCPPort = 21120
+
+	// maxSocketPathLen is the safe maximum length for a Unix domain socket path.
+	// macOS limits sun_path to 104 bytes; Linux to 108. We use 104 for portability.
+	maxSocketPathLen = 104
 )
 
 // MessageType identifies the type of socket message
@@ -113,7 +118,27 @@ func NewSocketServer(sessionID string, reqCh chan<- PermissionRequest, respCh <-
 	if len(shortID) > 12 {
 		shortID = shortID[:12]
 	}
-	socketPath := filepath.Join(os.TempDir(), "pl-"+shortID+".sock")
+	socketName := "pl-" + shortID + ".sock"
+
+	// Prefer a user-private directory (0700) over os.TempDir().
+	// On Linux, /tmp is world-readable, allowing any local user to enumerate
+	// and connect to sockets. On macOS, os.TempDir() returns a per-user dir
+	// that is already private, but we still prefer our own dir for consistency.
+	//
+	// However, Unix socket paths have a hard limit (~104 chars on macOS, ~108
+	// on Linux). If the private path would be too long, fall back to os.TempDir().
+	socketDir := os.TempDir() // safe default
+	if dir, err := paths.SocketsDir(); err == nil {
+		candidate := filepath.Join(dir, socketName)
+		if len(candidate) <= maxSocketPathLen {
+			if mkErr := os.MkdirAll(dir, 0700); mkErr == nil {
+				if chErr := os.Chmod(dir, 0700); chErr == nil {
+					socketDir = dir
+				}
+			}
+		}
+	}
+	socketPath := filepath.Join(socketDir, socketName)
 	log := logger.WithSession(sessionID).With("component", "mcp-socket")
 
 	// Remove existing socket if present

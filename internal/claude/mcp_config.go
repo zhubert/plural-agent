@@ -147,7 +147,21 @@ func (r *Runner) createMCPConfigLocked(socketPath string) (string, error) {
 		return "", err
 	}
 
-	configPath := filepath.Join(os.TempDir(), fmt.Sprintf("erg-mcp-%s.json", r.sessionID))
+	// Write to StateDir (typically ~/.erg or ~/.local/state/erg) instead of
+	// os.TempDir(). /tmp is world-readable and allows other users to read the
+	// MCP config which contains the socket path.
+	stateDir, err := paths.StateDir()
+	if err != nil {
+		return "", fmt.Errorf("get state dir: %w", err)
+	}
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		return "", fmt.Errorf("create state dir: %w", err)
+	}
+	// Ensure the state directory is not world-readable even if it already existed.
+	if err := os.Chmod(stateDir, 0700); err != nil {
+		return "", fmt.Errorf("set state dir permissions: %w", err)
+	}
+	configPath := filepath.Join(stateDir, fmt.Sprintf("erg-mcp-%s.json", r.sessionID))
 	if err := os.WriteFile(configPath, configJSON, 0600); err != nil {
 		return "", err
 	}
@@ -209,6 +223,10 @@ func (r *Runner) createContainerMCPConfigLocked(containerPort int) (string, erro
 	}
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		return "", fmt.Errorf("create state dir: %w", err)
+	}
+	// Ensure the state directory is not world-readable even if it already existed.
+	if err := os.Chmod(stateDir, 0700); err != nil {
+		return "", fmt.Errorf("set state dir permissions: %w", err)
 	}
 	configPath := filepath.Join(stateDir, fmt.Sprintf("erg-mcp-%s.json", r.sessionID))
 	if err := os.WriteFile(configPath, configJSON, 0600); err != nil {

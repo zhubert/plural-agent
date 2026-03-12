@@ -9,8 +9,9 @@
 //     Implements the JSON-RPC 2.0 protocol and receives tool calls from Claude CLI.
 //
 //  2. Unix Socket IPC: Communication channel between the MCP server subprocess and the TUI.
-//     Located at /tmp/pl-<session-id>.sock. The MCP server sends permission requests
-//     through this socket and receives responses.
+//     Located in a user-private sockets directory (e.g., ~/.erg/sockets/pl-<session-id>.sock)
+//     when the path fits within Unix socket limits, otherwise falls back to os.TempDir().
+//     The MCP server sends permission requests through this socket and receives responses.
 //
 //  3. TUI Permission Modal: Displays the permission request to the user and captures
 //     their decision (Allow, Deny, or Always Allow).

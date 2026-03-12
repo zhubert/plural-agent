@@ -228,6 +228,14 @@ func TestDerivedPaths(t *testing.T) {
 		if want := filepath.Join(legacyDir, "logs"); logsDir != want {
 			t.Errorf("LogsDir = %q, want %q", logsDir, want)
 		}
+
+		sockDir, err := SocketsDir()
+		if err != nil {
+			t.Fatalf("SocketsDir: %v", err)
+		}
+		if want := filepath.Join(legacyDir, "sockets"); sockDir != want {
+			t.Errorf("SocketsDir = %q, want %q", sockDir, want)
+		}
 	})
 
 	t.Run("XDG layout", func(t *testing.T) {
@@ -263,6 +271,14 @@ func TestDerivedPaths(t *testing.T) {
 		}
 		if want := filepath.Join(xdgState, "erg", "logs"); logsDir != want {
 			t.Errorf("LogsDir = %q, want %q", logsDir, want)
+		}
+
+		sockDir, err := SocketsDir()
+		if err != nil {
+			t.Fatalf("SocketsDir: %v", err)
+		}
+		if want := filepath.Join(xdgState, "erg", "sockets"); sockDir != want {
+			t.Errorf("SocketsDir = %q, want %q", sockDir, want)
 		}
 	})
 }
