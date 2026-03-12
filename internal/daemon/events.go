@@ -17,8 +17,12 @@ import (
 // itself (e.g. guidance, idempotency-marked actions). Such comments must be
 // excluded from human-reply checks so they never accidentally trigger approvals.
 func isErgSystemComment(c issues.IssueComment) bool {
-	// Check plain text body for [erg:step=…] markers and <!-- erg:step=… --> markers.
+	// Check plain text body for [erg:step=…] markers, <!-- erg:step=… --> markers,
+	// and plan markers (<!-- erg:plan -->).
 	if strings.Contains(c.Body, "[erg:step=") || strings.Contains(c.Body, "<!-- erg:step=") {
+		return true
+	}
+	if strings.Contains(c.Body, "<!-- erg:plan") {
 		return true
 	}
 	return false
@@ -447,11 +451,16 @@ func (c *eventChecker) checkGateApproved(ctx context.Context, params *workflow.P
 
 		// Use the latest erg system comment as the cutoff (same rationale
 		// as checkPlanUserReplied — user may reply before StepEnteredAt).
+		// Find the max system comment timestamp regardless of slice order.
 		cutoff := item.StepEnteredAt
+		var latestSystem time.Time
 		for _, comment := range comments {
-			if isErgSystemComment(comment) {
-				cutoff = comment.CreatedAt
+			if isErgSystemComment(comment) && comment.CreatedAt.After(latestSystem) {
+				latestSystem = comment.CreatedAt
 			}
+		}
+		if !latestSystem.IsZero() {
+			cutoff = latestSystem
 		}
 
 		log.Debug("checking for matching comment", "pattern", pattern, "issueID", issueID, "since", cutoff)
@@ -607,11 +616,16 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 	// may arrive after the plan is posted but before the workflow transitions
 	// to this wait state (which is when StepEnteredAt is set). Without this,
 	// an early approval would be silently skipped.
+	// Find the max system comment timestamp regardless of slice order.
 	cutoff := item.StepEnteredAt
+	var latestSystem time.Time
 	for _, comment := range comments {
-		if isErgSystemComment(comment) {
-			cutoff = comment.CreatedAt
+		if isErgSystemComment(comment) && comment.CreatedAt.After(latestSystem) {
+			latestSystem = comment.CreatedAt
 		}
+	}
+	if !latestSystem.IsZero() {
+		cutoff = latestSystem
 	}
 
 	for _, comment := range comments {

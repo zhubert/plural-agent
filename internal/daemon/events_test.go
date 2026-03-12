@@ -3697,7 +3697,7 @@ func TestCheckPlanUserReplied_ApprovalBeforeStepEnteredAt(t *testing.T) {
 		comments: []issues.IssueComment{
 			{
 				Author:    "erg-bot",
-				Body:      "Here is the plan.\n<!-- erg:step=await_plan_feedback -->",
+				Body:      "Here is the plan.\n<!-- erg:plan -->",
 				CreatedAt: now.Add(1 * time.Minute),
 			},
 			{
