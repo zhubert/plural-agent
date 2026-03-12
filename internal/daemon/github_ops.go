@@ -616,7 +616,7 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 	}
 
 	// Clean up claim comments posted by this daemon.
-	d.deleteClaimForIssue(opCtx, repoPath, issues.Source(item.IssueRef.Source), item.IssueRef.ID)
+	d.deleteClaimForIssue(opCtx, repoPath, src, item.IssueRef.ID)
 }
 
 // closeIssueGracefully removes the queue label and closes the issue with an

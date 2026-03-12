@@ -290,6 +290,43 @@ func TestTryClaim_PostClaimError_FailsOpen(t *testing.T) {
 	}
 }
 
+func TestTryClaim_VerifyClaimsError_FailsClosed(t *testing.T) {
+	// After posting our claim, if the verification GetClaims call fails,
+	// the daemon should delete its claim and return false (fail closed).
+	mock := &mockClaimProvider{
+		nextCommentID: "our-claim-123",
+		// After posting, make the next GetClaims call fail.
+		postHook: func(m *mockClaimProvider) {
+			m.getErr = fmt.Errorf("API unavailable")
+		},
+	}
+	d := newTestDaemonWithClaimProvider(mock)
+
+	issue := issues.Issue{ID: "42", Source: issues.SourceGitHub}
+	won, err := d.tryClaim(context.Background(), "/test/repo", issue, issues.SourceGitHub)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if won {
+		t.Error("expected to lose (fail closed) when verification GetClaims errors")
+	}
+	if !mock.deleteCalled {
+		t.Error("expected claim to be deleted after verification failure")
+	}
+	// Verify it deleted our specific claim comment
+	found := false
+	for _, id := range mock.deleteCalledIDs {
+		if id == "our-claim-123" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected delete of comment 'our-claim-123', got deletes: %v", mock.deleteCalledIDs)
+	}
+}
+
 func TestTryClaim_RaceCondition_EarliestWins(t *testing.T) {
 	// Simulate: we post our claim, but on re-read another daemon's earlier claim appears.
 	otherTime := time.Now().Add(-1 * time.Second) // other daemon was 1 second earlier
