@@ -362,6 +362,9 @@ func PRTemplateConfig() *TemplateConfig {
 			"success": "pr_done",
 			"failure": "pr_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "draft", Default: false},
+		},
 		States: map[string]*State{
 			"open_pr": {
 				Type:        StateTypeTask,
@@ -369,6 +372,7 @@ func PRTemplateConfig() *TemplateConfig {
 				DisplayName: "Opening PR",
 				Params: map[string]any{
 					"link_issue": true,
+					"draft":      "{{draft}}",
 				},
 				Next:  "pr_done",
 				Error: "pr_failed",
