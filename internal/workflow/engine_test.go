@@ -894,6 +894,12 @@ func TestEngine_RetryDelay(t *testing.T) {
 			attempt:  3,
 			expected: 10 * time.Second,
 		},
+		{
+			name:     "high backoff rate clamped to 24h max",
+			retry:    RetryConfig{MaxAttempts: 100, Interval: &Duration{time.Second}, BackoffRate: 10.0},
+			attempt:  60,
+			expected: 24 * time.Hour,
+		},
 	}
 
 	for _, tt := range tests {

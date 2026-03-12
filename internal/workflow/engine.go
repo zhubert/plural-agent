@@ -476,6 +476,9 @@ func getRetryCount(stepData map[string]any) int {
 	}
 }
 
+// maxRetryDelay is the upper bound on exponential backoff to prevent overflow.
+const maxRetryDelay = 24 * time.Hour
+
 // retryDelay calculates the delay for the given retry attempt using exponential backoff.
 func retryDelay(retry RetryConfig, attempt int) time.Duration {
 	if retry.Interval == nil {
@@ -490,6 +493,9 @@ func retryDelay(retry RetryConfig, attempt int) time.Duration {
 	delay := base
 	for i := 1; i < attempt; i++ {
 		delay = time.Duration(float64(delay) * rate)
+		if delay > maxRetryDelay {
+			return maxRetryDelay
+		}
 	}
 	return delay
 }
