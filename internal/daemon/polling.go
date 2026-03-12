@@ -102,6 +102,18 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 				}
 			}
 
+			// Attempt to claim the issue (multi-daemon coordination).
+			// If another daemon has already claimed it, skip.
+			won, claimErr := d.tryClaim(pollCtx, repoPath, issue, provider)
+			if claimErr != nil {
+				log.Debug("claim attempt failed", "issue", issue.ID, "error", claimErr)
+				continue
+			}
+			if !won {
+				log.Debug("issue claimed by another daemon, skipping", "issue", issue.ID)
+				continue
+			}
+
 			item := &daemonstate.WorkItem{
 				ID: fmt.Sprintf("%s-%s", repoPath, issue.ID),
 				IssueRef: config.IssueRef{

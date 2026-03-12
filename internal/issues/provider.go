@@ -169,6 +169,31 @@ type IssueStateChecker interface {
 	IsIssueClosed(ctx context.Context, repoPath string, issueID string) (bool, error)
 }
 
+// ClaimInfo represents a daemon's claim on an issue. Used by the claiming
+// protocol to coordinate work across multiple daemon instances.
+type ClaimInfo struct {
+	CommentID string    // Provider-specific comment ID (for deletion)
+	DaemonID  string    // ID of the daemon that posted the claim
+	Hostname  string    // Hostname of the claiming machine
+	Timestamp time.Time // When the claim was posted
+	Expires   time.Time // When the claim expires (stale after this)
+}
+
+// ProviderClaimManager extends Provider with the ability to post, read, and
+// delete claim comments on issues. Used by the daemon to coordinate work
+// across multiple daemon instances via comment-based claiming.
+type ProviderClaimManager interface {
+	// PostClaim posts a claim comment on the issue and returns the comment ID.
+	PostClaim(ctx context.Context, repoPath string, issueID string, claim ClaimInfo) (commentID string, err error)
+
+	// GetClaims reads all claim comments from an issue, returning only valid
+	// (parseable) claim comments. Non-claim comments are ignored.
+	GetClaims(ctx context.Context, repoPath string, issueID string) ([]ClaimInfo, error)
+
+	// DeleteClaim deletes a claim comment by its provider-specific ID.
+	DeleteClaim(ctx context.Context, repoPath string, issueID string, commentID string) error
+}
+
 // ProviderGateChecker extends Provider with operations needed for gate/approval events.
 // Providers that support label checking and comment fetching implement this interface,
 // enabling gate.approved and plan.user_replied events to work across all sources.

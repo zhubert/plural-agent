@@ -85,6 +85,12 @@ func (d *Daemon) rebuildStateFromTracker(ctx context.Context) {
 				continue
 			}
 
+			// Skip issues claimed by another daemon (multi-daemon coordination).
+			if d.isClaimedByOther(rebuildCtx, repoPath, issue, provider) {
+				log.Debug("issue claimed by another daemon during rebuild, skipping", "issue", issue.ID)
+				continue
+			}
+
 			item := d.rebuildWorkItem(rebuildCtx, repoPath, issue, engine, provider)
 			if item != nil {
 				d.state.AddRebuiltWorkItem(item)

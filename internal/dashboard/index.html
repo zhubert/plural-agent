@@ -669,6 +669,10 @@ var Idiomorph=function(){"use strict";let o=new Set;let n={morphStyle:"outerHTML
   }
 
   function repoDisplayName(repo) {
+    // Handle comma-separated multi-repo strings
+    if (repo.includes(', ')) {
+      return repo.split(', ').map(repoDisplayName).join(', ');
+    }
     // Show last two path segments or full owner/repo
     if (repo.includes('/')) {
       const parts = repo.split('/');

@@ -776,6 +776,37 @@ func (s *GitService) UpdateIssueComment(ctx context.Context, repoPath string, co
 	return nil
 }
 
+// CreateIssueCommentWithID creates a comment on a GitHub issue and returns
+// the comment's database ID. Uses the REST API so the response includes the ID.
+func (s *GitService) CreateIssueCommentWithID(ctx context.Context, repoPath string, issueNumber int, body string) (int64, error) {
+	output, err := s.executor.Output(ctx, repoPath, "gh", "api", "--method", "POST",
+		fmt.Sprintf("repos/:owner/:repo/issues/%d/comments", issueNumber),
+		"-f", fmt.Sprintf("body=%s", body),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("gh api create comment failed: %w", err)
+	}
+
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse comment response: %w", err)
+	}
+	return result.ID, nil
+}
+
+// DeleteIssueComment deletes a GitHub issue or PR comment by its database ID.
+func (s *GitService) DeleteIssueComment(ctx context.Context, repoPath string, commentID int64) error {
+	_, _, err := s.executor.Run(ctx, repoPath, "gh", "api", "--method", "DELETE",
+		fmt.Sprintf("repos/:owner/:repo/issues/comments/%d", commentID),
+	)
+	if err != nil {
+		return fmt.Errorf("gh api delete comment failed: %w", err)
+	}
+	return nil
+}
+
 // GetPRNumber returns the PR number for the given branch name.
 func (s *GitService) GetPRNumber(ctx context.Context, repoPath, branch string) (int, error) {
 	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "view", branch, "--json", "number")

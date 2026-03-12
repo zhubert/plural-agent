@@ -586,6 +586,7 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 // but does NOT close the issue. This is used when an existing PR already addresses
 // the issue, or when the coding session made no changes. All operations are
 // best-effort — failures are logged but do not block the workflow from advancing.
+// Also cleans up any claim comments posted by this daemon.
 func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, reason string) {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
@@ -613,6 +614,9 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 	} else {
 		log.Debug("provider does not support ProviderActions, skipping label removal and comment")
 	}
+
+	// Clean up claim comments posted by this daemon.
+	d.deleteClaimForIssue(opCtx, repoPath, src, item.IssueRef.ID)
 }
 
 // closeIssueGracefully removes the queue label and closes the issue with an
@@ -653,6 +657,9 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 			log.Debug("failed to close issue during graceful close", "error", err)
 		}
 	}
+
+	// Clean up claim comments posted by this daemon.
+	d.deleteClaimForIssue(opCtx, repoPath, src, item.IssueRef.ID)
 }
 
 // requestReview requests a review on the PR for a work item.
