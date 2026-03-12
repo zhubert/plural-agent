@@ -415,11 +415,14 @@ func (d *Daemon) reconcileClosedIssues(ctx context.Context) {
 
 		// Cancel any running worker for this item
 		d.mu.Lock()
-		if w, ok := d.workers[item.ID]; ok {
-			w.Cancel()
+		w, ok := d.workers[item.ID]
+		if ok {
 			delete(d.workers, item.ID)
 		}
 		d.mu.Unlock()
+		if ok {
+			w.Cancel()
+		}
 
 		// Remove the queued label so it doesn't get re-queued
 		d.unqueueIssue(ctx, item, "Issue was closed externally. Cancelling work.")
