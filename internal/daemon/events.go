@@ -90,28 +90,12 @@ func (c *eventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 
 	if prState == git.PRStateMerged {
 		log.Info("PR was merged externally")
-		return true, map[string]any{"pr_merged_externally": true, "ci_regressed": false}, nil
+		return true, map[string]any{"pr_merged_externally": true}, nil
 	}
 
 	// If we're currently addressing feedback or pushing, don't poll for more
 	if item.Phase == "addressing_feedback" || item.Phase == "pushing" {
 		return false, nil, nil
-	}
-
-	// Check for CI regression — if CI is now failing while we're awaiting review,
-	// fire the event so the workflow can route back to the CI fix loop.
-	// This catches late-posting CI systems (e.g. CircleCI status contexts that
-	// arrive after the daemon has already advanced past await_ci) and CI that
-	// breaks due to upstream changes.
-	checkCI := params.Bool("check_ci", true)
-	if checkCI {
-		ciStatus, ciErr := d.gitService.CheckPRChecks(pollCtx, sess.RepoPath, item.Branch)
-		if ciErr != nil {
-			log.Debug("CI regression check failed, continuing with review check", "error", ciErr)
-		} else if ciStatus == git.CIStatusFailing {
-			log.Warn("CI regressed during review phase")
-			return true, map[string]any{"ci_regressed": true}, nil
-		}
 	}
 
 	workItem, ok := d.state.GetWorkItem(item.ID)
@@ -172,14 +156,14 @@ func (c *eventChecker) checkPRReviewed(ctx context.Context, params *workflow.Par
 
 	if reviewDecision == git.ReviewApproved {
 		log.Info("PR approved")
-		return true, map[string]any{"review_approved": true, "ci_regressed": false}, nil
+		return true, map[string]any{"review_approved": true}, nil
 	}
 
 	// When auto_address is disabled, fire the event for changes_requested so
 	// the workflow engine can route to an explicit address_review state.
 	if !autoAddress && reviewDecision == git.ReviewChangesRequested {
 		log.Info("PR has changes requested, advancing for address_review")
-		return true, map[string]any{"changes_requested": true, "ci_regressed": false}, nil
+		return true, map[string]any{"changes_requested": true}, nil
 	}
 
 	return false, nil, nil
