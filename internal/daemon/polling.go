@@ -325,7 +325,21 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 		return true
 	}
 
-	// PR is open — adopt it into the workflow so the daemon monitors CI/review.
+	// PR is open — check if another daemon has claimed this issue before adopting.
+	// Without this check, two daemons can both adopt the same PR and race on
+	// review feedback, causing push conflicts.
+	if d.isClaimedByOther(ctx, repoPath, issue, issues.SourceGitHub) {
+		log.Debug("skipping PR adoption, issue claimed by another daemon", "pr", pr.Number)
+		// Mark the work item terminal so this skipped adoption is recorded.
+		// HasWorkItemForIssue will ignore it after the fail cooldown, at which
+		// point the issue becomes eligible for re-adoption.
+		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
+			log.Debug("failed to mark skipped adoption terminal", "error", err)
+		}
+		return true // skip — another daemon owns this
+	}
+
+	// Adopt PR into the workflow so the daemon monitors CI/review.
 	// Keep the queued label as a durable safety net: if the daemon crashes before
 	// persisting state, the label ensures this issue is rediscovered on next start.
 	// HasWorkItemForIssue prevents re-adoption on subsequent polls within the same run.
