@@ -132,7 +132,9 @@ func NewSocketServer(sessionID string, reqCh chan<- PermissionRequest, respCh <-
 		candidate := filepath.Join(dir, socketName)
 		if len(candidate) <= maxSocketPathLen {
 			if mkErr := os.MkdirAll(dir, 0700); mkErr == nil {
-				socketDir = dir
+				if chErr := os.Chmod(dir, 0700); chErr == nil {
+					socketDir = dir
+				}
 			}
 		}
 	}

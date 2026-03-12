@@ -1048,7 +1048,7 @@ func TestNewSocketServer_PrivateDirectory(t *testing.T) {
 	socketsDir := filepath.Join(shortHome, ".erg", "sockets")
 
 	// Socket should be in the private sockets directory, not os.TempDir()
-	if !strings.HasPrefix(sockPath, socketsDir) {
+	if !strings.HasPrefix(sockPath, socketsDir+string(os.PathSeparator)) {
 		t.Errorf("SocketPath = %q, want prefix %q (should use private dir)", sockPath, socketsDir)
 	}
 
@@ -1093,8 +1093,9 @@ func TestNewSocketServer_FallsBackToTmpDir(t *testing.T) {
 
 	sockPath := server.SocketPath()
 	// Should have fallen back to os.TempDir() since the private dir path was too long
-	if !strings.HasPrefix(sockPath, os.TempDir()) {
+	tmpDir := filepath.Clean(os.TempDir())
+	if !strings.HasPrefix(sockPath, tmpDir+string(os.PathSeparator)) {
 		t.Errorf("SocketPath = %q, expected to be in os.TempDir() %q when private dir path too long",
-			sockPath, os.TempDir())
+			sockPath, tmpDir)
 	}
 }
