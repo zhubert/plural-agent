@@ -291,6 +291,19 @@ func (s *DaemonState) GetWorkItem(id string) (WorkItem, bool) {
 	return *item, true
 }
 
+// GetWorkItemBySessionID returns a copy of the work item associated with the
+// given session ID. Returns the zero value and false if no match is found.
+func (s *DaemonState) GetWorkItemBySessionID(sessionID string) (WorkItem, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.WorkItems {
+		if item.SessionID == sessionID {
+			return *item, true
+		}
+	}
+	return WorkItem{}, false
+}
+
 // GetWorkItemsByState returns copies of all work items in a given state.
 func (s *DaemonState) GetWorkItemsByState(state WorkItemState) []WorkItem {
 	s.mu.RLock()

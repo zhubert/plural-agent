@@ -289,6 +289,35 @@ func TestDaemonState_GetWorkItemsByState(t *testing.T) {
 	}
 }
 
+func TestDaemonState_GetWorkItemBySessionID(t *testing.T) {
+	state := NewDaemonState("/test/repo")
+
+	state.AddWorkItem(&WorkItem{ID: "w1", SessionID: "sess-a", IssueRef: config.IssueRef{Source: "github", ID: "1"}})
+	state.AddWorkItem(&WorkItem{ID: "w2", SessionID: "sess-b", IssueRef: config.IssueRef{Source: "github", ID: "2"}})
+
+	// Find existing
+	item, ok := state.GetWorkItemBySessionID("sess-a")
+	if !ok {
+		t.Fatal("expected to find work item for sess-a")
+	}
+	if item.ID != "w1" {
+		t.Errorf("expected w1, got %s", item.ID)
+	}
+
+	// Not found
+	_, ok = state.GetWorkItemBySessionID("nonexistent")
+	if ok {
+		t.Error("expected not found for nonexistent session")
+	}
+
+	// Returns a copy — mutating it should not affect internal state
+	item.SessionID = "mutated"
+	orig, _ := state.GetWorkItemBySessionID("sess-a")
+	if orig.SessionID != "sess-a" {
+		t.Error("GetWorkItemBySessionID should return a copy")
+	}
+}
+
 func TestDaemonState_ActiveSlotCount(t *testing.T) {
 	state := NewDaemonState("/test/repo")
 

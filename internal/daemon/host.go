@@ -64,32 +64,30 @@ func (d *Daemon) RecordSpend(costUSD float64, outputTokens, inputTokens int) {
 }
 
 // RecordItemSpend accumulates spend data on the work item associated with the
-// given session ID. Linear scan over all items — count is always small.
+// given session ID.
 func (d *Daemon) RecordItemSpend(sessionID string, costUSD float64, outputTokens, inputTokens int) {
-	for _, item := range d.state.GetAllWorkItems() {
-		if item.SessionID == sessionID {
-			d.state.RecordItemSpend(item.ID, costUSD, outputTokens, inputTokens)
-			return
-		}
+	item, ok := d.state.GetWorkItemBySessionID(sessionID)
+	if !ok {
+		d.logger.Warn("RecordItemSpend: no work item found for session", "sessionID", sessionID)
+		return
 	}
-	d.logger.Warn("RecordItemSpend: no work item found for session", "sessionID", sessionID)
+	d.state.RecordItemSpend(item.ID, costUSD, outputTokens, inputTokens)
 }
 
 // SetWorkItemData stores a key-value pair in the work item's StepData
 // for the work item associated with the given session ID.
 func (d *Daemon) SetWorkItemData(sessionID, key string, value any) error {
-	for _, item := range d.state.GetActiveWorkItems() {
-		if item.SessionID == sessionID {
-			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
-				if it.StepData == nil {
-					it.StepData = make(map[string]any)
-				}
-				it.StepData[key] = value
-			})
-			return nil
-		}
+	item, ok := d.state.GetWorkItemBySessionID(sessionID)
+	if !ok {
+		return fmt.Errorf("no work item found for session %s", sessionID)
 	}
-	return fmt.Errorf("no work item found for session %s", sessionID)
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		if it.StepData == nil {
+			it.StepData = make(map[string]any)
+		}
+		it.StepData[key] = value
+	})
+	return nil
 }
 
 // CommentOnIssue posts a comment on the issue/task associated with the given session.
