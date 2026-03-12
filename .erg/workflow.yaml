@@ -4,7 +4,7 @@ start: plan
 source:
   provider: github
   filter:
-    label: plan
+    label: ai-assisted
 
 states:
   plan:
