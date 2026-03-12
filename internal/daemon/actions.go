@@ -725,7 +725,7 @@ func (a *validateDiffAction) Execute(ctx context.Context, ac *workflow.ActionCon
 
 	violations, err := d.validateDiff(ctx, item, ac.Params)
 	if err != nil {
-		return workflow.ActionResult{Error: fmt.Errorf("git.validate_diff: %v", err)}
+		return workflow.ActionResult{Error: fmt.Errorf("git.validate_diff: %w", err)}
 	}
 
 	if len(violations) > 0 {
