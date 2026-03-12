@@ -1210,9 +1210,11 @@
             <span class="action-title">pr.reviewed</span>
           </div>
           <p class="action-desc">
-            Fires when the pull request receives a formal approval. While
-            waiting, the orchestrator automatically resumes Claude to address new
-            review comments (configurable via <code>auto_address</code>).
+            Fires when the pull request receives a formal approval, or when a
+            reviewer requests changes and <code>auto_address</code> is
+            <code>false</code>. While waiting, the orchestrator automatically
+            resumes Claude to address new review comments (configurable via
+            <code>auto_address</code>).
           </p>
           <div class="param-section">
             <div class="param-section-title">Params</div>
@@ -1290,6 +1292,14 @@
                   <td>
                     Set to <code>true</code> if the PR was merged outside the
                     orchestrator.
+                  </td>
+                </tr>
+                <tr>
+                  <td>changes_requested</td>
+                  <td>bool</td>
+                  <td>
+                    Set to <code>true</code> when a reviewer requests changes
+                    and <code>auto_address</code> is <code>false</code>.
                   </td>
                 </tr>
               </tbody>
@@ -1434,6 +1444,13 @@
                   <td>string</td>
                   <td>
                     The <code>on_failure</code> strategy that was applied.
+                  </td>
+                </tr>
+                <tr>
+                  <td>conflicting</td>
+                  <td>bool</td>
+                  <td>
+                    Set to <code>true</code> when the PR has merge conflicts.
                   </td>
                 </tr>
               </tbody>
@@ -1782,6 +1799,14 @@
                   <td>
                     The label name (only when <code>trigger</code> is
                     <code>label_added</code>).
+                  </td>
+                </tr>
+                <tr>
+                  <td>gate_comment_author</td>
+                  <td>string</td>
+                  <td>
+                    The username of the commenter (only when
+                    <code>trigger</code> is <code>comment_match</code>).
                   </td>
                 </tr>
               </tbody>
