@@ -457,23 +457,12 @@ func TestRebuild_OpenPR_CIPassed_PlacesAtAwaitReview(t *testing.T) {
 		Stdout: prViewJSON,
 	})
 	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
-		Stdout: []byte("check1\tpass\t\t\n"),
+		Stdout: []byte(`[{"name":"check1","state":"SUCCESS"}]`),
 	})
-
-	// pr.reviewed — not approved yet (returns not-approved)
-	// GetPRState for review check
-	prStateJSON, _ := json.Marshal(struct {
-		State   string `json:"state"`
-		Reviews []any  `json:"reviews"`
-	}{State: "OPEN", Reviews: []any{}})
-	// The second pr view call (for review check) — overwrite won't work with prefix match,
-	// but since all pr view calls return the same base, this should be fine.
-	// Actually, we need the review check to return the PR state.
-	// Let me use the combined JSON approach.
-	_ = prStateJSON
-
-	// CheckPRReviewDecision uses "gh pr view" with --json reviewDecision
-	// Actually, let's look at what CheckPRReviewDecision calls.
+	// getRequiredStatusChecks — no branch protection (error falls through)
+	mockExec.AddPrefixMatch("gh", []string{"repo", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
 
 	d, _ := setupRebuildDaemon(t, mockExec)
 	d.rebuildStateFromTracker(context.Background())
@@ -514,7 +503,11 @@ func TestRebuild_OpenPR_ReviewApproved_PlacesAtMerge(t *testing.T) {
 		Stdout: prViewJSON,
 	})
 	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
-		Stdout: []byte("check1\tpass\t\t\n"),
+		Stdout: []byte(`[{"name":"check1","state":"SUCCESS"}]`),
+	})
+	// getRequiredStatusChecks — no branch protection (error falls through)
+	mockExec.AddPrefixMatch("gh", []string{"repo", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("not found"),
 	})
 
 	// Review approved — pr.reviewed returns review_approved=true

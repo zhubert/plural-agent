@@ -937,8 +937,59 @@ func TestFetchGitHubIssuesWithLabel_CLIError(t *testing.T) {
 
 func TestCheckPRChecks_AllPassing(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
-		Stdout: []byte(`[{"state":"SUCCESS"},{"state":"SUCCESS"}]`),
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"test","state":"SUCCESS"},{"name":"lint","state":"SUCCESS"}]`),
+	})
+	// No branch protection configured — getRequiredStatusChecks will fail, fall through
+	mock.AddPrefixMatch("gh", []string{"repo", "view"}, pexec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRChecks(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CIStatusPassing {
+		t.Errorf("expected CIStatusPassing, got %s", status)
+	}
+}
+
+func TestCheckPRChecks_AllPassing_RequiredCheckMissing(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	// Two checks posted and passing, but a required check hasn't posted yet
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"ci/circleci: js","state":"SUCCESS"},{"name":"ci/circleci: spec","state":"SUCCESS"}]`),
+	})
+	// Default branch
+	mock.AddPrefixMatch("gh", []string{"repo", "view"}, pexec.MockResponse{
+		Stdout: []byte("main\n"),
+	})
+	// Required checks include one that hasn't posted
+	mock.AddPrefixMatch("gh", []string{"api"}, pexec.MockResponse{
+		Stdout: []byte("ci/circleci: js\nci/circleci: spec\nci/circleci: test\n"),
+	})
+
+	svc := NewGitServiceWithExecutor(mock)
+	status, err := svc.CheckPRChecks(context.Background(), "/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CIStatusPending {
+		t.Errorf("expected CIStatusPending (required check missing), got %s", status)
+	}
+}
+
+func TestCheckPRChecks_AllPassing_AllRequiredPresent(t *testing.T) {
+	mock := pexec.NewMockExecutor(nil)
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"ci/circleci: js","state":"SUCCESS"},{"name":"ci/circleci: test","state":"SUCCESS"}]`),
+	})
+	mock.AddPrefixMatch("gh", []string{"repo", "view"}, pexec.MockResponse{
+		Stdout: []byte("main\n"),
+	})
+	mock.AddPrefixMatch("gh", []string{"api"}, pexec.MockResponse{
+		Stdout: []byte("ci/circleci: js\nci/circleci: test\n"),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -954,8 +1005,8 @@ func TestCheckPRChecks_AllPassing(t *testing.T) {
 func TestCheckPRChecks_SomeFailing(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	// gh pr checks returns non-zero exit code when checks fail, so we set Err
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
-		Stdout: []byte(`[{"state":"SUCCESS"},{"state":"FAILURE"}]`),
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"lint","state":"SUCCESS"},{"name":"test","state":"FAILURE"}]`),
 		Err:    fmt.Errorf("exit status 1"),
 	})
 
@@ -972,8 +1023,8 @@ func TestCheckPRChecks_SomeFailing(t *testing.T) {
 func TestCheckPRChecks_Pending(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	// gh pr checks returns non-zero when checks are pending
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
-		Stdout: []byte(`[{"state":"SUCCESS"},{"state":"PENDING"}]`),
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
+		Stdout: []byte(`[{"name":"lint","state":"SUCCESS"},{"name":"test","state":"PENDING"}]`),
 		Err:    fmt.Errorf("exit status 1"),
 	})
 
@@ -990,7 +1041,7 @@ func TestCheckPRChecks_Pending(t *testing.T) {
 func TestCheckPRChecks_NoChecks(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	// Empty checks array with successful exit code
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
 		Stdout: []byte(`[]`),
 	})
 
@@ -1007,7 +1058,7 @@ func TestCheckPRChecks_NoChecks(t *testing.T) {
 func TestCheckPRChecks_NoChecksWithError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	// Empty checks array with error exit code
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
 		Stdout: []byte(`[]`),
 		Err:    fmt.Errorf("exit status 1"),
 	})
@@ -1025,7 +1076,7 @@ func TestCheckPRChecks_NoChecksWithError(t *testing.T) {
 func TestCheckPRChecks_ErrorNoOutput(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
 	// Error with no stdout (e.g., no PR found)
-	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "state"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"pr", "checks", "feature-branch", "--json", "name,state"}, pexec.MockResponse{
 		Err: fmt.Errorf("no pull requests found"),
 	})
 
