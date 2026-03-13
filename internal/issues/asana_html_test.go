@@ -101,6 +101,16 @@ func TestMarkdownToAsanaHTML(t *testing.T) {
 			md:   "## Plan\n\nSome **bold** text and `code`.\n\n- Item one\n- Item two\n\n```\ncode block\n```\n\nDone.",
 			want: "<body><strong>Plan</strong>\n\nSome <strong>bold</strong> text and <code>code</code>.\n\n<ul>\n<li>Item one</li>\n<li>Item two</li>\n</ul>\n\n<pre>\ncode block\n</pre>\n\nDone.</body>",
 		},
+		{
+			name: "bold inside backtick code not processed",
+			md:   "Use `**not bold**` here",
+			want: "<body>Use <code>**not bold**</code> here</body>",
+		},
+		{
+			name: "consecutive italic spans",
+			md:   "*first* and *second*",
+			want: "<body><em>first</em> and <em>second</em></body>",
+		},
 	}
 
 	for _, tt := range tests {

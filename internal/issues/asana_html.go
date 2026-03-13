@@ -1,6 +1,7 @@
 package issues
 
 import (
+	"fmt"
 	"html"
 	"regexp"
 	"strings"
@@ -166,24 +167,37 @@ func parseOrderedItem(line string) (string, bool) {
 // --- Inline formatting ---
 //
 // Applied AFTER HTML-escaping, so we need to match on escaped text but
-// produce unescaped HTML tags. Bold must be checked before italic since
-// ** is a prefix of *.
+// produce unescaped HTML tags. Inline code is extracted first so that
+// formatting inside backticks (e.g. `**not bold**`) is not interpreted.
+// Bold must be checked before italic since ** is a prefix of *.
 
 // convertInline applies inline markdown formatting to an already HTML-escaped
-// line. The order matters: bold (**) before italic (*), and links before
-// other patterns to avoid mangling URLs.
+// line. Inline code spans are protected from bold/italic processing via
+// placeholder substitution.
 func convertInline(escaped string) string {
-	// Links: [text](url) — note: parens in the url part are HTML-escaped already
-	escaped = linkRe.ReplaceAllString(escaped, `<a href="$2">$1</a>`)
+	// Step 1: Extract inline code spans into placeholders so their content
+	// is not processed by bold/italic/link regexes.
+	var codeSpans []string
+	escaped = inlineCodeRe.ReplaceAllStringFunc(escaped, func(match string) string {
+		m := inlineCodeRe.FindStringSubmatch(match)
+		placeholder := fmt.Sprintf("\x00CODE%d\x00", len(codeSpans))
+		codeSpans = append(codeSpans, "<code>"+m[1]+"</code>")
+		return placeholder
+	})
 
+	// Step 2: Apply remaining inline formatting.
+	// Links: [text](url)
+	escaped = linkRe.ReplaceAllString(escaped, `<a href="$2">$1</a>`)
 	// Bold: **text**
 	escaped = boldRe.ReplaceAllString(escaped, `<strong>$1</strong>`)
+	// Italic: *text* (lookahead avoids consuming the trailing boundary,
+	// so consecutive spans like *a* and *b* both match)
+	escaped = italicRe.ReplaceAllString(escaped, `${1}<em>$2</em>`)
 
-	// Italic: *text* (but not inside words or if preceded by *)
-	escaped = italicRe.ReplaceAllString(escaped, `${1}<em>$2</em>${3}`)
-
-	// Inline code: `text`
-	escaped = inlineCodeRe.ReplaceAllString(escaped, `<code>$1</code>`)
+	// Step 3: Restore code spans.
+	for i, span := range codeSpans {
+		escaped = strings.Replace(escaped, fmt.Sprintf("\x00CODE%d\x00", i), span, 1)
+	}
 
 	return escaped
 }
@@ -191,6 +205,6 @@ func convertInline(escaped string) string {
 var (
 	linkRe       = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 	boldRe       = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	italicRe     = regexp.MustCompile(`(^|[^*])\*([^*]+?)\*([^*]|$)`)
+	italicRe     = regexp.MustCompile(`(^|[^*])\*([^*]+?)\*`)
 	inlineCodeRe = regexp.MustCompile("`([^`]+)`")
 )
