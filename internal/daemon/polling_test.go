@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -702,6 +703,173 @@ func TestCheckLinkedPRsAndUnqueue_NonNumericID(t *testing.T) {
 	// No calls should have been made.
 	if len(mockExec.GetCalls()) != 0 {
 		t.Errorf("expected no CLI calls for non-numeric ID, got %d", len(mockExec.GetCalls()))
+	}
+}
+
+// TestCheckLinkedPRsAndUnqueue_OpenPR_SkipsWhenClaimedByOther verifies that when
+// a GitHub issue has an open linked PR but another daemon has a valid claim on
+// the issue, the PR is NOT adopted. This prevents two daemons from both
+// monitoring the same PR and racing on review feedback.
+func TestCheckLinkedPRsAndUnqueue_OpenPR_SkipsWhenClaimedByOther(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	// Mock gh api graphql — returns one OPEN linked PR.
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: []byte(`{
+			"data": {
+				"repository": {
+					"issue": {
+						"timelineItems": {
+							"nodes": [
+								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}}
+							]
+						}
+					}
+				}
+			}
+		}`),
+	})
+
+	// Set up a mock claim provider that reports a claim from another daemon.
+	mockClaim := &mockClaimProvider{
+		claims: []issues.ClaimInfo{
+			{
+				CommentID: "other-claim",
+				DaemonID:  "other-daemon",
+				Hostname:  "other-host",
+				Timestamp: time.Now().Add(-5 * time.Minute),
+				Expires:   time.Now().Add(55 * time.Minute),
+			},
+		},
+	}
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	registry := issues.NewProviderRegistry(mockClaim)
+
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	d.daemonID = "test-daemon-1"
+
+	defaultCfg := workflow.DefaultWorkflowConfig()
+	actionRegistry := workflow.NewActionRegistry()
+	defaultEngine := workflow.NewEngine(defaultCfg, actionRegistry, nil, discardLogger())
+	d.engines = map[string]*workflow.Engine{"/test/repo": defaultEngine}
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": defaultCfg}
+
+	issue := issues.Issue{
+		ID:     "42",
+		Title:  "Fix the bug",
+		Source: issues.SourceGitHub,
+	}
+
+	skip := d.checkLinkedPRsAndUnqueue(context.Background(), "/test/repo", issue)
+
+	if !skip {
+		t.Error("expected checkLinkedPRsAndUnqueue to return true (handled) when issue is claimed by another daemon")
+	}
+
+	// The work item should exist but be terminal (not adopted into the workflow).
+	item, exists := d.state.GetWorkItem("/test/repo-42")
+	if !exists {
+		t.Fatal("expected work item to exist in state")
+	}
+	if !item.IsTerminal() {
+		t.Errorf("expected work item to be terminal, got state=%s", item.State)
+	}
+	// Should NOT be active — that would mean it was adopted.
+	if item.State == daemonstate.WorkItemActive {
+		t.Error("expected work item NOT to be active when issue is claimed by another daemon")
+	}
+}
+
+// TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsWhenClaimedBySelf verifies that when
+// this daemon holds the claim, the PR is still adopted normally.
+func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsWhenClaimedBySelf(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: []byte(`{
+			"data": {
+				"repository": {
+					"issue": {
+						"timelineItems": {
+							"nodes": [
+								{"source": {"number": 10, "state": "OPEN", "url": "https://github.com/owner/repo/pull/10", "headRefName": "issue-42"}}
+							]
+						}
+					}
+				}
+			}
+		}`),
+	})
+
+	// Claim from this daemon — should NOT block adoption.
+	// claimIdentity() returns stateKey()+"@"+hostname, so the mock must match.
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	mockClaim := &mockClaimProvider{
+		claims: []issues.ClaimInfo{
+			{
+				CommentID: "our-claim",
+				DaemonID:  "test-daemon-1@" + hostname,
+				Hostname:  hostname,
+				Timestamp: time.Now().Add(-5 * time.Minute),
+				Expires:   time.Now().Add(55 * time.Minute),
+			},
+		},
+	}
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	registry := issues.NewProviderRegistry(mockClaim)
+
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	d.daemonID = "test-daemon-1"
+
+	defaultCfg := workflow.DefaultWorkflowConfig()
+	actionRegistry := workflow.NewActionRegistry()
+	defaultEngine := workflow.NewEngine(defaultCfg, actionRegistry, nil, discardLogger())
+	d.engines = map[string]*workflow.Engine{"/test/repo": defaultEngine}
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": defaultCfg}
+
+	issue := issues.Issue{
+		ID:     "42",
+		Title:  "Fix the bug",
+		Source: issues.SourceGitHub,
+	}
+
+	skip := d.checkLinkedPRsAndUnqueue(context.Background(), "/test/repo", issue)
+
+	if !skip {
+		t.Error("expected checkLinkedPRsAndUnqueue to return true when we hold the claim")
+	}
+
+	item, ok := d.state.GetWorkItem("/test/repo-42")
+	if !ok {
+		t.Fatal("expected work item to be created")
+	}
+	if item.State != daemonstate.WorkItemActive {
+		t.Errorf("expected active state, got %s", item.State)
 	}
 }
 

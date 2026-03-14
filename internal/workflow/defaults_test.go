@@ -52,13 +52,22 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 		t.Errorf("await_review next: expected check_review_result, got %s", review.Next)
 	}
 
-	// check_review_result routes review_approved → merge and changes_requested → address_review
+	// check_review_result routes ci_regressed → await_ci, review_approved → merge, changes_requested → address_review
 	checkReview := cfg.States["check_review_result"]
 	if checkReview == nil {
 		t.Fatal("expected check_review_result state")
 	}
 	if checkReview.Type != StateTypeChoice {
 		t.Errorf("check_review_result type: expected choice, got %s", checkReview.Type)
+	}
+	if len(checkReview.Choices) != 4 {
+		t.Errorf("check_review_result choices: expected 4, got %d", len(checkReview.Choices))
+	}
+	if len(checkReview.Choices) >= 1 {
+		first := checkReview.Choices[0]
+		if first.Variable != "ci_regressed" || first.Equals != true || first.Next != "await_ci" {
+			t.Errorf("first review choice: expected ci_regressed→await_ci, got %s=%v→%s", first.Variable, first.Equals, first.Next)
+		}
 	}
 
 	// address_review state
@@ -338,6 +347,36 @@ func TestDefaultWorkflowConfig_RetryOnNetworkStates(t *testing.T) {
 		if len(state.Retry) > 0 {
 			t.Errorf("state %q should NOT have retry configured (expensive action)", name)
 		}
+	}
+}
+
+func TestReviewTemplateConfig_CIRegressionExit(t *testing.T) {
+	tmpl := ReviewTemplateConfig()
+
+	// Verify ci_regression exit exists
+	if _, ok := tmpl.Exits["ci_regression"]; !ok {
+		t.Error("expected ci_regression exit in review template")
+	}
+
+	// Verify check_review_result has ci_regressed rule as first choice
+	checkReview := tmpl.States["check_review_result"]
+	if checkReview == nil {
+		t.Fatal("expected check_review_result state")
+	}
+	if len(checkReview.Choices) < 1 || checkReview.Choices[0].Variable != "ci_regressed" {
+		t.Error("expected first choice rule to be ci_regressed")
+	}
+	if checkReview.Choices[0].Next != "review_ci_regressed" {
+		t.Errorf("ci_regressed choice next: expected review_ci_regressed, got %s", checkReview.Choices[0].Next)
+	}
+
+	// Verify review_ci_regressed state exists and is a fail terminal
+	regState := tmpl.States["review_ci_regressed"]
+	if regState == nil {
+		t.Fatal("expected review_ci_regressed state in review template")
+	}
+	if regState.Type != StateTypeFail {
+		t.Errorf("review_ci_regressed type: expected fail, got %s", regState.Type)
 	}
 }
 

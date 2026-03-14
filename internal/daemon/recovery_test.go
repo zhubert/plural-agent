@@ -11,6 +11,8 @@ import (
 	"github.com/zhubert/erg/internal/daemonstate"
 	"github.com/zhubert/erg/internal/exec"
 	"github.com/zhubert/erg/internal/git"
+	"github.com/zhubert/erg/internal/issues"
+	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/workflow"
 )
 
@@ -456,23 +458,12 @@ func TestRebuild_OpenPR_CIPassed_PlacesAtAwaitReview(t *testing.T) {
 		Stdout: prViewJSON,
 	})
 	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
-		Stdout: []byte("check1\tpass\t\t\n"),
+		Stdout: []byte(`[{"name":"check1","state":"SUCCESS"}]`),
 	})
-
-	// pr.reviewed — not approved yet (returns not-approved)
-	// GetPRState for review check
-	prStateJSON, _ := json.Marshal(struct {
-		State   string `json:"state"`
-		Reviews []any  `json:"reviews"`
-	}{State: "OPEN", Reviews: []any{}})
-	// The second pr view call (for review check) — overwrite won't work with prefix match,
-	// but since all pr view calls return the same base, this should be fine.
-	// Actually, we need the review check to return the PR state.
-	// Let me use the combined JSON approach.
-	_ = prStateJSON
-
-	// CheckPRReviewDecision uses "gh pr view" with --json reviewDecision
-	// Actually, let's look at what CheckPRReviewDecision calls.
+	// getRequiredStatusChecks — no branch protection (error falls through)
+	mockExec.AddPrefixMatch("gh", []string{"repo", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("not found"),
+	})
 
 	d, _ := setupRebuildDaemon(t, mockExec)
 	d.rebuildStateFromTracker(context.Background())
@@ -513,7 +504,11 @@ func TestRebuild_OpenPR_ReviewApproved_PlacesAtMerge(t *testing.T) {
 		Stdout: prViewJSON,
 	})
 	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
-		Stdout: []byte("check1\tpass\t\t\n"),
+		Stdout: []byte(`[{"name":"check1","state":"SUCCESS"}]`),
+	})
+	// getRequiredStatusChecks — no branch protection (error falls through)
+	mockExec.AddPrefixMatch("gh", []string{"repo", "view"}, exec.MockResponse{
+		Err: fmt.Errorf("not found"),
 	})
 
 	// Review approved — pr.reviewed returns review_approved=true
@@ -752,12 +747,12 @@ func TestEngine_GetOrderedWaitStates_CustomWorkflow(t *testing.T) {
 	cfg := &workflow.Config{
 		Start: "code",
 		States: map[string]*workflow.State{
-			"code":       {Type: workflow.StateTypeTask, Action: "ai.code", Next: "pr"},
-			"pr":         {Type: workflow.StateTypeTask, Action: "github.create_pr", Next: "check_ci"},
-			"check_ci":   {Type: workflow.StateTypeWait, Event: "ci.complete", Next: "approval"},
-			"approval":   {Type: workflow.StateTypeWait, Event: "pr.reviewed", Next: "merge"},
-			"merge":      {Type: workflow.StateTypeTask, Action: "github.merge", Next: "done"},
-			"done":       {Type: workflow.StateTypeSucceed},
+			"code":     {Type: workflow.StateTypeTask, Action: "ai.code", Next: "pr"},
+			"pr":       {Type: workflow.StateTypeTask, Action: "github.create_pr", Next: "check_ci"},
+			"check_ci": {Type: workflow.StateTypeWait, Event: "ci.complete", Next: "approval"},
+			"approval": {Type: workflow.StateTypeWait, Event: "pr.reviewed", Next: "merge"},
+			"merge":    {Type: workflow.StateTypeTask, Action: "github.merge", Next: "done"},
+			"done":     {Type: workflow.StateTypeSucceed},
 		},
 	}
 	engine := workflow.NewEngine(cfg, workflow.NewActionRegistry(), nil, discardLogger())
@@ -1025,5 +1020,296 @@ func TestRebuild_AllWaitStatesSatisfied_PlacesAtLastWaitState(t *testing.T) {
 	step := items[0].CurrentStep
 	if step == "merge" || step == "check_ci_result" || step == "check_review_result" {
 		t.Errorf("expected item at a wait state, not sync step %s", step)
+	}
+}
+
+// --- Non-GitHub provider rebuild tests ---
+
+// mockRebuildProvider implements Provider, ProviderGateChecker, and ProviderActions
+// for testing rebuild with non-GitHub providers (Asana, Linear).
+type mockRebuildProvider struct {
+	src      issues.Source
+	issues   []issues.Issue
+	comments []issues.IssueComment
+}
+
+func (m *mockRebuildProvider) Name() string                             { return string(m.src) }
+func (m *mockRebuildProvider) Source() issues.Source                    { return m.src }
+func (m *mockRebuildProvider) IsConfigured(_ string) bool               { return true }
+func (m *mockRebuildProvider) GenerateBranchName(_ issues.Issue) string { return "" }
+func (m *mockRebuildProvider) GetPRLinkText(_ issues.Issue) string      { return "" }
+func (m *mockRebuildProvider) FetchIssues(_ context.Context, _ string, _ issues.FilterConfig) ([]issues.Issue, error) {
+	return m.issues, nil
+}
+func (m *mockRebuildProvider) RemoveLabel(_ context.Context, _, _, _ string) error { return nil }
+func (m *mockRebuildProvider) Comment(_ context.Context, _, _, _ string) error     { return nil }
+func (m *mockRebuildProvider) CheckIssueHasLabel(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRebuildProvider) GetIssueComments(_ context.Context, _, _ string) ([]issues.IssueComment, error) {
+	return m.comments, nil
+}
+
+func setupAsanaRebuildDaemon(t *testing.T, provider *mockRebuildProvider, wfCfg *workflow.Config) *Daemon {
+	t.Helper()
+	mockExec := exec.NewMockExecutor(nil)
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	registry := issues.NewProviderRegistry(provider)
+	d := New(cfg, gitSvc, sessSvc, registry, discardLogger())
+	d.sessionMgr.SetSkipMessageLoad(true)
+	d.state = daemonstate.NewDaemonState("/test/repo")
+	d.repoFilter = "/test/repo"
+	d.dockerHealthCheck = func(context.Context) error { return nil }
+
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": wfCfg}
+	checker := newEventChecker(d)
+	d.engines = map[string]*workflow.Engine{
+		"/test/repo": workflow.NewEngine(wfCfg, d.buildActionRegistry(), checker, discardLogger()),
+	}
+	return d
+}
+
+func TestRebuild_AsanaPlanWorkflow_NewIssue_QueuesFromStart(t *testing.T) {
+	provider := &mockRebuildProvider{
+		src: issues.SourceAsana,
+		issues: []issues.Issue{
+			{ID: "1213636226479865", Title: "Fix campus filter", URL: "https://app.asana.com/0/1/1213636226479865", Source: issues.SourceAsana},
+		},
+		comments: nil, // no comments — brand new issue
+	}
+
+	wfCfg := workflow.DefaultPlanningWorkflowConfig()
+	wfCfg.Source.Provider = "asana"
+	wfCfg.Source.Filter.Label = "queued"
+
+	d := setupAsanaRebuildDaemon(t, provider, wfCfg)
+	d.rebuildStateFromTracker(context.Background())
+
+	// Brand new Asana issue with plan-then-code workflow should be queued,
+	// NOT placed at await_plan_feedback (which was the bug).
+	items := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
+	if len(items) != 1 {
+		allItems := d.state.GetAllWorkItems()
+		for _, it := range allItems {
+			t.Logf("  item=%s state=%s step=%s", it.ID, it.State, it.CurrentStep)
+		}
+		t.Fatalf("expected 1 queued item, got %d", len(items))
+	}
+	if items[0].IssueRef.ID != "1213636226479865" {
+		t.Errorf("expected issue ID 1213636226479865, got %s", items[0].IssueRef.ID)
+	}
+}
+
+func TestRebuild_AsanaTemplateWorkflow_NewIssue_QueuesFromStart(t *testing.T) {
+	// Template-expanded workflows (like builtin:plan) produce pass states
+	// at the start. The fix must follow pass→task chain to detect that the
+	// effective start is a task state.
+	provider := &mockRebuildProvider{
+		src: issues.SourceAsana,
+		issues: []issues.Issue{
+			{ID: "1213636226479865", Title: "Fix campus filter", URL: "https://app.asana.com/0/1/1213636226479865", Source: issues.SourceAsana},
+		},
+		comments: nil,
+	}
+
+	// Build a template-based workflow like the real registrations repo uses.
+	wfCfg := &workflow.Config{
+		Workflow: "plan-then-code",
+		Start:    "plan_phase",
+		Source: workflow.SourceConfig{
+			Provider: "asana",
+			Filter:   workflow.FilterConfig{Label: "queued"},
+		},
+		States: map[string]*workflow.State{
+			"plan_phase": {
+				Type: workflow.StateTypeTemplate,
+				Use:  "builtin:plan",
+				Exits: map[string]string{
+					"success": "done",
+					"failure": "failed",
+				},
+			},
+			"done":   {Type: workflow.StateTypeSucceed},
+			"failed": {Type: workflow.StateTypeFail},
+		},
+	}
+	expanded, err := workflow.ExpandTemplates(wfCfg, "")
+	if err != nil {
+		t.Fatalf("failed to expand templates: %v", err)
+	}
+
+	d := setupAsanaRebuildDaemon(t, provider, expanded)
+	d.rebuildStateFromTracker(context.Background())
+
+	items := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
+	if len(items) != 1 {
+		allItems := d.state.GetAllWorkItems()
+		for _, it := range allItems {
+			t.Logf("  item=%s state=%s step=%s", it.ID, it.State, it.CurrentStep)
+		}
+		t.Fatalf("expected 1 queued item, got %d", len(items))
+	}
+}
+
+func TestRebuild_GitHubOpenPR_StillPlacesAtWaitState(t *testing.T) {
+	// Verify that the hasProgressEvidence=true path (GitHub with open PR)
+	// still correctly places items at wait states, not queued from start.
+	mockExec := exec.NewMockExecutor(nil)
+
+	mockExec.AddPrefixMatch("gh", []string{"issue", "list"}, exec.MockResponse{
+		Stdout: mockGitHubIssuesList([]git.GitHubIssue{
+			{Number: 42, Title: "Fix bug", URL: "https://github.com/owner/repo/issues/42"},
+		}),
+	})
+	mockExec.AddExactMatch("git", []string{"remote", "get-url", "origin"}, exec.MockResponse{
+		Stdout: []byte("git@github.com:owner/repo.git\n"),
+	})
+	mockExec.AddPrefixMatch("gh", []string{"api", "graphql"}, exec.MockResponse{
+		Stdout: mockGitHubGraphQL([]git.LinkedPR{
+			{Number: 10, State: git.PRStateOpen, URL: "https://github.com/owner/repo/pull/10", HeadRefName: "fix-bug"},
+		}),
+	})
+	prViewJSON, _ := json.Marshal(struct {
+		MergeableStatus string `json:"mergeable"`
+	}{MergeableStatus: "MERGEABLE"})
+	mockExec.AddPrefixMatch("gh", []string{"pr", "view"}, exec.MockResponse{
+		Stdout: prViewJSON,
+	})
+	// CI pending — first wait state (await_ci) unsatisfied
+	mockExec.AddPrefixMatch("gh", []string{"pr", "checks"}, exec.MockResponse{
+		Err: fmt.Errorf("no checks yet"),
+	})
+
+	// Use a plan-then-code workflow so the start state is a task.
+	// With an open PR, the GitHub path should still place at await_ci.
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+	d := testDaemonWithExec(cfg, mockExec)
+	d.repoFilter = "/test/repo"
+	d.autoMerge = true
+
+	wfCfg := workflow.DefaultPlanningWorkflowConfig()
+	d.workflowConfigs = map[string]*workflow.Config{"/test/repo": wfCfg}
+	checker := newEventChecker(d)
+	d.engines = map[string]*workflow.Engine{
+		"/test/repo": workflow.NewEngine(wfCfg, d.buildActionRegistry(), checker, discardLogger()),
+	}
+
+	d.rebuildStateFromTracker(context.Background())
+
+	// With an open PR, the GitHub path passes hasProgressEvidence=true.
+	// Even though the workflow starts with a task, the item should NOT
+	// be queued from start — it should be placed at a wait state.
+	items := d.state.GetActiveWorkItems()
+	if len(items) != 1 {
+		queued := d.state.GetWorkItemsByState(daemonstate.WorkItemQueued)
+		t.Fatalf("expected 1 active item, got %d active + %d queued", len(items), len(queued))
+	}
+	// Should NOT be queued — the open PR proves work has been done.
+	if items[0].State == daemonstate.WorkItemQueued {
+		t.Error("GitHub item with open PR should not be queued from start")
+	}
+}
+
+func TestWorkflowStartsWithTask(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    *workflow.Config
+		expect bool
+	}{
+		{
+			name:   "direct task start",
+			cfg:    workflow.DefaultPlanningWorkflowConfig(),
+			expect: true,
+		},
+		{
+			name: "direct wait start",
+			cfg: &workflow.Config{
+				Start: "gate",
+				States: map[string]*workflow.State{
+					"gate": {Type: workflow.StateTypeWait, Event: "gate.approved", Next: "done"},
+					"done": {Type: workflow.StateTypeSucceed},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "pass chain to task (template-expanded)",
+			cfg: func() *workflow.Config {
+				c := &workflow.Config{
+					Start: "plan_phase",
+					States: map[string]*workflow.State{
+						"plan_phase":             {Type: workflow.StateTypePass, Next: "_t_plan_phase_planning"},
+						"_t_plan_phase_planning": {Type: workflow.StateTypeTask, Action: "ai.plan", Next: "done"},
+						"done":                   {Type: workflow.StateTypeSucceed},
+					},
+				}
+				return c
+			}(),
+			expect: true,
+		},
+		{
+			name: "pass chain to wait",
+			cfg: &workflow.Config{
+				Start: "entry",
+				States: map[string]*workflow.State{
+					"entry": {Type: workflow.StateTypePass, Next: "gate"},
+					"gate":  {Type: workflow.StateTypeWait, Event: "gate.approved", Next: "done"},
+					"done":  {Type: workflow.StateTypeSucceed},
+				},
+			},
+			expect: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := workflow.NewEngine(tt.cfg, workflow.NewActionRegistry(), nil, discardLogger())
+			got := workflowStartsWithTask(engine)
+			if got != tt.expect {
+				t.Errorf("workflowStartsWithTask() = %v, want %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestRebuild_AsanaWaitOnlyWorkflow_PlacesAtWaitState(t *testing.T) {
+	// A workflow that starts with a wait state (no preceding task) should
+	// still place items at the first unsatisfied wait state.
+	provider := &mockRebuildProvider{
+		src: issues.SourceAsana,
+		issues: []issues.Issue{
+			{ID: "888", Title: "Manual gate", URL: "https://app.asana.com/0/1/888", Source: issues.SourceAsana},
+		},
+	}
+
+	wfCfg := &workflow.Config{
+		Workflow: "gate-only",
+		Start:    "wait_for_gate",
+		Source: workflow.SourceConfig{
+			Provider: "asana",
+			Filter:   workflow.FilterConfig{Label: "queued"},
+		},
+		States: map[string]*workflow.State{
+			"wait_for_gate": {Type: workflow.StateTypeWait, Event: "gate.approved", Params: map[string]any{"label": "approved"}, Next: "done"},
+			"done":          {Type: workflow.StateTypeSucceed},
+			"failed":        {Type: workflow.StateTypeFail},
+		},
+	}
+
+	d := setupAsanaRebuildDaemon(t, provider, wfCfg)
+	d.rebuildStateFromTracker(context.Background())
+
+	// Workflow starts with a wait state — item should be placed there,
+	// not queued (there's no preceding task to skip).
+	items := d.state.GetActiveWorkItems()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 active item, got %d", len(items))
+	}
+	if items[0].CurrentStep != "wait_for_gate" {
+		t.Errorf("expected step wait_for_gate, got %s", items[0].CurrentStep)
 	}
 }

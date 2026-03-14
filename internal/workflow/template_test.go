@@ -1462,6 +1462,42 @@ func TestExpandTemplates_BuiltinPR(t *testing.T) {
 	if len(pr.Retry) == 0 {
 		t.Error("open_pr should have retry config")
 	}
+	// Default: draft should be false
+	p := NewParamHelper(pr.Params)
+	if p.Bool("draft", true) != false {
+		t.Errorf("open_pr draft default: got %v, want false", p.Raw("draft"))
+	}
+}
+
+func TestExpandTemplates_BuiltinPR_Draft(t *testing.T) {
+	cfg := minimalCfg(map[string]*State{
+		"start": {
+			Type: StateTypeTemplate,
+			Use:  "builtin:pr",
+			Exits: map[string]string{
+				"success": "done",
+				"failure": "failed",
+			},
+			Params: map[string]any{
+				"draft": true,
+			},
+		},
+	})
+	cfg.Start = "start"
+
+	result, err := ExpandTemplates(cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pr := result.States["_t_start_open_pr"]
+	if pr == nil {
+		t.Fatal("_t_start_open_pr missing")
+	}
+	p := NewParamHelper(pr.Params)
+	if p.Bool("draft", false) != true {
+		t.Errorf("open_pr draft override: got %v (%T), want true (bool)", p.Raw("draft"), p.Raw("draft"))
+	}
 }
 
 func TestExpandTemplates_BuiltinCI(t *testing.T) {

@@ -245,7 +245,7 @@ func (d *Daemon) rebuildGitHubWorkItem(
 	}
 	d.config.AddSession(sess)
 
-	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log)
+	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log, true)
 }
 
 // rebuildGenericWorkItem handles non-GitHub providers by walking the workflow
@@ -291,12 +291,19 @@ func (d *Daemon) rebuildGenericWorkItem(
 	}
 	d.config.AddSession(sess)
 
-	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log)
+	return d.walkWorkflowForPosition(ctx, repoPath, engine, item, log, false)
 }
 
 // walkWorkflowForPosition walks the workflow's wait states in BFS order,
 // probing each with the event checker to determine which have been satisfied.
 // It places the work item at the first unsatisfied wait state.
+//
+// hasProgressEvidence indicates whether the caller has independent proof that
+// the workflow has progressed (e.g. a linked PR exists for GitHub issues).
+// When false and the workflow starts with a task state, the walker returns
+// WorkItemQueued if no wait states have been satisfied — this prevents a
+// brand-new issue from being placed at a wait state whose preceding task
+// never ran.
 func (d *Daemon) walkWorkflowForPosition(
 	ctx context.Context,
 	repoPath string,
@@ -306,6 +313,7 @@ func (d *Daemon) walkWorkflowForPosition(
 		Info(string, ...any)
 		Debug(string, ...any)
 	},
+	hasProgressEvidence bool,
 ) *daemonstate.WorkItem {
 	checker := newEventChecker(d)
 	waitStates := engine.GetOrderedWaitStates()
@@ -344,6 +352,19 @@ func (d *Daemon) walkWorkflowForPosition(
 		}
 
 		if !fired {
+			// Without external progress evidence (e.g. a linked PR),
+			// an unsatisfied first wait state is indistinguishable from
+			// "the preceding task never ran." Queue from start so the
+			// initial task executes instead of skipping to a wait state.
+			if !hasProgressEvidence && lastSatisfiedIdx < 0 {
+				if workflowStartsWithTask(engine) {
+					log.Info("no progress evidence and workflow starts with task, queuing from start",
+						"firstUnsatisfied", ws.Name)
+					item.State = daemonstate.WorkItemQueued
+					return item
+				}
+			}
+
 			// This wait state hasn't been satisfied — place item here
 			item.State = daemonstate.WorkItemActive
 			item.CurrentStep = ws.Name
@@ -381,6 +402,29 @@ func (d *Daemon) walkWorkflowForPosition(
 	item.CurrentStep = waitStates[0].Name
 	item.Phase = "idle"
 	return item
+}
+
+// workflowStartsWithTask follows the workflow's start state through any pass
+// states (produced by template expansion) and returns true if the effective
+// first real state is a task.
+func workflowStartsWithTask(engine *workflow.Engine) bool {
+	name := engine.GetStartState()
+	seen := map[string]bool{}
+	for {
+		if seen[name] {
+			return false // cycle
+		}
+		seen[name] = true
+		s := engine.GetState(name)
+		if s == nil {
+			return false
+		}
+		if s.Type == workflow.StateTypePass {
+			name = s.Next
+			continue
+		}
+		return s.Type == workflow.StateTypeTask
+	}
 }
 
 // reconstructSessions creates minimal config.Session objects for work items

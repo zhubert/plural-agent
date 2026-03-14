@@ -11,6 +11,7 @@ import (
 //	  → conflicting=true: rebase → await_ci (loop, bounded by max_rebase_rounds)
 //	    → rebase error: resolve_conflicts (Claude AI) → push_conflict_fix → await_ci
 //	  → ci_passed=true:   await_review → check_review_result
+//	    → ci_regressed=true:       await_ci (loop back to fix CI)
 //	    → review_approved=true:    merge → done
 //	    → changes_requested=true: address_review → push_review_fix → await_review (loop)
 //	  → ci_failed=true:   fix_ci → push_ci_fix → await_ci (loop)
@@ -138,6 +139,7 @@ func DefaultWorkflowConfig() *Config {
 				Type:        StateTypeChoice,
 				DisplayName: "Checking Review",
 				Choices: []ChoiceRule{
+					{Variable: "ci_regressed", Equals: true, Next: "await_ci"},
 					{Variable: "review_approved", Equals: true, Next: "merge"},
 					{Variable: "changes_requested", Equals: true, Next: "address_review"},
 					{Variable: "pr_merged_externally", Equals: true, Next: "done"},
@@ -362,6 +364,9 @@ func PRTemplateConfig() *TemplateConfig {
 			"success": "pr_done",
 			"failure": "pr_failed",
 		},
+		Params: []TemplateParam{
+			{Name: "draft", Default: false},
+		},
 		States: map[string]*State{
 			"open_pr": {
 				Type:        StateTypeTask,
@@ -369,6 +374,7 @@ func PRTemplateConfig() *TemplateConfig {
 				DisplayName: "Opening PR",
 				Params: map[string]any{
 					"link_issue": true,
+					"draft":      "{{draft}}",
 				},
 				Next:  "pr_done",
 				Error: "pr_failed",
@@ -510,8 +516,9 @@ func ReviewTemplateConfig() *TemplateConfig {
 		Template: "review",
 		Entry:    "await_review",
 		Exits: map[string]string{
-			"success": "review_done",
-			"failure": "review_failed",
+			"success":       "review_done",
+			"failure":       "review_failed",
+			"ci_regression": "review_ci_regressed",
 		},
 		Params: []TemplateParam{
 			{Name: "simplify", Default: false},
@@ -534,6 +541,7 @@ func ReviewTemplateConfig() *TemplateConfig {
 				Type:        StateTypeChoice,
 				DisplayName: "Checking Review",
 				Choices: []ChoiceRule{
+					{Variable: "ci_regressed", Equals: true, Next: "review_ci_regressed"},
 					{Variable: "review_approved", Equals: true, Next: "review_done"},
 					{Variable: "changes_requested", Equals: true, Next: "address_review"},
 					{Variable: "pr_merged_externally", Equals: true, Next: "review_done"},
@@ -576,6 +584,10 @@ func ReviewTemplateConfig() *TemplateConfig {
 			"review_failed": {
 				Type:        StateTypeFail,
 				DisplayName: "Failed",
+			},
+			"review_ci_regressed": {
+				Type:        StateTypeFail,
+				DisplayName: "CI Regressed",
 			},
 		},
 	}
