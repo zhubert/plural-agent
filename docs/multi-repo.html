@@ -1312,6 +1312,117 @@
           </tbody>
         </table>
 
+        <!-- Multi-machine claiming -->
+        <h2 id="multi-machine">Multi-machine claiming</h2>
+        <p>
+          Multiple erg daemon instances running on different machines can safely
+          point at the same issue tracker. A comment-based claiming protocol
+          ensures each issue is picked up by exactly one daemon &mdash; no
+          configuration required.
+        </p>
+
+        <h3>How it works</h3>
+        <ol class="steps-list">
+          <li>
+            <div class="step-body">
+              <h4>Check existing claims</h4>
+              <p>Before taking an issue, the daemon reads the issue's comments for
+              any valid (non-expired) claim from another daemon. If one exists,
+              the issue is skipped.</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Post a claim comment</h4>
+              <p>If no conflicting claim exists, the daemon posts its own claim
+              comment containing its daemon ID, hostname, timestamp, and expiry
+              time.</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Wait for API consistency</h4>
+              <p>The daemon waits 2 seconds to allow the provider API to become
+              consistent before verifying the result.</p>
+            </div>
+          </li>
+          <li>
+            <div class="step-body">
+              <h4>Verify the win</h4>
+              <p>The daemon re-reads all claims and checks that it holds the
+              earliest non-expired one. If it lost the race, it deletes its own
+              claim comment and backs off.</p>
+            </div>
+          </li>
+        </ol>
+
+        <h3>Claim comment format</h3>
+        <p>
+          The claim comment format differs by provider:
+        </p>
+        <div class="info-grid">
+          <div class="info-card">
+            <h4>GitHub</h4>
+            <p>An invisible HTML comment embeds the JSON payload, followed by a
+            human-readable line. The comment is hidden in the rendered GitHub UI,
+            so only the readable line is visible to humans:</p>
+          </div>
+          <div class="info-card">
+            <h4>Asana &amp; Linear</h4>
+            <p>A visible <code>[erg-claim] {...}</code> prefix embeds the JSON
+            payload, since HTML comments are not hidden in these platforms.
+            These automated comments are expected and can be ignored.</p>
+          </div>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">GitHub claim comment (raw body)</span>
+          </div>
+          <pre><span class="cc">&lt;!-- erg-claim {"daemon":"my-daemon","host":"hostname","ts":"...","expires":"..."} --&gt;</span>
+<span class="cs">Claimed by erg daemon `my-daemon` on `hostname` at 2026-03-12T10:00:00Z.</span></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-filename">Asana / Linear claim comment</span>
+          </div>
+          <pre><span class="ca">[erg-claim]</span> <span class="cv">{"daemon":"my-daemon","host":"hostname","ts":"...","expires":"..."}</span>
+<span class="cs">Claimed by erg daemon `my-daemon` on `hostname` at 2026-03-12T10:00:00Z.</span></pre>
+        </div>
+
+        <h3>Claim expiry</h3>
+        <p>
+          Claims automatically expire at the daemon's effective max autonomous
+          duration (for example, <code>settings.max_duration</code>) plus a 10
+          minute buffer. If a daemon crashes mid-work and never cleans up its
+          claim, the claim becomes stale and is automatically ignored once it
+          expires &mdash; no manual cleanup is needed.
+        </p>
+
+        <h3>Error handling</h3>
+        <p>
+          The protocol uses an asymmetric fail strategy:
+        </p>
+        <ul>
+          <li>
+            <strong>Reading existing claims fails</strong> &rarr; <em>fail open</em>:
+            proceed without a claim. No claim has been posted yet, so this is safe.
+          </li>
+          <li>
+            <strong>Verifying our own claim fails</strong> &rarr; <em>fail closed</em>:
+            delete the claim and skip the issue. A claim was already posted and we
+            can't confirm we won, so deleting avoids two daemons both thinking they
+            won.
+          </li>
+        </ul>
+
+        <h3>Recovery</h3>
+        <p>
+          When a daemon restarts and rebuilds state from the issue tracker, it
+          checks all in-flight issues for valid claims from other daemons. Any
+          issue already claimed by another daemon is skipped, preventing duplicate
+          work after a restart.
+        </p>
+
         <!-- Services -->
         <h2 id="services">Brew services (macOS)</h2>
         <p>

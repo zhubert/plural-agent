@@ -53,6 +53,7 @@
         { href: "dashboard.html#dashboard-features", text: "Features", type: "sub" },
         { href: "dashboard.html#dashboard-api", text: "API", type: "sub" },
         { href: "multi-repo.html#multi-repo", text: "Multi-repo", type: "link" },
+        { href: "multi-repo.html#multi-machine", text: "Multi-machine claiming", type: "link" },
         { href: "multi-repo.html#services", text: "Brew services", type: "link" },
         { href: "actions.html#actions", text: "Actions", type: "link" },
         { href: "actions.html#actions-ai", text: "ai", type: "sub" },

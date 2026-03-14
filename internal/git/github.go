@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -1098,55 +1099,101 @@ const (
 )
 
 // CheckPRChecks checks the CI status of a PR for the given branch.
-// Uses `gh pr checks` which returns exit code 0 if all checks pass.
+// It parses the JSON output to classify every individual check, and when all
+// posted checks pass, it verifies that all required status checks (from branch
+// protection) have actually posted — preventing premature "passing" when slow
+// CI systems like CircleCI haven't reported yet.
 func (s *GitService) CheckPRChecks(ctx context.Context, repoPath, branch string) (CIStatus, error) {
-	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "checks", branch, "--json", "state")
-	if err != nil {
-		// gh pr checks returns non-zero if checks fail or are pending
-		outputStr := string(output)
-		if outputStr != "" {
-			// Parse the JSON output to determine status
-			var checks []struct {
-				State string `json:"state"`
-			}
-			if jsonErr := json.Unmarshal(output, &checks); jsonErr == nil {
-				if len(checks) == 0 {
-					return CIStatusNone, nil
-				}
-				hasFailing := false
-				hasPending := false
-				for _, c := range checks {
-					switch c.State {
-					case "FAILURE", "ERROR", "CANCELLED":
-						hasFailing = true
-					case "PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED":
-						hasPending = true
-					}
-				}
-				if hasFailing {
-					return CIStatusFailing, nil
-				}
-				if hasPending {
-					return CIStatusPending, nil
-				}
-			}
+	output, err := s.executor.Output(ctx, repoPath, "gh", "pr", "checks", branch, "--json", "name,state")
+
+	// Combine output from both success and error paths — gh returns non-zero
+	// when any check is pending or failing, but the JSON is valid either way.
+	if err != nil && len(output) == 0 {
+		return CIStatusPending, fmt.Errorf("gh pr checks failed with no output: %w", err)
+	}
+
+	var checks []struct {
+		Name  string `json:"name"`
+		State string `json:"state"`
+	}
+	if jsonErr := json.Unmarshal(output, &checks); jsonErr != nil {
+		if err != nil {
+			return CIStatusPending, fmt.Errorf("gh pr checks failed: %w", err)
 		}
-		// If output is empty (e.g., network error, no PR found), return the error
-		// rather than silently treating it as pending (which could cause infinite polling).
-		if outputStr == "" {
-			return CIStatusPending, fmt.Errorf("gh pr checks failed with no output: %w", err)
+		return CIStatusPending, fmt.Errorf("failed to parse gh pr checks output: %w", jsonErr)
+	}
+
+	if len(checks) == 0 {
+		return CIStatusNone, nil
+	}
+
+	hasFailing := false
+	hasPending := false
+	checkNames := make(map[string]bool, len(checks))
+	for _, c := range checks {
+		checkNames[c.Name] = true
+		switch c.State {
+		case "FAILURE", "ERROR", "CANCELLED":
+			hasFailing = true
+		case "PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED":
+			hasPending = true
 		}
+	}
+
+	if hasFailing {
+		return CIStatusFailing, nil
+	}
+	if hasPending {
 		return CIStatusPending, nil
 	}
 
-	// Exit code 0 means all checks pass
-	var checks []struct {
-		State string `json:"state"`
+	// All posted checks passed. Verify that every required status check has
+	// actually posted — slow CI systems may not have reported yet.
+	required, reqErr := s.getRequiredStatusChecks(ctx, repoPath)
+	if reqErr == nil && len(required) > 0 {
+		for _, name := range required {
+			if !checkNames[name] {
+				return CIStatusPending, nil
+			}
+		}
 	}
-	if jsonErr := json.Unmarshal(output, &checks); jsonErr == nil && len(checks) == 0 {
-		return CIStatusNone, nil
-	}
+	// If we can't fetch required checks (no branch protection, permissions, etc.),
+	// fall through and trust the posted checks.
+
 	return CIStatusPassing, nil
+}
+
+// getRequiredStatusChecks fetches the required status check contexts from
+// branch protection rules for the repo's default branch. Uses {owner}/{repo}
+// placeholder expansion so it works from any repo directory.
+// Returns nil slice on any error (no branch protection, permissions, etc.).
+func (s *GitService) getRequiredStatusChecks(ctx context.Context, repoPath string) ([]string, error) {
+	// Get the default branch name
+	baseBranch, err := s.executor.Output(ctx, repoPath,
+		"gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name",
+	)
+	if err != nil {
+		return nil, err
+	}
+	base := strings.TrimSpace(string(baseBranch))
+	if base == "" {
+		return nil, fmt.Errorf("empty default branch")
+	}
+
+	output, err := s.executor.Output(ctx, repoPath,
+		"gh", "api",
+		fmt.Sprintf("repos/{owner}/{repo}/branches/%s/protection/required_status_checks", url.PathEscape(base)),
+		"--jq", ".contexts[]",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\n"), nil
 }
 
 // CheckRun represents a single check run result for a PR.

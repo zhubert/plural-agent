@@ -460,6 +460,9 @@ func TestAsanaProvider_Comment(t *testing.T) {
 	if !strings.Contains(storyReqBody, "Hello, world!") {
 		t.Errorf("expected story body to contain message, got: %s", storyReqBody)
 	}
+	if !strings.Contains(storyReqBody, "html_text") {
+		t.Errorf("expected request to use html_text field, got: %s", storyReqBody)
+	}
 }
 
 func TestAsanaProvider_Comment_NoPAT(t *testing.T) {
@@ -1478,6 +1481,56 @@ func TestAsanaProvider_GetIssueComments_IncludesGID(t *testing.T) {
 	}
 }
 
+func TestAsanaProvider_GetIssueComments_TranslatesTextMarkers(t *testing.T) {
+	// When comments are posted via html_text, Asana derives text with
+	// visible [erg:...] markers. GetIssueComments should translate them
+	// back to <!-- erg:... --> form for the rest of the system.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"gid":        "story-1",
+					"type":       "comment",
+					"text":       "The plan\n[erg:plan]",
+					"created_at": "2024-01-01T10:00:00Z",
+					"created_by": map[string]any{"name": "Bot"},
+				},
+				{
+					"gid":        "story-2",
+					"type":       "comment",
+					"text":       "Step done\n[erg:step=notify]",
+					"created_at": "2024-01-01T11:00:00Z",
+					"created_by": map[string]any{"name": "Bot"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	origPAT := os.Getenv(asanaPATEnvVar)
+	defer os.Setenv(asanaPATEnvVar, origPAT)
+	os.Setenv(asanaPATEnvVar, "test-pat")
+
+	p := NewAsanaProviderWithClient(nil, server.Client(), server.URL)
+	comments, err := p.GetIssueComments(context.Background(), "/repo", "task-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if !strings.Contains(comments[0].Body, "<!-- erg:plan -->") {
+		t.Errorf("expected plan marker translated to HTML comment form, got %q", comments[0].Body)
+	}
+	if strings.Contains(comments[0].Body, "[erg:plan]") {
+		t.Errorf("expected text marker removed, got %q", comments[0].Body)
+	}
+	if !strings.Contains(comments[1].Body, "<!-- erg:step=notify -->") {
+		t.Errorf("expected step marker translated to HTML comment form, got %q", comments[1].Body)
+	}
+}
+
 func TestAsanaProvider_UpdateComment_Success(t *testing.T) {
 	var capturedBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1504,11 +1557,14 @@ func TestAsanaProvider_UpdateComment_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(capturedBody, `"text"`) {
-		t.Errorf("expected text field in request body, got: %s", capturedBody)
+	if !strings.Contains(capturedBody, `"html_text"`) {
+		t.Errorf("expected html_text field in request body, got: %s", capturedBody)
 	}
 	if !strings.Contains(capturedBody, "Updated body") {
 		t.Errorf("expected updated body in request, got: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "[erg:step=notify]") {
+		t.Errorf("expected marker translated to text form, got: %s", capturedBody)
 	}
 }
 

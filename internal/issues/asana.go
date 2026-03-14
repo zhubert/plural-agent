@@ -519,7 +519,7 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 		comments = append(comments, IssueComment{
 			ID:        story.GID,
 			Author:    story.CreatedBy.Name,
-			Body:      story.Text,
+			Body:      translateMarkersFromAsana(story.Text),
 			CreatedAt: createdAt,
 		})
 	}
@@ -647,11 +647,12 @@ func (p *AsanaProvider) Comment(ctx context.Context, repoPath string, issueID st
 	}
 
 	storiesURL := fmt.Sprintf("%s/tasks/%s/stories", p.apiBase, issueID)
-	textJSON, err := json.Marshal(body)
+	html := markdownToAsanaHTML(body)
+	htmlJSON, err := json.Marshal(html)
 	if err != nil {
 		return fmt.Errorf("failed to marshal comment body: %w", err)
 	}
-	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
+	reqBody := fmt.Sprintf(`{"data":{"html_text":%s}}`, htmlJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPost, storiesURL, strings.NewReader(reqBody),
 		"Bearer "+pat, http.StatusCreated, "", "Asana", nil)
@@ -666,11 +667,12 @@ func (p *AsanaProvider) UpdateComment(ctx context.Context, repoPath string, issu
 	}
 
 	storyURL := fmt.Sprintf("%s/stories/%s", p.apiBase, commentID)
-	textJSON, err := json.Marshal(body)
+	html := markdownToAsanaHTML(body)
+	htmlJSON, err := json.Marshal(html)
 	if err != nil {
 		return fmt.Errorf("failed to marshal comment body: %w", err)
 	}
-	reqBody := fmt.Sprintf(`{"data":{"text":%s}}`, textJSON)
+	reqBody := fmt.Sprintf(`{"data":{"html_text":%s}}`, htmlJSON)
 
 	return apiRequest(ctx, p.httpClient, http.MethodPut, storyURL, strings.NewReader(reqBody),
 		"Bearer "+pat, http.StatusOK, "", "Asana", nil)
