@@ -23,6 +23,47 @@ func TestFormatUnqueuedComment_Linear(t *testing.T) {
 	}
 }
 
+func TestFormatUnqueuedCommentWithSuffix_GitHub(t *testing.T) {
+	tests := []struct {
+		suffix   string
+		reason   string
+		expected string
+	}{
+		{"success", "Work completed.", "<!-- erg:unqueued:success -->\nWork completed."},
+		{"failed", "CI unfixable.", "<!-- erg:unqueued:failed -->\nCI unfixable."},
+		{"no_changes", "No changes needed.", "<!-- erg:unqueued:no_changes -->\nNo changes needed."},
+		{"", "Legacy format.", "<!-- erg:unqueued -->\nLegacy format."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.suffix, func(t *testing.T) {
+			body := FormatUnqueuedCommentWithSuffix(SourceGitHub, tt.reason, tt.suffix)
+			if body != tt.expected {
+				t.Errorf("got %q, want %q", body, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatUnqueuedCommentWithSuffix_Asana(t *testing.T) {
+	tests := []struct {
+		suffix   string
+		reason   string
+		expected string
+	}{
+		{"success", "Done.", "[erg:unqueued:success] Done."},
+		{"failed", "Failed.", "[erg:unqueued:failed] Failed."},
+		{"", "Legacy.", "[erg:unqueued] Legacy."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.suffix, func(t *testing.T) {
+			body := FormatUnqueuedCommentWithSuffix(SourceAsana, tt.reason, tt.suffix)
+			if body != tt.expected {
+				t.Errorf("got %q, want %q", body, tt.expected)
+			}
+		})
+	}
+}
+
 func TestHasUnqueuedMarker(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -42,16 +83,44 @@ func TestHasUnqueuedMarker(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "github marker",
+			name: "legacy github marker",
 			comments: []IssueComment{
 				{Body: "<!-- erg:unqueued -->\nPR already merged."},
 			},
 			want: true,
 		},
 		{
-			name: "visible marker",
+			name: "legacy visible marker",
 			comments: []IssueComment{
 				{Body: "[erg:unqueued] No changes made."},
+			},
+			want: true,
+		},
+		{
+			name: "suffixed github marker success",
+			comments: []IssueComment{
+				{Body: "<!-- erg:unqueued:success -->\nWork completed."},
+			},
+			want: true,
+		},
+		{
+			name: "suffixed github marker failed",
+			comments: []IssueComment{
+				{Body: "<!-- erg:unqueued:failed -->\nCI unfixable."},
+			},
+			want: true,
+		},
+		{
+			name: "suffixed visible marker success",
+			comments: []IssueComment{
+				{Body: "[erg:unqueued:success] Done."},
+			},
+			want: true,
+		},
+		{
+			name: "suffixed visible marker failed",
+			comments: []IssueComment{
+				{Body: "[erg:unqueued:failed] Failed."},
 			},
 			want: true,
 		},
@@ -59,7 +128,7 @@ func TestHasUnqueuedMarker(t *testing.T) {
 			name: "marker among other comments",
 			comments: []IssueComment{
 				{Body: "Some earlier comment"},
-				{Body: "<!-- erg:unqueued -->\nDone."},
+				{Body: "<!-- erg:unqueued:success -->\nDone."},
 				{Body: "A later comment"},
 			},
 			want: true,
