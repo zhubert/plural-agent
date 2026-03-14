@@ -3819,6 +3819,244 @@ func TestUnqueueIssue_NoRepoPath(t *testing.T) {
 	}
 }
 
+// --- postTerminalMarker tests ---
+
+// TestPostTerminalMarker_Success verifies that postTerminalMarker posts a
+// comment with the success suffix when the work item completes successfully.
+func TestPostTerminalMarker_Success(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-gh-10",
+		IssueRef:  config.IssueRef{Source: "github", ID: "10"},
+		SessionID: "sess-1",
+	}
+	d.state.AddWorkItem(item)
+
+	d.postTerminalMarker(context.Background(), item.ID, true)
+
+	// Verify a comment with the success marker was posted.
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(provider.comments))
+	}
+	body := provider.comments[0].body
+	if !strings.Contains(body, "<!-- erg:unqueued:success -->") {
+		t.Errorf("comment body missing success marker, got: %s", body)
+	}
+	if !strings.Contains(body, "Work completed successfully") {
+		t.Errorf("comment body missing success reason, got: %s", body)
+	}
+
+	// Verify guard flag was set.
+	updated, _ := d.state.GetWorkItem(item.ID)
+	if posted, _ := updated.StepData["_unqueued_posted"].(bool); !posted {
+		t.Error("expected _unqueued_posted to be true")
+	}
+}
+
+// TestPostTerminalMarker_Failed verifies that postTerminalMarker posts a
+// comment with the failed suffix when the work item fails.
+func TestPostTerminalMarker_Failed(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-gh-11",
+		IssueRef:  config.IssueRef{Source: "github", ID: "11"},
+		SessionID: "sess-1",
+	}
+	d.state.AddWorkItem(item)
+	d.state.SetErrorMessage(item.ID, "CI fix exhausted after 3 rounds")
+
+	d.postTerminalMarker(context.Background(), item.ID, false)
+
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(provider.comments))
+	}
+	body := provider.comments[0].body
+	if !strings.Contains(body, "<!-- erg:unqueued:failed -->") {
+		t.Errorf("comment body missing failed marker, got: %s", body)
+	}
+	if !strings.Contains(body, "CI fix exhausted") {
+		t.Errorf("comment body should include error message, got: %s", body)
+	}
+}
+
+// TestPostTerminalMarker_TruncatesLongError verifies that very long error
+// messages are truncated in the public comment to avoid leaking noisy details.
+func TestPostTerminalMarker_TruncatesLongError(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-gh-15",
+		IssueRef:  config.IssueRef{Source: "github", ID: "15"},
+		SessionID: "sess-1",
+	}
+	d.state.AddWorkItem(item)
+
+	// Set a very long error message (> 200 chars).
+	longErr := strings.Repeat("x", 300)
+	d.state.SetErrorMessage(item.ID, longErr)
+
+	d.postTerminalMarker(context.Background(), item.ID, false)
+
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(provider.comments))
+	}
+	body := provider.comments[0].body
+	if strings.Contains(body, longErr) {
+		t.Error("full long error message should NOT appear in comment")
+	}
+	if !strings.Contains(body, "...") {
+		t.Error("truncated error should end with '...'")
+	}
+	// The reason should be "Work item failed: " (18 chars) + 200 chars + "..." = 221 chars max
+	if len(body) > 500 {
+		t.Errorf("comment body is too long: %d chars", len(body))
+	}
+}
+
+// TestPostTerminalMarker_SkipsWhenAlreadyPosted verifies that postTerminalMarker
+// is a no-op when the _unqueued_posted guard flag is already set.
+func TestPostTerminalMarker_SkipsWhenAlreadyPosted(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-gh-12",
+		IssueRef:  config.IssueRef{Source: "github", ID: "12"},
+		SessionID: "sess-1",
+		StepData:  map[string]any{"_unqueued_posted": true},
+	}
+	d.state.AddWorkItem(item)
+
+	d.postTerminalMarker(context.Background(), item.ID, true)
+
+	// Should not have posted any comment.
+	if len(provider.comments) != 0 {
+		t.Errorf("expected 0 comments (guard flag set), got %d", len(provider.comments))
+	}
+}
+
+// TestPostTerminalMarker_NoRepoPath verifies that postTerminalMarker is a
+// no-op when the repo path cannot be resolved, and that it does NOT set the
+// guard flag so a later retry can succeed.
+func TestPostTerminalMarker_NoRepoPath(t *testing.T) {
+	cfg := testConfig()
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	// No repoFilter, no sessions — resolveRepoPath returns ""
+
+	item := &daemonstate.WorkItem{
+		ID:       "item-gh-13",
+		IssueRef: config.IssueRef{Source: "github", ID: "13"},
+	}
+	d.state.AddWorkItem(item)
+
+	d.postTerminalMarker(context.Background(), item.ID, true)
+
+	// Should not have posted any comment.
+	if len(provider.comments) != 0 {
+		t.Errorf("expected 0 comments (no repo path), got %d", len(provider.comments))
+	}
+
+	// Guard flag should NOT be set — the comment was never attempted, so a
+	// later call with a valid repo path should be able to post.
+	updated, _ := d.state.GetWorkItem(item.ID)
+	if posted, _ := updated.StepData["_unqueued_posted"].(bool); posted {
+		t.Error("expected _unqueued_posted to be false when repo path is unresolvable")
+	}
+}
+
+// TestUnqueueIssueWithSuffix_GitHub verifies that unqueueIssueWithSuffix posts
+// a comment with the suffixed marker format.
+func TestUnqueueIssueWithSuffix_GitHub(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	provider := &mockCommentProvider{src: issues.SourceGitHub}
+	registry := issues.NewProviderRegistry(provider)
+
+	mockExec := exec.NewMockExecutor(nil)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.issueRegistry = registry
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	item := &daemonstate.WorkItem{
+		ID:        "item-gh-14",
+		IssueRef:  config.IssueRef{Source: "github", ID: "14"},
+		SessionID: "sess-1",
+	}
+	d.state.AddWorkItem(item)
+
+	d.unqueueIssueWithSuffix(context.Background(), *item, "No changes needed.", "no_changes")
+
+	if len(provider.comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(provider.comments))
+	}
+	body := provider.comments[0].body
+	if !strings.Contains(body, "<!-- erg:unqueued:no_changes -->") {
+		t.Errorf("comment body missing suffixed marker, got: %s", body)
+	}
+	if !strings.Contains(body, "No changes needed.") {
+		t.Errorf("comment body missing reason, got: %s", body)
+	}
+}
+
 // --- rebaseAction tests ---
 
 func TestRebaseAction_Execute_WorkItemNotFound(t *testing.T) {

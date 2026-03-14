@@ -326,7 +326,13 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 			"PR #%d has already been merged. Removing from the queue.",
 			pr.Number,
 		)
-		d.unqueueIssue(ctx, *item, comment)
+		d.unqueueIssueWithSuffix(ctx, *item, comment, "success")
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			if it.StepData == nil {
+				it.StepData = make(map[string]any)
+			}
+			it.StepData["_unqueued_posted"] = true
+		})
 		if err := d.state.MarkWorkItemTerminal(item.ID, true); err != nil {
 			log.Debug("failed to mark pre-flight item terminal", "error", err)
 		}
@@ -366,7 +372,13 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	})
 	if recoveryStep == "" {
 		log.Warn("no wait state found in workflow, cannot adopt PR")
-		d.unqueueIssue(ctx, *item, "Cannot adopt PR: no matching wait state found in workflow configuration. Please check your workflow definition.")
+		d.unqueueIssueWithSuffix(ctx, *item, "Cannot adopt PR: no matching wait state found in workflow configuration. Please check your workflow definition.", "failed")
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			if it.StepData == nil {
+				it.StepData = make(map[string]any)
+			}
+			it.StepData["_unqueued_posted"] = true
+		})
 		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
 			log.Debug("failed to mark work item terminal after adoption failure", "error", err)
 		}
@@ -459,7 +471,13 @@ func (d *Daemon) reconcileClosedIssues(ctx context.Context) {
 		}
 
 		// Comment on the issue about cancellation (label stays as AI-assisted marker)
-		d.unqueueIssue(ctx, item, "Issue was closed externally. Cancelling work.")
+		d.unqueueIssueWithSuffix(ctx, item, "Issue was closed externally. Cancelling work.", "closed_externally")
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			if it.StepData == nil {
+				it.StepData = make(map[string]any)
+			}
+			it.StepData["_unqueued_posted"] = true
+		})
 
 		// Mark terminal
 		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
@@ -493,7 +511,13 @@ func (d *Daemon) reconcileClosedIssues(ctx context.Context) {
 		log.Info("queued issue closed externally, removing",
 			"workItem", item.ID, "issue", item.IssueRef.ID)
 
-		d.unqueueIssue(ctx, item, "Issue was closed externally. Removing from queue.")
+		d.unqueueIssueWithSuffix(ctx, item, "Issue was closed externally. Removing from queue.", "closed_externally")
+		d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+			if it.StepData == nil {
+				it.StepData = make(map[string]any)
+			}
+			it.StepData["_unqueued_posted"] = true
+		})
 
 		if err := d.state.MarkWorkItemTerminal(item.ID, false); err != nil {
 			log.Debug("failed to mark queued item terminal", "workItem", item.ID, "error", err)

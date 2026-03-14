@@ -117,6 +117,7 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 			d.runHooks(ctx, state.After, item, sess)
 		}
 		d.state.AdvanceWorkItem(item.ID, "done", "idle", stepDisplayName(engine, "done"))
+		d.postTerminalMarker(ctx, item.ID, true)
 		d.state.MarkWorkItemTerminal(item.ID, true)
 
 		mergeState := engine.GetState("merge")
@@ -242,6 +243,7 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 	if err != nil {
 		log.Error("failed to advance after async", "error", err)
 		d.state.SetErrorMessage(item.ID, err.Error())
+		d.postTerminalMarker(ctx, item.ID, false)
 		d.state.MarkWorkItemTerminal(item.ID, false)
 		return
 	}
@@ -253,6 +255,7 @@ func (d *Daemon) handleAsyncComplete(ctx context.Context, item daemonstate.WorkI
 
 	if result.Terminal {
 		d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase, stepDisplayName(engine, result.NewStep))
+		d.postTerminalMarker(ctx, item.ID, result.TerminalOK)
 		d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 		return
 	}
@@ -304,6 +307,7 @@ func (d *Daemon) executeSyncChain(ctx context.Context, itemID string, engine *wo
 						continue // follow error edge
 					}
 					d.state.SetErrorMessage(item.ID, err.Error())
+					d.postTerminalMarker(ctx, item.ID, false)
 					d.state.MarkWorkItemTerminal(item.ID, false)
 					return
 				}
@@ -315,12 +319,14 @@ func (d *Daemon) executeSyncChain(ctx context.Context, itemID string, engine *wo
 		if err != nil {
 			d.logger.Error("sync chain error", "workItem", item.ID, "step", item.CurrentStep, "error", err)
 			d.state.SetErrorMessage(item.ID, err.Error())
+			d.postTerminalMarker(ctx, item.ID, false)
 			d.state.MarkWorkItemTerminal(item.ID, false)
 			return
 		}
 
 		if result.Terminal {
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase, stepDisplayName(engine, result.NewStep))
+			d.postTerminalMarker(ctx, item.ID, result.TerminalOK)
 			d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 			if !result.TerminalOK {
 				errMsg := ""
@@ -392,6 +398,7 @@ func (d *Daemon) handleFeedbackComplete(ctx context.Context, item daemonstate.Wo
 	if err := d.pushChanges(ctx, item); err != nil {
 		log.Error("failed to push changes", "error", err)
 		d.state.SetErrorMessage(item.ID, fmt.Sprintf("push failed: %v", err))
+		d.postTerminalMarker(ctx, item.ID, false)
 		d.state.MarkWorkItemTerminal(item.ID, false)
 		return
 	}
@@ -486,6 +493,7 @@ func (d *Daemon) processWaitItems(ctx context.Context) {
 			}
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase, stepDisplayName(engine, result.NewStep))
 			if result.Terminal {
+				d.postTerminalMarker(ctx, item.ID, result.TerminalOK)
 				d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 			} else {
 				// Continue sync chain if next is a sync task
@@ -542,6 +550,7 @@ func (d *Daemon) processCIItems(ctx context.Context) {
 			}
 			d.state.AdvanceWorkItem(item.ID, result.NewStep, result.NewPhase, stepDisplayName(engine, result.NewStep))
 			if result.Terminal {
+				d.postTerminalMarker(ctx, item.ID, result.TerminalOK)
 				d.state.MarkWorkItemTerminal(item.ID, result.TerminalOK)
 			} else {
 				d.executeSyncChain(ctx, item.ID, engine)

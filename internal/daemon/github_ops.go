@@ -590,6 +590,13 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 // do not block the workflow from advancing. Also cleans up any claim comments
 // posted by this daemon.
 func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, reason string) {
+	d.unqueueIssueWithSuffix(ctx, item, reason, "")
+}
+
+// unqueueIssueWithSuffix is like unqueueIssue but embeds a machine-readable
+// suffix in the marker (e.g. "success", "failed", "no_changes"). An empty
+// suffix produces the legacy marker format.
+func (d *Daemon) unqueueIssueWithSuffix(ctx context.Context, item daemonstate.WorkItem, reason, suffix string) {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
 	repoPath := d.resolveRepoPath(ctx, item)
@@ -605,7 +612,7 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 	src := issues.Source(item.IssueRef.Source)
 	p := d.issueRegistry.GetProvider(src)
 	if pa, ok := p.(issues.ProviderActions); ok {
-		body := issues.FormatUnqueuedComment(src, reason)
+		body := issues.FormatUnqueuedCommentWithSuffix(src, reason, suffix)
 		if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, body); err != nil {
 			log.Debug("failed to comment during unqueue", "error", err)
 		}
@@ -617,10 +624,10 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 	d.deleteClaimForIssue(opCtx, repoPath, src, item.IssueRef.ID)
 }
 
-// closeIssueGracefully closes the issue with an explanatory comment. The label
-// is kept as a permanent marker so humans can always identify AI-assisted issues.
-// All operations are best-effort — failures are logged but do not block the
-// workflow from advancing.
+// closeIssueGracefully closes the issue with an explanatory comment containing
+// the unqueued marker. The label is kept as a permanent marker so humans can
+// always identify AI-assisted issues. All operations are best-effort — failures
+// are logged but do not block the workflow from advancing.
 func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.WorkItem) {
 	repoPath := d.resolveRepoPath(ctx, item)
 	if repoPath == "" {
@@ -629,22 +636,33 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
-	comment := "Closing this issue — no work was needed (the branch already has a merged PR or the coding session made no changes)."
+	reason := "Closing this issue — no work was needed (the branch already has a merged PR or the coding session made no changes)."
 
 	opCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
-	// Try the provider registry first (works for GitHub, Asana, and Linear).
+	// Post comment with unqueued marker so the poller won't rediscover this
+	// issue after terminal work items are pruned.
 	src := issues.Source(item.IssueRef.Source)
 	if d.issueRegistry != nil {
 		if p := d.issueRegistry.GetProvider(src); p != nil {
 			if pa, ok := p.(issues.ProviderActions); ok {
-				if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, comment); err != nil {
+				body := issues.FormatUnqueuedCommentWithSuffix(src, reason, "success")
+				if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, body); err != nil {
 					log.Debug("failed to comment during graceful close", "error", err)
 				}
 			}
 		}
 	}
+
+	// Mark that the unqueued comment was posted so postTerminalMarker won't
+	// double-post.
+	d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+		if it.StepData == nil {
+			it.StepData = make(map[string]any)
+		}
+		it.StepData["_unqueued_posted"] = true
+	})
 
 	// Close the issue (currently only supported for GitHub)
 	if src == issues.SourceGitHub {
@@ -655,6 +673,75 @@ func (d *Daemon) closeIssueGracefully(ctx context.Context, item daemonstate.Work
 
 	// Clean up claim comments posted by this daemon.
 	d.deleteClaimForIssue(opCtx, repoPath, src, item.IssueRef.ID)
+}
+
+// maxTerminalReasonLen caps the length of error details included in the
+// unqueued marker comment to avoid leaking noisy or sensitive operational
+// details (paths, command output, etc.) into public issue comments.
+const maxTerminalReasonLen = 200
+
+// postTerminalMarker posts an unqueued marker comment on the issue when a work
+// item reaches a terminal state (success or failure). This is the durable guard
+// that prevents re-polling after PruneTerminalItems cleans up old work items.
+//
+// The method is idempotent: an atomic check-and-set on the _unqueued_posted
+// flag in StepData ensures at most one comment is posted, even if multiple
+// callers race on the same work item. If the comment cannot be attempted
+// (e.g. repo path unresolvable), the flag is NOT set so a later retry can
+// succeed.
+//
+// All operations are best-effort — failures are logged but do not block the
+// workflow from advancing.
+func (d *Daemon) postTerminalMarker(ctx context.Context, itemID string, success bool) {
+	// Atomic check-and-set: claim the right to post under the state lock.
+	// If another caller already set the flag we return immediately.
+	alreadyPosted := false
+	d.state.UpdateWorkItem(itemID, func(it *daemonstate.WorkItem) {
+		if it.StepData == nil {
+			it.StepData = make(map[string]any)
+		}
+		if posted, _ := it.StepData["_unqueued_posted"].(bool); posted {
+			alreadyPosted = true
+			return
+		}
+		// Tentatively claim — cleared below if the comment can't be attempted.
+		it.StepData["_unqueued_posted"] = true
+	})
+	if alreadyPosted {
+		return
+	}
+
+	item, ok := d.state.GetWorkItem(itemID)
+	if !ok {
+		return
+	}
+
+	// Verify the comment can actually be attempted (repo path resolvable).
+	// If not, clear the flag so a future call can retry.
+	repoPath := d.resolveRepoPath(ctx, item)
+	if repoPath == "" {
+		d.state.UpdateWorkItem(itemID, func(it *daemonstate.WorkItem) {
+			delete(it.StepData, "_unqueued_posted")
+		})
+		return
+	}
+
+	// Determine suffix and reason.
+	suffix := "failed"
+	reason := "Work item failed."
+	if success {
+		suffix = "success"
+		reason = "Work completed successfully — PR merged."
+	}
+	if item.ErrorMessage != "" && !success {
+		errMsg := item.ErrorMessage
+		if len(errMsg) > maxTerminalReasonLen {
+			errMsg = errMsg[:maxTerminalReasonLen] + "..."
+		}
+		reason = "Work item failed: " + errMsg
+	}
+
+	d.unqueueIssueWithSuffix(ctx, item, reason, suffix)
 }
 
 // requestReview requests a review on the PR for a work item.

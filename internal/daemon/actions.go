@@ -178,7 +178,13 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 		if errors.Is(err, errNoChanges) {
 			// Coding session made no changes — comment and mark done,
 			// but leave the issue open for humans to investigate.
-			d.unqueueIssue(ctx, item, "The coding session made no changes. The issue remains open for manual investigation.")
+			d.unqueueIssueWithSuffix(ctx, item, "The coding session made no changes. The issue remains open for manual investigation.", "no_changes")
+			d.state.UpdateWorkItem(item.ID, func(it *daemonstate.WorkItem) {
+				if it.StepData == nil {
+					it.StepData = make(map[string]any)
+				}
+				it.StepData["_unqueued_posted"] = true
+			})
 			return workflow.ActionResult{Success: true, OverrideNext: "done"}
 		}
 		return workflow.ActionResult{Error: fmt.Errorf("PR creation failed: %w", err)}
