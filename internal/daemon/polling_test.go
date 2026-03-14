@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -818,12 +819,17 @@ func TestCheckLinkedPRsAndUnqueue_OpenPR_AdoptsWhenClaimedBySelf(t *testing.T) {
 	})
 
 	// Claim from this daemon — should NOT block adoption.
+	// claimIdentity() returns stateKey()+"@"+hostname, so the mock must match.
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
 	mockClaim := &mockClaimProvider{
 		claims: []issues.ClaimInfo{
 			{
 				CommentID: "our-claim",
-				DaemonID:  "test-daemon-1",
-				Hostname:  "this-host",
+				DaemonID:  "test-daemon-1@" + hostname,
+				Hostname:  hostname,
 				Timestamp: time.Now().Add(-5 * time.Minute),
 				Expires:   time.Now().Add(55 * time.Minute),
 			},

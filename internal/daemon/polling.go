@@ -101,16 +101,9 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 				continue
 			}
 
-			// Pre-flight: for GitHub issues, check if an open/merged PR already
-			// addresses this issue. If so, unqueue it without spawning a session.
-			if provider == issues.SourceGitHub {
-				if skip := d.checkLinkedPRsAndUnqueue(pollCtx, repoPath, issue); skip {
-					continue
-				}
-			}
-
 			// Attempt to claim the issue (multi-daemon coordination).
-			// If another daemon has already claimed it, skip.
+			// Must happen before pre-flight PR checks so that adopting an
+			// existing PR is also coordinated across daemons.
 			won, claimErr := d.tryClaim(pollCtx, repoPath, issue, provider)
 			if claimErr != nil {
 				log.Debug("claim attempt failed", "issue", issue.ID, "error", claimErr)
@@ -119,6 +112,15 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 			if !won {
 				log.Debug("issue claimed by another daemon, skipping", "issue", issue.ID)
 				continue
+			}
+
+			// Pre-flight: for GitHub issues, check if an open/merged PR already
+			// addresses this issue. If so, unqueue it without spawning a session.
+			// This runs after claiming so the unqueue path can clean up our claim.
+			if provider == issues.SourceGitHub {
+				if skip := d.checkLinkedPRsAndUnqueue(pollCtx, repoPath, issue); skip {
+					continue
+				}
 			}
 
 			item := &daemonstate.WorkItem{

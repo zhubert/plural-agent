@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -375,13 +376,29 @@ func (d *Daemon) getAutoAddressPRComments() bool {
 	return d.autoAddressPRComments || d.config.GetAutoAddressPRComments()
 }
 
-// stateKey returns the key used for lock and state file paths.
-// In multi-repo mode this is the daemonID; otherwise it's the repoFilter.
+// stateKey returns the stable key used for daemon lock files and persisted state.
+// In multi-repo mode this is the daemonID (manifest hash).
+// In single-repo mode this is the repoFilter.
+// This key must NOT include hostname so that lock/state file identities remain
+// stable across upgrades and restarts on the same machine.
 func (d *Daemon) stateKey() string {
 	if d.daemonID != "" {
 		return d.daemonID
 	}
 	return d.repoFilter
+}
+
+// claimIdentity returns the key used to identify this daemon in the comment-based
+// claim coordination protocol. It includes the hostname so that two daemons on
+// different machines targeting the same repo produce distinct identities,
+// preventing them from treating each other's claims as their own.
+func (d *Daemon) claimIdentity() string {
+	base := d.stateKey()
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "unknown"
+	}
+	return base + "@" + hostname
 }
 
 // resolveAndSaveRepoLabels resolves owner/repo display labels for all repos this daemon

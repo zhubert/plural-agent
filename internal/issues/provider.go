@@ -172,11 +172,12 @@ type IssueStateChecker interface {
 // ClaimInfo represents a daemon's claim on an issue. Used by the claiming
 // protocol to coordinate work across multiple daemon instances.
 type ClaimInfo struct {
-	CommentID string    // Provider-specific comment ID (for deletion)
-	DaemonID  string    // ID of the daemon that posted the claim
-	Hostname  string    // Hostname of the claiming machine
-	Timestamp time.Time // When the claim was posted
-	Expires   time.Time // When the claim expires (stale after this)
+	CommentID       string    // Provider-specific comment ID (for deletion)
+	DaemonID        string    // ID of the daemon that posted the claim
+	Hostname        string    // Hostname of the claiming machine
+	Timestamp       time.Time // When the claim was posted (self-reported by daemon)
+	Expires         time.Time // When the claim expires (stale after this)
+	ServerTimestamp time.Time // When the comment was created per the provider API (immune to clock skew)
 }
 
 // ProviderClaimManager extends Provider with the ability to post, read, and

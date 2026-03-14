@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -30,11 +31,10 @@ const (
 //  4. Re-read all claims and verify ours is the earliest non-expired claim.
 //  5. If we lost, delete our claim comment and back off.
 //
-// Error handling is asymmetric by design:
-//   - Step 1 fails open (proceed without claiming) because no claim was posted yet.
-//   - Step 4 fails closed (delete our claim and skip) because we already posted
-//     a claim and can't verify we won — deleting avoids the risk of two daemons
-//     both thinking they won due to inconsistent reads.
+// Error handling: all steps fail closed to prevent duplicate work.
+//   - Step 1: if we can't read claims, skip (retry next poll).
+//   - Step 2: if we can't post a claim, skip (retry next poll).
+//   - Step 4: if we can't verify, delete our claim and skip.
 func (d *Daemon) tryClaim(ctx context.Context, repoPath string, issue issues.Issue, provider issues.Source) (bool, error) {
 	cm := d.getClaimManager(provider)
 	if cm == nil {
@@ -44,15 +44,16 @@ func (d *Daemon) tryClaim(ctx context.Context, repoPath string, issue issues.Iss
 	log := d.logger.With("component", "claim", "issue", issue.ID, "provider", string(provider))
 
 	// 1. Check for existing non-expired claims.
-	// Fails open: no claim posted yet, so proceeding is safe.
+	// Fails closed: if we can't read claims, we can't verify exclusivity,
+	// so skip this issue and retry on the next poll.
 	existingClaims, err := cm.GetClaims(ctx, repoPath, issue.ID)
 	if err != nil {
-		log.Warn("failed to read claims, proceeding without claim", "error", err)
-		return true, nil
+		log.Warn("failed to read claims, skipping issue", "error", err)
+		return false, fmt.Errorf("GetClaims: %w", err)
 	}
 
 	now := time.Now()
-	daemonKey := d.stateKey()
+	daemonKey := d.claimIdentity()
 
 	for _, claim := range existingClaims {
 		if claim.DaemonID == daemonKey {
@@ -70,7 +71,9 @@ func (d *Daemon) tryClaim(ctx context.Context, repoPath string, issue issues.Iss
 			log.Debug("issue claimed by another daemon", "claimedBy", claim.DaemonID, "expires", claim.Expires)
 			return false, nil
 		}
-		// Expired claim from another daemon — ignore it
+		// Expired claim from another daemon — clean it up
+		log.Debug("cleaning up expired claim from other daemon", "claimedBy", claim.DaemonID)
+		_ = cm.DeleteClaim(ctx, repoPath, issue.ID, claim.CommentID)
 	}
 
 	// 2. Post our claim
@@ -87,8 +90,8 @@ func (d *Daemon) tryClaim(ctx context.Context, repoPath string, issue issues.Iss
 
 	commentID, err := cm.PostClaim(ctx, repoPath, issue.ID, claim)
 	if err != nil {
-		log.Warn("failed to post claim, proceeding without", "error", err)
-		return true, nil
+		log.Warn("failed to post claim, skipping issue", "error", err)
+		return false, fmt.Errorf("PostClaim: %w", err)
 	}
 
 	// 3. Wait for API consistency
@@ -110,15 +113,17 @@ func (d *Daemon) tryClaim(ctx context.Context, repoPath string, issue issues.Iss
 	if err != nil {
 		log.Warn("failed to verify claim, deleting and skipping", "error", err)
 		_ = cm.DeleteClaim(ctx, repoPath, issue.ID, commentID)
-		return false, nil
+		return false, fmt.Errorf("GetClaims (verify): %w", err)
 	}
 
-	// Find earliest non-expired claim
+	// Find earliest non-expired claim. Prefer server-side timestamps
+	// (from the provider API) over self-reported timestamps to avoid
+	// clock-skew issues between machines.
 	var earliest *issues.ClaimInfo
 	for i := range allClaims {
 		c := &allClaims[i]
 		if now.Before(c.Expires) {
-			if earliest == nil || c.Timestamp.Before(earliest.Timestamp) {
+			if earliest == nil || claimIsBefore(c, earliest) {
 				earliest = c
 			}
 		}
@@ -154,7 +159,7 @@ func (d *Daemon) isClaimedByOther(ctx context.Context, repoPath string, issue is
 	}
 
 	now := time.Now()
-	daemonKey := d.stateKey()
+	daemonKey := d.claimIdentity()
 
 	for _, claim := range claims {
 		if claim.DaemonID != daemonKey && now.Before(claim.Expires) {
@@ -178,12 +183,27 @@ func (d *Daemon) deleteClaimForIssue(ctx context.Context, repoPath string, issue
 		return
 	}
 
-	daemonKey := d.stateKey()
+	daemonKey := d.claimIdentity()
 	for _, claim := range claims {
 		if claim.DaemonID == daemonKey {
 			_ = cm.DeleteClaim(ctx, repoPath, issueID, claim.CommentID)
 		}
 	}
+}
+
+// claimIsBefore returns true if claim a was created before claim b.
+// Prefers server-side timestamps (from the provider API's created_at)
+// over self-reported timestamps to avoid clock-skew between machines.
+func claimIsBefore(a, b *issues.ClaimInfo) bool {
+	aTS := a.Timestamp
+	bTS := b.Timestamp
+	if !a.ServerTimestamp.IsZero() {
+		aTS = a.ServerTimestamp
+	}
+	if !b.ServerTimestamp.IsZero() {
+		bTS = b.ServerTimestamp
+	}
+	return aTS.Before(bTS)
 }
 
 // getClaimManager returns the ProviderClaimManager for the given source, or nil

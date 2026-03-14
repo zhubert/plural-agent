@@ -85,8 +85,15 @@ func (d *Daemon) rebuildStateFromTracker(ctx context.Context) {
 				continue
 			}
 
-			// Skip issues claimed by another daemon (multi-daemon coordination).
-			if d.isClaimedByOther(rebuildCtx, repoPath, issue, provider) {
+			// Claim the issue before rebuilding (multi-daemon coordination).
+			// Unlike isClaimedByOther, tryClaim posts a claim so other daemons
+			// can see that this daemon is tracking the issue after restart.
+			won, claimErr := d.tryClaim(rebuildCtx, repoPath, issue, provider)
+			if claimErr != nil {
+				log.Debug("claim attempt failed during rebuild", "issue", issue.ID, "error", claimErr)
+				continue
+			}
+			if !won {
 				log.Debug("issue claimed by another daemon during rebuild, skipping", "issue", issue.ID)
 				continue
 			}
