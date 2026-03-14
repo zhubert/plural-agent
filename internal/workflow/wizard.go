@@ -134,7 +134,7 @@ func GenerateWizardYAML(cfg WizardConfig) string {
 	fmt.Fprintf(&b, "  provider: %s\n", cfg.Provider)
 	b.WriteString("  filter:\n")
 	// Label is always emitted — it's the permanent AI-assisted marker.
-	fmt.Fprintf(&b, "    label: %s\n", cfg.Label)
+	fmt.Fprintf(&b, "    label: %q\n", cfg.Label)
 	switch cfg.Provider {
 	case "asana":
 		fmt.Fprintf(&b, "    project: %q\n", cfg.Project)

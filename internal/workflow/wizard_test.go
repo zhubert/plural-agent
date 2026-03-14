@@ -52,8 +52,8 @@ func TestGenerateWizardYAML_GitHub_Defaults(t *testing.T) {
 	if !strings.Contains(out, "provider: github") {
 		t.Errorf("expected provider: github, got:\n%s", out)
 	}
-	if !strings.Contains(out, "label: ai-assisted") {
-		t.Errorf("expected label: ai-assisted, got:\n%s", out)
+	if !strings.Contains(out, `label: "ai-assisted"`) {
+		t.Errorf("expected label: \"ai-assisted\", got:\n%s", out)
 	}
 	if !strings.Contains(out, "use: builtin:code") {
 		t.Errorf("expected builtin:code template, got:\n%s", out)
@@ -281,8 +281,8 @@ func TestGenerateWizardYAML_Asana_Defaults(t *testing.T) {
 	if !strings.Contains(out, `project: "1234567890"`) {
 		t.Errorf("expected project GID, got:\n%s", out)
 	}
-	if !strings.Contains(out, "label: ai-assisted") {
-		t.Errorf("expected label: ai-assisted, got:\n%s", out)
+	if !strings.Contains(out, `label: "ai-assisted"`) {
+		t.Errorf("expected label: \"ai-assisted\", got:\n%s", out)
 	}
 	// No completion section set → no move_complete state
 	if strings.Contains(out, "move_complete") {
@@ -677,7 +677,7 @@ func TestGenerateWizardYAML_Asana_Kanban(t *testing.T) {
 	}
 
 	// Source filter should have both label and section
-	if !strings.Contains(out, "    label: ai-assisted") {
+	if !strings.Contains(out, `    label: "ai-assisted"`) {
 		t.Errorf("kanban Asana should have label in source filter, got:\n%s", out)
 	}
 	if !strings.Contains(out, `section: "To do"`) {
@@ -768,7 +768,7 @@ func TestGenerateWizardYAML_Linear_Kanban(t *testing.T) {
 	}
 
 	// Should still have label in source (Linear has no state-based source)
-	if !strings.Contains(out, "label: ai-assisted") {
+	if !strings.Contains(out, `label: "ai-assisted"`) {
 		t.Errorf("expected label in Linear kanban source filter")
 	}
 
