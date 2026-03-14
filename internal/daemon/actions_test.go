@@ -3702,7 +3702,8 @@ func TestUnqueueIssue_GitHub(t *testing.T) {
 	cfg.Repos = []string{"/test/repo"}
 	mockExec := exec.NewMockExecutor(nil)
 
-	// Mock comment — success response.
+	// Mock label removal and comment — success responses.
+	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
 	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -3729,13 +3730,17 @@ func TestUnqueueIssue_GitHub(t *testing.T) {
 
 	calls := mockExec.GetCalls()
 
-	// Verify label was NOT removed — label stays as permanent AI-assisted marker.
+	// Verify label was removed so the poller doesn't rediscover this issue.
+	foundRemoveLabel := false
 	for _, c := range calls {
 		if c.Name == "gh" && len(c.Args) >= 3 && c.Args[0] == "issue" && c.Args[1] == "edit" {
 			if slices.Contains(c.Args, "--remove-label") {
-				t.Error("gh issue edit --remove-label should NOT be called — label is permanent")
+				foundRemoveLabel = true
 			}
 		}
+	}
+	if !foundRemoveLabel {
+		t.Error("expected gh issue edit --remove-label to be called")
 	}
 
 	// Verify Comment was called (gh issue comment).

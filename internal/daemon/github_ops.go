@@ -582,11 +582,12 @@ func (d *Daemon) closeIssue(ctx context.Context, item daemonstate.WorkItem) erro
 	return d.gitService.CloseIssue(closeCtx, repoPath, item.IssueRef.ID)
 }
 
-// unqueueIssue leaves a comment explaining why the issue is being dequeued,
-// but does NOT close the issue or remove the label. The label is kept as a
-// permanent marker so humans can always identify AI-assisted issues.
-// All operations are best-effort — failures are logged but do not block the
-// workflow from advancing. Also cleans up any claim comments posted by this daemon.
+// unqueueIssue removes the label and leaves a comment explaining why the issue
+// is being dequeued, but does NOT close the issue. The label is removed so the
+// poller does not rediscover and re-comment on the issue after terminal work
+// items are pruned. All operations are best-effort — failures are logged but
+// do not block the workflow from advancing. Also cleans up any claim comments
+// posted by this daemon.
 func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, reason string) {
 	log := d.logger.With("workItem", item.ID, "issue", item.IssueRef.ID, "source", item.IssueRef.Source)
 
@@ -596,6 +597,8 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 		return
 	}
 
+	label := d.resolveQueueLabel(repoPath)
+
 	opCtx, cancel := context.WithTimeout(ctx, timeoutStandardOp)
 	defer cancel()
 
@@ -603,11 +606,14 @@ func (d *Daemon) unqueueIssue(ctx context.Context, item daemonstate.WorkItem, re
 	src := issues.Source(item.IssueRef.Source)
 	p := d.issueRegistry.GetProvider(src)
 	if pa, ok := p.(issues.ProviderActions); ok {
+		if err := pa.RemoveLabel(opCtx, repoPath, item.IssueRef.ID, label); err != nil {
+			log.Debug("failed to remove label during unqueue", "error", err, "label", label)
+		}
 		if err := pa.Comment(opCtx, repoPath, item.IssueRef.ID, reason); err != nil {
 			log.Debug("failed to comment during unqueue", "error", err)
 		}
 	} else {
-		log.Debug("provider does not support ProviderActions, skipping comment")
+		log.Debug("provider does not support ProviderActions, skipping label removal and comment")
 	}
 
 	// Clean up claim comments posted by this daemon.
@@ -750,6 +756,16 @@ func (d *Daemon) resolveRepoPath(ctx context.Context, item daemonstate.WorkItem)
 		return rp
 	}
 	return d.findRepoPath(ctx)
+}
+
+// resolveQueueLabel returns the configured filter label for the given repo,
+// falling back to the default label.
+func (d *Daemon) resolveQueueLabel(repoPath string) string {
+	wfCfg := d.getWorkflowConfig(repoPath)
+	if wfCfg != nil && wfCfg.Source.Filter.Label != "" {
+		return wfCfg.Source.Filter.Label
+	}
+	return autonomousFilterLabel
 }
 
 // issueFromWorkItem converts a WorkItem's issue ref to an issues.Issue.
