@@ -107,10 +107,13 @@ func parseClaimFromBody(body, commentID string) *ClaimInfo {
 
 // getClaimsFromComments extracts claim info from a list of issue comments.
 // This is the shared implementation used by all providers' GetClaims methods.
+// The provider-supplied CreatedAt timestamp is carried through as ServerTimestamp
+// so the claiming protocol can use it for ordering (immune to clock skew).
 func getClaimsFromComments(comments []IssueComment) []ClaimInfo {
 	var claims []ClaimInfo
 	for _, c := range comments {
 		if claim := parseClaimFromBody(c.Body, c.ID); claim != nil {
+			claim.ServerTimestamp = c.CreatedAt
 			claims = append(claims, *claim)
 		}
 	}

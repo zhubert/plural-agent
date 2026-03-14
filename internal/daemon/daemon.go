@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/zhubert/erg/internal/agentconfig"
 	"github.com/zhubert/erg/internal/claude"
-	"github.com/zhubert/erg/internal/dashboard"
 	"github.com/zhubert/erg/internal/daemonstate"
+	"github.com/zhubert/erg/internal/dashboard"
 	"github.com/zhubert/erg/internal/git"
 	"github.com/zhubert/erg/internal/issues"
 	"github.com/zhubert/erg/internal/manager"
@@ -375,13 +376,22 @@ func (d *Daemon) getAutoAddressPRComments() bool {
 	return d.autoAddressPRComments || d.config.GetAutoAddressPRComments()
 }
 
-// stateKey returns the key used for lock and state file paths.
-// In multi-repo mode this is the daemonID; otherwise it's the repoFilter.
+// stateKey returns the key used for claim identity in multi-daemon coordination.
+// In multi-repo mode this is the daemonID (manifest hash) plus hostname.
+// In single-repo mode this is the repoFilter plus hostname.
+// The hostname suffix ensures that two daemons on different machines targeting
+// the same repo produce distinct keys, preventing them from treating each
+// other's claims as their own.
 func (d *Daemon) stateKey() string {
+	base := d.repoFilter
 	if d.daemonID != "" {
-		return d.daemonID
+		base = d.daemonID
 	}
-	return d.repoFilter
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "unknown"
+	}
+	return base + "@" + hostname
 }
 
 // resolveAndSaveRepoLabels resolves owner/repo display labels for all repos this daemon

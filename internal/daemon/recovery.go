@@ -85,8 +85,15 @@ func (d *Daemon) rebuildStateFromTracker(ctx context.Context) {
 				continue
 			}
 
-			// Skip issues claimed by another daemon (multi-daemon coordination).
-			if d.isClaimedByOther(rebuildCtx, repoPath, issue, provider) {
+			// Claim the issue before rebuilding (multi-daemon coordination).
+			// Unlike isClaimedByOther, tryClaim posts a claim so other daemons
+			// can see that this daemon is tracking the issue after restart.
+			won, claimErr := d.tryClaim(rebuildCtx, repoPath, issue, provider)
+			if claimErr != nil {
+				log.Debug("claim attempt failed during rebuild", "issue", issue.ID, "error", claimErr)
+				continue
+			}
+			if !won {
 				log.Debug("issue claimed by another daemon during rebuild, skipping", "issue", issue.ID)
 				continue
 			}
@@ -151,7 +158,10 @@ func (d *Daemon) rebuildGitHubWorkItem(
 	issue issues.Issue,
 	engine *workflow.Engine,
 	item *daemonstate.WorkItem,
-	log interface{ Info(string, ...any); Debug(string, ...any) },
+	log interface {
+		Info(string, ...any)
+		Debug(string, ...any)
+	},
 ) *daemonstate.WorkItem {
 	issueNum, err := strconv.Atoi(issue.ID)
 	if err != nil {
@@ -245,7 +255,10 @@ func (d *Daemon) rebuildGenericWorkItem(
 	repoPath string,
 	engine *workflow.Engine,
 	item *daemonstate.WorkItem,
-	log interface{ Info(string, ...any); Debug(string, ...any) },
+	log interface {
+		Info(string, ...any)
+		Debug(string, ...any)
+	},
 ) *daemonstate.WorkItem {
 	// For non-GitHub providers without a PR concept, we can still probe
 	// wait states using event checkers (e.g., asana.in_section, linear.in_state).
@@ -289,7 +302,10 @@ func (d *Daemon) walkWorkflowForPosition(
 	repoPath string,
 	engine *workflow.Engine,
 	item *daemonstate.WorkItem,
-	log interface{ Info(string, ...any); Debug(string, ...any) },
+	log interface {
+		Info(string, ...any)
+		Debug(string, ...any)
+	},
 ) *daemonstate.WorkItem {
 	checker := newEventChecker(d)
 	waitStates := engine.GetOrderedWaitStates()
@@ -305,14 +321,14 @@ func (d *Daemon) walkWorkflowForPosition(
 	for i, ws := range waitStates {
 		// Build a probe view for this wait state
 		view := &workflow.WorkItemView{
-			ID:        item.ID,
-			SessionID: item.SessionID,
-			RepoPath:  repoPath,
-			Branch:    item.Branch,
-			PRURL:     item.PRURL,
-			CurrentStep: ws.Name,
-			Phase:       "idle",
-			StepData:    item.StepData,
+			ID:            item.ID,
+			SessionID:     item.SessionID,
+			RepoPath:      repoPath,
+			Branch:        item.Branch,
+			PRURL:         item.PRURL,
+			CurrentStep:   ws.Name,
+			Phase:         "idle",
+			StepData:      item.StepData,
 			StepEnteredAt: time.Now().Add(-1 * time.Hour), // backdate so timeouts don't fire
 		}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,16 @@ import (
 	"github.com/zhubert/erg/internal/session"
 	"github.com/zhubert/erg/internal/workflow"
 )
+
+// testDaemonKey returns the stateKey that a test daemon with the given
+// daemonID would produce. Mirrors the hostname logic in Daemon.stateKey().
+func testDaemonKey(daemonID string) string {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	return daemonID + "@" + hostname
+}
 
 // mockClaimProvider wraps GitHubProvider (via composition) to implement
 // ProviderClaimManager with controllable behavior for tests. It also satisfies
@@ -176,7 +187,7 @@ func TestTryClaim_OwnValidClaim_Wins(t *testing.T) {
 		claims: []issues.ClaimInfo{
 			{
 				CommentID: "our-old-claim",
-				DaemonID:  "test-daemon-1", // same as daemon's stateKey
+				DaemonID:  testDaemonKey("test-daemon-1"), // same as daemon's stateKey
 				Hostname:  "this-host",
 				Timestamp: time.Now().Add(-10 * time.Minute),
 				Expires:   time.Now().Add(50 * time.Minute),
@@ -204,7 +215,7 @@ func TestTryClaim_OwnExpiredClaim_ReClaims(t *testing.T) {
 		claims: []issues.ClaimInfo{
 			{
 				CommentID: "our-expired-claim",
-				DaemonID:  "test-daemon-1",
+				DaemonID:  testDaemonKey("test-daemon-1"),
 				Hostname:  "this-host",
 				Timestamp: time.Now().Add(-2 * time.Hour),
 				Expires:   time.Now().Add(-1 * time.Hour), // expired
@@ -256,7 +267,7 @@ func TestTryClaim_ProviderDoesNotSupportClaims_PassThrough(t *testing.T) {
 	}
 }
 
-func TestTryClaim_GetClaimsError_FailsOpen(t *testing.T) {
+func TestTryClaim_GetClaimsError_FailsClosed(t *testing.T) {
 	mock := &mockClaimProvider{
 		getErr: fmt.Errorf("API error"),
 	}
@@ -268,12 +279,12 @@ func TestTryClaim_GetClaimsError_FailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !won {
-		t.Error("expected to proceed (fail open) when GetClaims errors")
+	if won {
+		t.Error("expected to skip (fail closed) when GetClaims errors")
 	}
 }
 
-func TestTryClaim_PostClaimError_FailsOpen(t *testing.T) {
+func TestTryClaim_PostClaimError_FailsClosed(t *testing.T) {
 	mock := &mockClaimProvider{
 		postErr: fmt.Errorf("post failed"),
 	}
@@ -285,8 +296,8 @@ func TestTryClaim_PostClaimError_FailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !won {
-		t.Error("expected to proceed (fail open) when PostClaim errors")
+	if won {
+		t.Error("expected to skip (fail closed) when PostClaim errors")
 	}
 }
 
@@ -388,7 +399,7 @@ func TestIsClaimedByOther_OwnClaim(t *testing.T) {
 		claims: []issues.ClaimInfo{
 			{
 				CommentID: "our-claim",
-				DaemonID:  "test-daemon-1",
+				DaemonID:  testDaemonKey("test-daemon-1"),
 				Hostname:  "this-host",
 				Timestamp: time.Now().Add(-5 * time.Minute),
 				Expires:   time.Now().Add(55 * time.Minute),
@@ -440,7 +451,7 @@ func TestDeleteClaimForIssue_Cleanup(t *testing.T) {
 		claims: []issues.ClaimInfo{
 			{
 				CommentID: "our-claim-1",
-				DaemonID:  "test-daemon-1",
+				DaemonID:  testDaemonKey("test-daemon-1"),
 				Hostname:  "this-host",
 				Timestamp: time.Now(),
 				Expires:   time.Now().Add(1 * time.Hour),
@@ -495,9 +506,33 @@ func TestPollForNewIssues_SkipsClaimedIssues(t *testing.T) {
 	mockExec.AddPrefixMatch("gh", []string{"api", "--method", "POST"}, exec.MockResponse{
 		Stdout: []byte(`{"id": 12345}`),
 	})
-	// Mock for GetIssueCommentsWithIDs (claim verification)
-	mockExec.AddPrefixMatch("gh", []string{"api", "repos"}, exec.MockResponse{
-		Stdout: []byte(`[]`),
+	// Mock for GetIssueCommentsWithIDs (claim read + verification).
+	// Return a claim comment from this daemon so tryClaim sees a matching
+	// claim and reports success. Uses AddRule because the actual args are
+	// like ["api", "repos/owner/repo/issues/10/comments", "--paginate"]
+	// which AddPrefixMatch can't match (it checks exact arg equality).
+	daemonKey := testDaemonKey("test-daemon")
+	verifyClaimBody := fmt.Sprintf(
+		`<!-- erg-claim {"daemon":%q,"host":"test","ts":"%s","expires":"%s"} -->`,
+		daemonKey,
+		time.Now().UTC().Format(time.RFC3339),
+		time.Now().Add(70*time.Minute).UTC().Format(time.RFC3339),
+	)
+	verifyJSON, _ := json.Marshal([]struct {
+		ID        int64                  `json:"id"`
+		Body      string                 `json:"body"`
+		User      struct{ Login string } `json:"user"`
+		CreatedAt string                 `json:"created_at"`
+	}{
+		{ID: 12345, Body: verifyClaimBody, User: struct{ Login string }{Login: "bot"}, CreatedAt: time.Now().UTC().Format(time.RFC3339)},
+	})
+	mockExec.AddRule(func(dir, name string, args []string) bool {
+		if name != "gh" || len(args) < 2 || args[0] != "api" {
+			return false
+		}
+		return strings.Contains(args[1], "/comments")
+	}, exec.MockResponse{
+		Stdout: verifyJSON,
 	})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -564,10 +599,10 @@ func TestRebuildState_SkipsClaimedByOther(t *testing.T) {
 		time.Now().Add(55*time.Minute).UTC().Format(time.RFC3339),
 	)
 	commentsJSON, _ := json.Marshal([]struct {
-		ID        int64  `json:"id"`
-		Body      string `json:"body"`
+		ID        int64                  `json:"id"`
+		Body      string                 `json:"body"`
 		User      struct{ Login string } `json:"user"`
-		CreatedAt string `json:"created_at"`
+		CreatedAt string                 `json:"created_at"`
 	}{
 		{ID: 999, Body: claimBody, User: struct{ Login string }{Login: "bot"}, CreatedAt: time.Now().UTC().Format(time.RFC3339)},
 	})
@@ -607,5 +642,171 @@ func TestRebuildState_SkipsClaimedByOther(t *testing.T) {
 	_, exists := d.state.GetWorkItem("/test/repo-50")
 	if exists {
 		t.Error("expected work item to NOT be created for issue claimed by another daemon")
+	}
+}
+
+func TestStateKey_IncludesHostname(t *testing.T) {
+	cfg := testConfig()
+
+	t.Run("single repo mode includes hostname", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.repoFilter = "/test/repo"
+		key := d.stateKey()
+		if !strings.Contains(key, "@") {
+			t.Errorf("expected stateKey to contain '@' separator, got %s", key)
+		}
+		if !strings.HasPrefix(key, "/test/repo@") {
+			t.Errorf("expected stateKey to start with '/test/repo@', got %s", key)
+		}
+	})
+
+	t.Run("multi repo mode includes hostname", func(t *testing.T) {
+		d := testDaemon(cfg)
+		d.daemonID = "multi-abc123"
+		key := d.stateKey()
+		if !strings.Contains(key, "@") {
+			t.Errorf("expected stateKey to contain '@' separator, got %s", key)
+		}
+		if !strings.HasPrefix(key, "multi-abc123@") {
+			t.Errorf("expected stateKey to start with 'multi-abc123@', got %s", key)
+		}
+	})
+
+	t.Run("different daemons produce different keys", func(t *testing.T) {
+		d1 := testDaemon(cfg)
+		d1.repoFilter = "/test/repo"
+		d2 := testDaemon(cfg)
+		d2.repoFilter = "/test/repo"
+		// On the same machine they should be equal
+		if d1.stateKey() != d2.stateKey() {
+			t.Error("expected same stateKey on same machine")
+		}
+	})
+}
+
+func TestTryClaim_ServerTimestampsPreferred(t *testing.T) {
+	// Simulate: our claim has an earlier self-reported timestamp (clock skew)
+	// but the server says the other daemon posted first.
+	ourTime := time.Now().Add(-5 * time.Second)   // our clock is behind
+	otherTime := time.Now().Add(-1 * time.Second) // other daemon's self-reported time is later
+
+	mock := &mockClaimProvider{
+		nextCommentID: "our-claim",
+		postHook: func(m *mockClaimProvider) {
+			// Inject other daemon's claim with later self-reported time
+			// but earlier server time
+			m.claims = append(m.claims, issues.ClaimInfo{
+				CommentID:       "other-claim",
+				DaemonID:        "other-daemon",
+				Hostname:        "other-host",
+				Timestamp:       otherTime,
+				Expires:         otherTime.Add(70 * time.Minute),
+				ServerTimestamp: ourTime.Add(-10 * time.Second), // server says other was first
+			})
+			// Set server timestamp on our claim too
+			for i := range m.claims {
+				if m.claims[i].CommentID == "our-claim" {
+					m.claims[i].ServerTimestamp = otherTime // server says we were second
+				}
+			}
+		},
+	}
+	d := newTestDaemonWithClaimProvider(mock)
+
+	issue := issues.Issue{ID: "42", Source: issues.SourceGitHub}
+	won, err := d.tryClaim(context.Background(), "/test/repo", issue, issues.SourceGitHub)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if won {
+		t.Error("expected to lose when server timestamp shows other daemon was first")
+	}
+}
+
+func TestTryClaim_CleansUpExpiredClaimsFromOtherDaemons(t *testing.T) {
+	expiredClaim := issues.ClaimInfo{
+		CommentID: "expired-other-claim",
+		DaemonID:  "dead-daemon",
+		Hostname:  "dead-host",
+		Timestamp: time.Now().Add(-2 * time.Hour),
+		Expires:   time.Now().Add(-1 * time.Hour),
+	}
+	mock := &mockClaimProvider{
+		claims:        []issues.ClaimInfo{expiredClaim},
+		nextCommentID: "our-claim",
+	}
+	d := newTestDaemonWithClaimProvider(mock)
+
+	issue := issues.Issue{ID: "42", Source: issues.SourceGitHub}
+	won, err := d.tryClaim(context.Background(), "/test/repo", issue, issues.SourceGitHub)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !won {
+		t.Error("expected to win after cleaning up expired claim")
+	}
+	// Verify the expired claim was deleted
+	deletedExpired := false
+	for _, id := range mock.deleteCalledIDs {
+		if id == "expired-other-claim" {
+			deletedExpired = true
+			break
+		}
+	}
+	if !deletedExpired {
+		t.Error("expected expired claim from other daemon to be deleted")
+	}
+}
+
+func TestClaimIsBefore_PrefersServerTimestamp(t *testing.T) {
+	tests := []struct {
+		name     string
+		a, b     *issues.ClaimInfo
+		expected bool
+	}{
+		{
+			name: "uses server timestamps when both available",
+			a: &issues.ClaimInfo{
+				Timestamp:       time.Now(),                        // self-reported: later
+				ServerTimestamp: time.Now().Add(-10 * time.Second), // server: earlier
+			},
+			b: &issues.ClaimInfo{
+				Timestamp:       time.Now().Add(-5 * time.Second), // self-reported: earlier
+				ServerTimestamp: time.Now().Add(-5 * time.Second),
+			},
+			expected: true, // a's server timestamp is earlier
+		},
+		{
+			name: "falls back to self-reported when no server timestamp",
+			a: &issues.ClaimInfo{
+				Timestamp: time.Now().Add(-10 * time.Second),
+			},
+			b: &issues.ClaimInfo{
+				Timestamp: time.Now().Add(-5 * time.Second),
+			},
+			expected: true, // a's self-reported timestamp is earlier
+		},
+		{
+			name: "mixed: a has server, b does not",
+			a: &issues.ClaimInfo{
+				Timestamp:       time.Now(),
+				ServerTimestamp: time.Now().Add(-10 * time.Second),
+			},
+			b: &issues.ClaimInfo{
+				Timestamp: time.Now().Add(-5 * time.Second),
+			},
+			expected: true, // a's server timestamp vs b's self-reported
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := claimIsBefore(tc.a, tc.b)
+			if result != tc.expected {
+				t.Errorf("claimIsBefore() = %v, want %v", result, tc.expected)
+			}
+		})
 	}
 }
