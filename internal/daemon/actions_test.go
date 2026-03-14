@@ -3695,15 +3695,14 @@ func TestHandleAsyncComplete_NoFormatCommandSkipsFormatter(t *testing.T) {
 	}
 }
 
-// TestUnqueueIssue_GitHub verifies that unqueueIssue calls RemoveLabel and Comment
-// via the GitHub provider, but does NOT close the issue.
+// TestUnqueueIssue_GitHub verifies that unqueueIssue posts a comment with the
+// unqueued marker, does NOT remove the label, and does NOT close the issue.
 func TestUnqueueIssue_GitHub(t *testing.T) {
 	cfg := testConfig()
 	cfg.Repos = []string{"/test/repo"}
 	mockExec := exec.NewMockExecutor(nil)
 
-	// Mock label removal and comment — success responses.
-	mockExec.AddPrefixMatch("gh", []string{"issue", "edit"}, exec.MockResponse{})
+	// Mock comment — success response.
 	mockExec.AddPrefixMatch("gh", []string{"issue", "comment"}, exec.MockResponse{})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -3730,24 +3729,28 @@ func TestUnqueueIssue_GitHub(t *testing.T) {
 
 	calls := mockExec.GetCalls()
 
-	// Verify RemoveLabel was called (gh issue edit --remove-label).
-	foundRemoveLabel := false
+	// Verify label was NOT removed — label stays as permanent AI-assisted marker.
 	for _, c := range calls {
 		if c.Name == "gh" && len(c.Args) >= 3 && c.Args[0] == "issue" && c.Args[1] == "edit" {
 			if slices.Contains(c.Args, "--remove-label") {
-				foundRemoveLabel = true
+				t.Error("gh issue edit --remove-label should NOT be called — label is permanent")
 			}
 		}
 	}
-	if !foundRemoveLabel {
-		t.Error("expected gh issue edit --remove-label to be called")
-	}
 
-	// Verify Comment was called (gh issue comment).
+	// Verify Comment was called with the unqueued marker.
 	foundComment := false
 	for _, c := range calls {
 		if c.Name == "gh" && len(c.Args) >= 2 && c.Args[0] == "issue" && c.Args[1] == "comment" {
 			foundComment = true
+			// Check that the comment body contains the unqueued marker.
+			for i, arg := range c.Args {
+				if arg == "--body" && i+1 < len(c.Args) {
+					if !strings.Contains(c.Args[i+1], "<!-- erg:unqueued -->") {
+						t.Errorf("comment body missing unqueued marker, got: %s", c.Args[i+1])
+					}
+				}
+			}
 			break
 		}
 	}

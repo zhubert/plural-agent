@@ -179,8 +179,8 @@ func TestRunConfigure_GitHub_WizardDefaults(t *testing.T) {
 	if captured.Provider != "github" {
 		t.Errorf("expected provider github, got %q", captured.Provider)
 	}
-	if captured.Label != "queued" {
-		t.Errorf("expected default label queued, got %q", captured.Label)
+	if captured.Label != "ai-assisted" {
+		t.Errorf("expected default label ai-assisted, got %q", captured.Label)
 	}
 	if captured.PlanFirst {
 		t.Errorf("expected PlanFirst=false (default)")
@@ -305,8 +305,8 @@ func TestRunConfigure_Linear_WizardCaptures(t *testing.T) {
 	if captured.Team != "team-xyz" {
 		t.Errorf("expected team team-xyz, got %q", captured.Team)
 	}
-	if captured.Label != "queued" {
-		t.Errorf("expected default label queued, got %q", captured.Label)
+	if captured.Label != "ai-assisted" {
+		t.Errorf("expected default label ai-assisted, got %q", captured.Label)
 	}
 	if captured.CompletionState != "Merged" {
 		t.Errorf("expected CompletionState=Merged, got %q", captured.CompletionState)
@@ -388,10 +388,10 @@ func TestRunConfigure_ShowsErgStart(t *testing.T) {
 
 func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=2(Asana), [keychain=n on macOS], project=1234, org=2(kanban), section=(default "To do"),
-	// completion=(default Done), plan=n, reviewer=(skip),
+	// tracker=2(Asana), [keychain=n on macOS], project=1234, org=2(kanban), label=(default "ai-assisted"),
+	// section=(default "To do"), completion=(default Done), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
-	input := "2\n" + keychainSkip() + "1234\n2\n\n\nn\n\ny\n1\nn\ny\n"
+	input := "2\n" + keychainSkip() + "1234\n2\n\n\n\nn\n\ny\n1\nn\ny\n"
 	var out bytes.Buffer
 	err := runConfigureWithIO(strings.NewReader(input), &out, allFoundChecker, ".", captureWriter(&captured), true)
 	if err != nil {
@@ -407,8 +407,8 @@ func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 	if captured.Section != "To do" {
 		t.Errorf("expected Section='To do', got %q", captured.Section)
 	}
-	if captured.Label != "" {
-		t.Errorf("expected Label empty for kanban, got %q", captured.Label)
+	if captured.Label != "ai-assisted" {
+		t.Errorf("expected Label=ai-assisted for kanban, got %q", captured.Label)
 	}
 	if captured.CompletionSection != "Done" {
 		t.Errorf("expected CompletionSection=Done, got %q", captured.CompletionSection)
@@ -426,7 +426,7 @@ func TestRunConfigure_Asana_Kanban_WizardCaptures(t *testing.T) {
 
 func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	var captured workflow.WizardConfig
-	// tracker=3(Linear), [keychain=n on macOS], team=team-xyz, org=2(kanban), label=(default "queued"),
+	// tracker=3(Linear), [keychain=n on macOS], team=team-xyz, org=2(kanban), label=(default "ai-assisted"),
 	// completionState=(default Done), plan=n, reviewer=(skip),
 	// automerge=y, merge=1(rebase), containers=n, confirm=y
 	input := "3\n" + keychainSkip() + "team-xyz\n2\n\n\nn\n\ny\n1\nn\ny\n"
@@ -442,8 +442,8 @@ func TestRunConfigure_Linear_Kanban_WizardCaptures(t *testing.T) {
 	if !captured.Kanban {
 		t.Errorf("expected Kanban=true")
 	}
-	if captured.Label != "queued" {
-		t.Errorf("expected Label=queued for Linear kanban, got %q", captured.Label)
+	if captured.Label != "ai-assisted" {
+		t.Errorf("expected Label=ai-assisted for Linear kanban, got %q", captured.Label)
 	}
 	if captured.CompletionState != "Done" {
 		t.Errorf("expected CompletionState=Done, got %q", captured.CompletionState)

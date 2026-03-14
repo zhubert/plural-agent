@@ -411,7 +411,7 @@ func TestDaemonState_HasWorkItemForIssue(t *testing.T) {
 			want:    false,
 		},
 		{
-			name: "recently failed item still matches",
+			name: "failed item matches (label is permanent)",
 			setup: func(s *DaemonState) {
 				s.AddWorkItem(&WorkItem{
 					ID:       "item-1",
@@ -424,7 +424,7 @@ func TestDaemonState_HasWorkItemForIssue(t *testing.T) {
 			want:    true,
 		},
 		{
-			name: "recently completed item still matches",
+			name: "completed item matches (label is permanent)",
 			setup: func(s *DaemonState) {
 				s.AddWorkItem(&WorkItem{
 					ID:       "item-1",
@@ -437,7 +437,7 @@ func TestDaemonState_HasWorkItemForIssue(t *testing.T) {
 			want:    true,
 		},
 		{
-			name: "old failed item does not match",
+			name: "old failed item still matches until pruned",
 			setup: func(s *DaemonState) {
 				longAgo := time.Now().Add(-10 * time.Minute)
 				s.WorkItems["item-1"] = &WorkItem{
@@ -446,6 +446,23 @@ func TestDaemonState_HasWorkItemForIssue(t *testing.T) {
 					State:       WorkItemFailed,
 					CompletedAt: &longAgo,
 				}
+			},
+			source:  "github",
+			issueID: "42",
+			want:    true,
+		},
+		{
+			name: "pruned item no longer matches",
+			setup: func(s *DaemonState) {
+				longAgo := time.Now().Add(-8 * 24 * time.Hour)
+				s.WorkItems["item-1"] = &WorkItem{
+					ID:          "item-1",
+					IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+					State:       WorkItemFailed,
+					CompletedAt: &longAgo,
+				}
+				// Prune removes old terminal items, making re-polling possible
+				s.PruneTerminalItems(7 * 24 * time.Hour)
 			},
 			source:  "github",
 			issueID: "42",

@@ -17,7 +17,7 @@ func TestDefaultWorkflowConfig(t *testing.T) {
 	if cfg.Source.Provider != "github" {
 		t.Errorf("default provider: got %q", cfg.Source.Provider)
 	}
-	if cfg.Source.Filter.Label != "queued" {
+	if cfg.Source.Filter.Label != "ai-assisted" {
 		t.Errorf("default label: got %q", cfg.Source.Filter.Label)
 	}
 
@@ -409,10 +409,10 @@ func TestMerge(t *testing.T) {
 		}
 	})
 
-	t.Run("asana config without label does not inherit github queued label", func(t *testing.T) {
-		// Regression: Merge used to blindly copy the default label ("queued") into
+	t.Run("asana config without label does not inherit github ai-assisted label", func(t *testing.T) {
+		// Regression: Merge used to blindly copy the default label ("ai-assisted") into
 		// non-GitHub configs that had no label set. This caused the Asana provider
-		// to filter by the tag "queued", silently dropping tasks without that tag.
+		// to filter by the tag "ai-assisted", silently dropping tasks without that tag.
 		partial := &Config{
 			Source: SourceConfig{
 				Provider: "asana",
@@ -422,7 +422,7 @@ func TestMerge(t *testing.T) {
 				},
 			},
 		}
-		defaults := DefaultWorkflowConfig() // provider=github, label=queued
+		defaults := DefaultWorkflowConfig() // provider=github, label=ai-assisted
 		result := Merge(partial, defaults)
 
 		if result.Source.Filter.Label != "" {

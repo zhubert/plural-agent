@@ -64,7 +64,7 @@ func runConfigureWithIO(input io.Reader, output io.Writer, checker prereqChecker
 	// Phase 3: Provider setup + source config
 	cfg := workflow.WizardConfig{
 		Provider:    provider,
-		Label:       "queued",
+		Label:       "ai-assisted",
 		AutoMerge:   true,
 		MergeMethod: "rebase",
 	}
@@ -195,7 +195,7 @@ func collectAsanaConfig(scanner *bufio.Scanner, input io.Reader, output io.Write
 
 	if orgChoice == "kanban" {
 		cfg.Kanban = true
-		cfg.Label = ""
+		cfg.Label = promptStringDefault(scanner, output, "Tag to identify AI-assisted tasks?", cfg.Label)
 		cfg.Section = promptStringDefault(scanner, output, "Which section has new tasks?", "To do")
 		cfg.CompletionSection = promptStringDefault(scanner, output, "Completion section?", "Done")
 

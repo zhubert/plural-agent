@@ -176,11 +176,9 @@ func (a *createPRAction) Execute(ctx context.Context, ac *workflow.ActionContext
 	prURL, err := d.createPR(ctx, item, draft)
 	if err != nil {
 		if errors.Is(err, errNoChanges) {
-			// Coding session made no changes — unqueue the issue (remove label +
-			// comment) but leave it open for humans to investigate.
-			repoPath := d.resolveRepoPath(ctx, item)
-			label := d.resolveQueueLabel(repoPath)
-			d.unqueueIssue(ctx, item, fmt.Sprintf("The coding session made no changes. Removing from the queue — re-add the '%s' label if this still needs work.", label))
+			// Coding session made no changes — comment and mark done,
+			// but leave the issue open for humans to investigate.
+			d.unqueueIssue(ctx, item, "The coding session made no changes. The issue remains open for manual investigation.")
 			return workflow.ActionResult{Success: true, OverrideNext: "done"}
 		}
 		return workflow.ActionResult{Error: fmt.Errorf("PR creation failed: %w", err)}

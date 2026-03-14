@@ -465,15 +465,21 @@ func validateSource(cfg *Config) []ValidationError {
 		})
 	}
 
-	// Provider-specific filter requirements
+	// Filter requirements (only validate when provider is known)
 	switch cfg.Source.Provider {
-	case "github":
+	case "github", "asana", "linear":
+		// Label is required for all providers — it serves as the permanent
+		// AI-assisted marker so humans can distinguish erg-managed issues.
 		if cfg.Source.Filter.Label == "" {
 			errs = append(errs, ValidationError{
 				Field:   "source.filter.label",
-				Message: "label is required for github provider",
+				Message: "label is required (identifies AI-assisted issues)",
 			})
 		}
+	}
+
+	// Provider-specific filter requirements
+	switch cfg.Source.Provider {
 	case "asana":
 		if cfg.Source.Filter.Project == "" {
 			errs = append(errs, ValidationError{

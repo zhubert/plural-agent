@@ -34,7 +34,7 @@ tail -f ~/.erg/logs/stream-*.log    # Raw Claude stream messages (per-session)
 
 ### Core Flow
 
-1. Daemon polls for issues labeled `queued` on the target repo
+1. Daemon polls for issues labeled `ai-assisted` on the target repo (label is required and stays permanently)
 2. For each issue, creates a containerized Claude Code session on a new branch
 3. SessionWorker manages the Claude process lifecycle (turns, duration, streaming)
 4. On completion, a PR is created and the daemon monitors for review + CI

@@ -363,27 +363,19 @@ func (s *DaemonState) ActiveSlotCount() int {
 	return count
 }
 
-// recentFailCooldown is how long after a work item fails before the same
-// issue can be re-queued. This prevents infinite re-queue loops when an issue
-// persistently fails (e.g., Docker daemon is down).
-const recentFailCooldown = 5 * time.Minute
-
 // HasWorkItemForIssue checks if a work item already exists for the given issue.
-// Returns true for active items and also for recently-failed items to prevent
-// infinite re-queue loops.
+// Returns true for any work item that matches, regardless of state — active,
+// completed, or failed. Because the ai-assisted label is now permanent and
+// never removed from issues, every terminal work item must block re-polling
+// to prevent the poller from re-adding the same issue on every cycle.
+// Terminal items are eventually cleaned up by PruneTerminalItems, at which
+// point the issue becomes eligible for re-polling if the label is still present.
 func (s *DaemonState) HasWorkItemForIssue(issueSource, issueID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	for _, item := range s.WorkItems {
-		if item.IssueRef.Source != issueSource || item.IssueRef.ID != issueID {
-			continue
-		}
-		if !item.IsTerminal() {
-			return true
-		}
-		// Recently-failed items still count to prevent re-queue storms
-		if item.CompletedAt != nil && time.Since(*item.CompletedAt) < recentFailCooldown {
+		if item.IssueRef.Source == issueSource && item.IssueRef.ID == issueID {
 			return true
 		}
 	}

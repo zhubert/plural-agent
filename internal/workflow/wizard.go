@@ -11,7 +11,7 @@ import (
 type WizardConfig struct {
 	// Source configuration
 	Provider string // "github", "asana", "linear"
-	Label    string // issue label/tag to watch
+	Label    string // required: permanent AI-assisted marker (all providers)
 	Project  string // Asana project GID (required for asana)
 	Team     string // Linear team ID (required for linear)
 	Section  string // Asana board section filter — watch only tasks in this section (optional)
@@ -133,22 +133,16 @@ func GenerateWizardYAML(cfg WizardConfig) string {
 	b.WriteString("source:\n")
 	fmt.Fprintf(&b, "  provider: %s\n", cfg.Provider)
 	b.WriteString("  filter:\n")
+	// Label is always emitted — it's the permanent AI-assisted marker.
+	fmt.Fprintf(&b, "    label: %q\n", cfg.Label)
 	switch cfg.Provider {
 	case "asana":
 		fmt.Fprintf(&b, "    project: %q\n", cfg.Project)
-		if cfg.Kanban {
+		if cfg.Section != "" {
 			fmt.Fprintf(&b, "    section: %q\n", cfg.Section)
-		} else {
-			fmt.Fprintf(&b, "    label: %s\n", cfg.Label)
-			if cfg.Section != "" {
-				fmt.Fprintf(&b, "    section: %q\n", cfg.Section)
-			}
 		}
 	case "linear":
 		fmt.Fprintf(&b, "    team: %q\n", cfg.Team)
-		fmt.Fprintf(&b, "    label: %s\n", cfg.Label)
-	default: // github
-		fmt.Fprintf(&b, "    label: %s\n", cfg.Label)
 	}
 	b.WriteByte('\n')
 

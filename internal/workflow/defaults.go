@@ -29,7 +29,7 @@ func DefaultWorkflowConfig() *Config {
 		Source: SourceConfig{
 			Provider: "github",
 			Filter: FilterConfig{
-				Label: "queued",
+				Label: "ai-assisted",
 			},
 		},
 		States: map[string]*State{

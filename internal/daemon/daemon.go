@@ -24,7 +24,7 @@ const (
 	defaultPollInterval       = 30 * time.Second
 	defaultReviewPollInterval = 60 * time.Second
 	defaultReconcileInterval  = 2 * time.Minute
-	autonomousFilterLabel     = "queued"
+	autonomousFilterLabel     = "ai-assisted"
 )
 
 // Daemon is the persistent orchestrator that manages the full lifecycle of work items.

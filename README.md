@@ -18,7 +18,7 @@ Or [build from source](#build-from-source).
 erg start --repo owner/repo
 ```
 
-Label a GitHub issue `queued` and erg picks it up — coding, PR, review feedback, CI, and merge are handled automatically. See the [docs](https://zhubert.com/erg/) for full configuration options including Asana and Linear as work sources.
+Label a GitHub issue `ai-assisted` and erg picks it up — coding, PR, review feedback, CI, and merge are handled automatically. The label stays on the issue permanently so humans can always identify AI-assisted work. See the [docs](https://zhubert.com/erg/) for full configuration options including Asana and Linear as work sources.
 
 ## Run as a Service (macOS)
 

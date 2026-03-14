@@ -37,7 +37,7 @@ start: coding
 source:
   provider: github          # github, asana, or linear
   filter:
-    label: queued            # GitHub: issue label to poll
+    label: ai-assisted       # Required: identifies AI-assisted issues
     # project: ""            # Asana: project GID (required for asana provider)
     # team: ""               # Linear: team ID (required for linear provider)
 

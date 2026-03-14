@@ -164,8 +164,8 @@ func TestWriteTemplate_ValidYAML(t *testing.T) {
 	if cfg.Source.Provider != "github" {
 		t.Errorf("expected provider github, got %q", cfg.Source.Provider)
 	}
-	if cfg.Source.Filter.Label != "queued" {
-		t.Errorf("expected label queued, got %q", cfg.Source.Filter.Label)
+	if cfg.Source.Filter.Label != "ai-assisted" {
+		t.Errorf("expected label ai-assisted, got %q", cfg.Source.Filter.Label)
 	}
 	if cfg.Start != "coding" {
 		t.Errorf("expected start coding, got %q", cfg.Start)

@@ -13,7 +13,7 @@ import (
 func defaultGitHubWizardConfig() WizardConfig {
 	return WizardConfig{
 		Provider:    "github",
-		Label:       "queued",
+		Label:       "ai-assisted",
 		AutoMerge:   true,
 		MergeMethod: "rebase",
 	}
@@ -52,8 +52,8 @@ func TestGenerateWizardYAML_GitHub_Defaults(t *testing.T) {
 	if !strings.Contains(out, "provider: github") {
 		t.Errorf("expected provider: github, got:\n%s", out)
 	}
-	if !strings.Contains(out, "label: queued") {
-		t.Errorf("expected label: queued, got:\n%s", out)
+	if !strings.Contains(out, `label: "ai-assisted"`) {
+		t.Errorf("expected label: \"ai-assisted\", got:\n%s", out)
 	}
 	if !strings.Contains(out, "use: builtin:code") {
 		t.Errorf("expected builtin:code template, got:\n%s", out)
@@ -259,7 +259,7 @@ func TestGenerateWizardYAML_GitHub_ContainerizedWithPlan(t *testing.T) {
 func TestGenerateWizardYAML_Asana_Defaults(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:    "asana",
-		Label:       "queued",
+		Label:       "ai-assisted",
 		Project:     "1234567890",
 		AutoMerge:   true,
 		MergeMethod: "rebase",
@@ -281,8 +281,8 @@ func TestGenerateWizardYAML_Asana_Defaults(t *testing.T) {
 	if !strings.Contains(out, `project: "1234567890"`) {
 		t.Errorf("expected project GID, got:\n%s", out)
 	}
-	if !strings.Contains(out, "label: queued") {
-		t.Errorf("expected label: queued, got:\n%s", out)
+	if !strings.Contains(out, `label: "ai-assisted"`) {
+		t.Errorf("expected label: \"ai-assisted\", got:\n%s", out)
 	}
 	// No completion section set → no move_complete state
 	if strings.Contains(out, "move_complete") {
@@ -294,7 +294,7 @@ func TestGenerateWizardYAML_Asana_Defaults(t *testing.T) {
 func TestGenerateWizardYAML_Asana_WithCompletion(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:          "asana",
-		Label:             "queued",
+		Label:             "ai-assisted",
 		Project:           "1234567890",
 		AutoMerge:         true,
 		MergeMethod:       "rebase",
@@ -330,7 +330,7 @@ func TestGenerateWizardYAML_Asana_WithCompletion(t *testing.T) {
 func TestGenerateWizardYAML_Asana_WithSection(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:    "asana",
-		Label:       "queued",
+		Label:       "ai-assisted",
 		Project:     "1234567890",
 		Section:     "Backlog",
 		AutoMerge:   true,
@@ -356,7 +356,7 @@ func TestGenerateWizardYAML_Asana_WithSection(t *testing.T) {
 func TestGenerateWizardYAML_Linear_Defaults(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:    "linear",
-		Label:       "queued",
+		Label:       "ai-assisted",
 		Team:        "team-abc-123",
 		AutoMerge:   true,
 		MergeMethod: "rebase",
@@ -384,7 +384,7 @@ func TestGenerateWizardYAML_Linear_Defaults(t *testing.T) {
 func TestGenerateWizardYAML_Linear_WithCompletion(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:        "linear",
-		Label:           "queued",
+		Label:           "ai-assisted",
 		Team:            "team-abc-123",
 		AutoMerge:       true,
 		MergeMethod:     "rebase",
@@ -598,21 +598,21 @@ func TestGenerateWizardYAML_NotifyFailed_ProviderSpecific(t *testing.T) {
 			name:           "github",
 			provider:       "github",
 			expectedAction: "github.comment_issue",
-			label:          "queued",
+			label:          "ai-assisted",
 		},
 		{
 			name:           "asana",
 			provider:       "asana",
 			expectedAction: "asana.comment",
 			project:        "123",
-			label:          "queued",
+			label:          "ai-assisted",
 		},
 		{
 			name:           "linear",
 			provider:       "linear",
 			expectedAction: "linear.comment",
 			team:           "team-abc",
-			label:          "queued",
+			label:          "ai-assisted",
 		},
 	}
 
@@ -657,6 +657,7 @@ func TestGenerateWizardYAML_NotifyFailed_ProviderSpecific(t *testing.T) {
 func TestGenerateWizardYAML_Asana_Kanban(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:          "asana",
+		Label:             "ai-assisted",
 		Project:           "123",
 		Section:           "To do",
 		Kanban:            true,
@@ -675,9 +676,9 @@ func TestGenerateWizardYAML_Asana_Kanban(t *testing.T) {
 		}
 	}
 
-	// Source filter should have section, no label
-	if strings.Contains(out, "    label:") {
-		t.Errorf("kanban Asana should not have label in source filter, got:\n%s", out)
+	// Source filter should have both label and section
+	if !strings.Contains(out, `    label: "ai-assisted"`) {
+		t.Errorf("kanban Asana should have label in source filter, got:\n%s", out)
 	}
 	if !strings.Contains(out, `section: "To do"`) {
 		t.Errorf("expected section: \"To do\" in source filter, got:\n%s", out)
@@ -703,6 +704,7 @@ func TestGenerateWizardYAML_Asana_Kanban(t *testing.T) {
 func TestGenerateWizardYAML_Asana_Kanban_PlanFirst(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:          "asana",
+		Label:             "ai-assisted",
 		Project:           "123",
 		Section:           "To do",
 		Kanban:            true,
@@ -747,7 +749,7 @@ func TestGenerateWizardYAML_Asana_Kanban_PlanFirst(t *testing.T) {
 func TestGenerateWizardYAML_Linear_Kanban(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:        "linear",
-		Label:           "queued",
+		Label:           "ai-assisted",
 		Team:            "team-abc",
 		Kanban:          true,
 		AutoMerge:       true,
@@ -766,7 +768,7 @@ func TestGenerateWizardYAML_Linear_Kanban(t *testing.T) {
 	}
 
 	// Should still have label in source (Linear has no state-based source)
-	if !strings.Contains(out, "label: queued") {
+	if !strings.Contains(out, `label: "ai-assisted"`) {
 		t.Errorf("expected label in Linear kanban source filter")
 	}
 
@@ -790,7 +792,7 @@ func TestGenerateWizardYAML_Linear_Kanban(t *testing.T) {
 func TestGenerateWizardYAML_Linear_Kanban_PlanFirst(t *testing.T) {
 	cfg := WizardConfig{
 		Provider:        "linear",
-		Label:           "queued",
+		Label:           "ai-assisted",
 		Team:            "team-abc",
 		Kanban:          true,
 		PlanFirst:       true,

@@ -94,6 +94,13 @@ func (d *Daemon) pollForNewIssues(ctx context.Context) {
 				continue
 			}
 
+			// Check if this issue was previously unqueued by erg (comment marker).
+			// This survives terminal work item pruning so we don't re-comment.
+			if d.isUnqueued(pollCtx, repoPath, issue, provider) {
+				log.Debug("issue has unqueued marker, skipping", "issue", issue.ID)
+				continue
+			}
+
 			// Attempt to claim the issue (multi-daemon coordination).
 			// Must happen before pre-flight PR checks so that adopting an
 			// existing PR is also coordinated across daemons.
@@ -342,10 +349,8 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 	}
 
 	// Adopt PR into the workflow so the daemon monitors CI/review.
-	// Keep the queued label as a durable safety net: if the daemon crashes before
-	// persisting state, the label ensures this issue is rediscovered on next start.
+	// The label stays permanently as an AI-assisted marker.
 	// HasWorkItemForIssue prevents re-adoption on subsequent polls within the same run.
-	// The label is removed later when the PR is actually merged (normal workflow path).
 
 	// Use the workflow engine to find the right wait state (e.g. await_ci).
 	// We cannot hardcode state names because template expansion namespaces
@@ -408,7 +413,8 @@ func (d *Daemon) checkLinkedPRsAndUnqueue(ctx context.Context, repoPath string, 
 
 // reconcileClosedIssues checks non-terminal work items to see if their underlying
 // issue has been closed externally. If so, the work item is cancelled: any running
-// worker is stopped, the queued label is removed, and the item is marked terminal.
+// worker is stopped, a comment is left, and the item is marked terminal.
+// The label is kept as a permanent AI-assisted marker.
 // This prevents closed issues from lingering as "active" in the dashboard.
 func (d *Daemon) reconcileClosedIssues(ctx context.Context) {
 	if time.Since(d.lastReconcileAt) < defaultReconcileInterval {
@@ -452,7 +458,7 @@ func (d *Daemon) reconcileClosedIssues(ctx context.Context) {
 			w.Cancel()
 		}
 
-		// Remove the queued label so it doesn't get re-queued
+		// Comment on the issue about cancellation (label stays as AI-assisted marker)
 		d.unqueueIssue(ctx, item, "Issue was closed externally. Cancelling work.")
 
 		// Mark terminal

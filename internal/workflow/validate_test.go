@@ -39,7 +39,7 @@ func TestValidate(t *testing.T) {
 				Start: "coding",
 				Source: SourceConfig{
 					Provider: "asana",
-					Filter:   FilterConfig{Project: "12345"},
+					Filter:   FilterConfig{Label: "ai-assisted", Project: "12345"},
 				},
 				States: map[string]*State{
 					"coding": {Type: StateTypeTask, Action: "ai.code", Next: "done"},
@@ -54,7 +54,7 @@ func TestValidate(t *testing.T) {
 				Start: "coding",
 				Source: SourceConfig{
 					Provider: "linear",
-					Filter:   FilterConfig{Team: "my-team"},
+					Filter:   FilterConfig{Label: "ai-assisted", Team: "my-team"},
 				},
 				States: map[string]*State{
 					"coding": {Type: StateTypeTask, Action: "ai.code", Next: "done"},
@@ -87,22 +87,22 @@ func TestValidate(t *testing.T) {
 			wantFields: []string{"source.filter.label"},
 		},
 		{
-			name: "asana missing project",
+			name: "asana missing label and project",
 			cfg: &Config{
 				Start:  "s",
 				Source: SourceConfig{Provider: "asana"},
 				States: map[string]*State{"s": {Type: StateTypeSucceed}},
 			},
-			wantFields: []string{"source.filter.project"},
+			wantFields: []string{"source.filter.label", "source.filter.project"},
 		},
 		{
-			name: "linear missing team",
+			name: "linear missing label and team",
 			cfg: &Config{
 				Start:  "s",
 				Source: SourceConfig{Provider: "linear"},
 				States: map[string]*State{"s": {Type: StateTypeSucceed}},
 			},
-			wantFields: []string{"source.filter.team"},
+			wantFields: []string{"source.filter.label", "source.filter.team"},
 		},
 		{
 			name:       "missing start",
