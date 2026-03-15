@@ -99,26 +99,6 @@ func WithMaxConcurrent(max int) Option {
 	return func(d *Daemon) { d.maxConcurrent = max }
 }
 
-// WithMaxTurns overrides the config's max autonomous turns setting.
-func WithMaxTurns(max int) Option {
-	return func(d *Daemon) { d.maxTurns = max }
-}
-
-// WithMaxDuration overrides the config's max autonomous duration (minutes) setting.
-func WithMaxDuration(max int) Option {
-	return func(d *Daemon) { d.maxDuration = max }
-}
-
-// WithAutoAddressPRComments enables auto-addressing PR review comments.
-func WithAutoAddressPRComments(v bool) Option {
-	return func(d *Daemon) { d.autoAddressPRComments = v }
-}
-
-// WithAutoBroadcastPR enables auto-creating PRs when broadcast group completes.
-func WithAutoBroadcastPR(v bool) Option {
-	return func(d *Daemon) { d.autoBroadcastPR = v }
-}
-
 // WithAutoMerge enables auto-merging PRs after review approval and CI pass.
 func WithAutoMerge(v bool) Option {
 	return func(d *Daemon) { d.autoMerge = v }

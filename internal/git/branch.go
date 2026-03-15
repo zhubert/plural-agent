@@ -234,37 +234,3 @@ func (s *GitService) CountMergeCommits(ctx context.Context, worktreePath, baseBr
 	}
 	return count, nil
 }
-
-// sanitizeBranchName ensures a branch name is valid for git
-func sanitizeBranchName(name string) string {
-	// Convert to lowercase
-	name = strings.ToLower(name)
-
-	// Replace spaces and underscores with hyphens
-	name = strings.ReplaceAll(name, " ", "-")
-	name = strings.ReplaceAll(name, "_", "-")
-
-	// Remove any characters that aren't alphanumeric or hyphens
-	var result strings.Builder
-	for _, c := range name {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
-			result.WriteRune(c)
-		}
-	}
-	name = result.String()
-
-	// Remove leading/trailing hyphens and collapse multiple hyphens
-	for strings.Contains(name, "--") {
-		name = strings.ReplaceAll(name, "--", "-")
-	}
-	name = strings.Trim(name, "-")
-
-	// Truncate if too long
-	if len(name) > MaxBranchNameLength {
-		name = name[:MaxBranchNameLength]
-		// Don't end with a hyphen
-		name = strings.TrimRight(name, "-")
-	}
-
-	return name
-}
