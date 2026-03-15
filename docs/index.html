@@ -300,6 +300,7 @@
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+        transition: opacity 0.6s ease;
       }
 
       .hero-cta {
@@ -1080,7 +1081,7 @@
         <section id="overview">
           <span class="hero-badge">agent orchestrator</span>
           <p class="hero-tagline">
-            <span class="hero-tagline-accent">workflow-driven.</span>
+            erg is <span class="hero-tagline-accent" id="rotating-tagline">workflow-driven.</span>
           </p>
           <p>
             Autonomous orchestrator for Claude Code. Polls GitHub, Asana, or
@@ -1345,6 +1346,29 @@
       });
     </script>
     <script src="sim-dashboard.js"></script>
+    <script>
+      (function () {
+        var taglines = [
+          "workflow-driven.",
+          "autonomously shipped.",
+          "issue to PR, automated.",
+          "relentlessly shipping.",
+          "your AI coworker.",
+          "always reviewing.",
+        ];
+        var el = document.getElementById("rotating-tagline");
+        if (!el) return;
+        var idx = 0;
+        setInterval(function () {
+          el.style.opacity = "0";
+          setTimeout(function () {
+            idx = (idx + 1) % taglines.length;
+            el.textContent = taglines[idx];
+            el.style.opacity = "1";
+          }, 600);
+        }, 3000);
+      })();
+    </script>
   </body>
 </html>
 
