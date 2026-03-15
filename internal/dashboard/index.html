@@ -1016,16 +1016,17 @@ var Idiomorph=function(){"use strict";let o=new Set;let n={morphStyle:"outerHTML
   // Derives "previously rendered count" from logCache to avoid redundant state.
   function updateLogViewer(container, prevCacheLen, lines) {
     let lv = container.querySelector('.log-viewer');
+    const isPlaceholder = lv && lv.querySelector('.log-loading');
 
     if (!lines || lines.length === 0) {
-      if (!lv) {
+      if (!lv || isPlaceholder) {
         container.innerHTML = logPlaceholder('No output yet');
       }
       return;
     }
 
-    // If no existing viewer, or line count decreased (log rotation), do a full render
-    if (!lv || lines.length < prevCacheLen) {
+    // If no existing viewer, placeholder, or line count decreased (log rotation), do a full render
+    if (!lv || isPlaceholder || lines.length < prevCacheLen) {
       let html = '<div class="log-viewer">';
       for (const line of lines) {
         html += renderLogLine(line);
