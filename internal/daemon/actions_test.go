@@ -8861,24 +8861,20 @@ func TestStartCoding_IncludesPlanFromIssueComments(t *testing.T) {
 		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
 	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
 
-	// Mock gh issue view --json comments to return a plan comment with the marker
-	commentsJSON, _ := json.Marshal(struct {
-		Comments []struct {
-			Author    struct{ Login string } `json:"author"`
-			Body      string                 `json:"body"`
-			CreatedAt string                 `json:"createdAt"`
-		} `json:"comments"`
+	// Mock gh api (REST) to return a plan comment with the marker.
+	// GetIssueComments uses the REST API because gh issue view --json comments
+	// does not include updatedAt in its response.
+	commentsJSON, _ := json.Marshal([]struct {
+		ID        int                    `json:"id"`
+		Body      string                 `json:"body"`
+		User      struct{ Login string } `json:"user"`
+		CreatedAt string                 `json:"created_at"`
+		UpdatedAt string                 `json:"updated_at"`
 	}{
-		Comments: []struct {
-			Author    struct{ Login string } `json:"author"`
-			Body      string                 `json:"body"`
-			CreatedAt string                 `json:"createdAt"`
-		}{
-			{Author: struct{ Login string }{"bot"}, Body: "## Plan\n1. Refactor the widget\n2. Add tests\n" + worker.PlanMarker, CreatedAt: "2026-03-05T10:00:00Z"},
-			{Author: struct{ Login string }{"zhubert"}, Body: "approved", CreatedAt: "2026-03-05T11:00:00Z"},
-		},
+		{ID: 100, Body: "## Plan\n1. Refactor the widget\n2. Add tests\n" + worker.PlanMarker, User: struct{ Login string }{"bot"}, CreatedAt: "2026-03-05T10:00:00Z", UpdatedAt: "2026-03-05T10:00:00Z"},
+		{ID: 101, Body: "approved", User: struct{ Login string }{"zhubert"}, CreatedAt: "2026-03-05T11:00:00Z", UpdatedAt: "2026-03-05T11:00:00Z"},
 	})
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -9604,9 +9600,9 @@ func TestStartCoding_SimplifyDirectiveAppended(t *testing.T) {
 	mockExec.AddRule(func(dir, name string, args []string) bool {
 		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
 	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
-	// Suppress gh issue view (fetching comments for plan)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
-		Stdout: []byte(`{"comments":[]}`),
+	// Suppress gh api (fetching comments for plan via REST API)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/"}, exec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)
@@ -9658,8 +9654,8 @@ func TestStartCoding_SimplifyDirectiveNotAppendedByDefault(t *testing.T) {
 	mockExec.AddRule(func(dir, name string, args []string) bool {
 		return name == "git" && len(args) >= 3 && args[0] == "rev-parse" && args[1] == "--verify"
 	}, exec.MockResponse{Err: fmt.Errorf("fatal: Needed a single revision")})
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
-		Stdout: []byte(`{"comments":[]}`),
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/"}, exec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	gitSvc := git.NewGitServiceWithExecutor(mockExec)

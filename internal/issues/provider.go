@@ -115,6 +115,18 @@ func (r *ProviderRegistry) AllProviders() []Provider {
 }
 
 // IssueComment represents a comment on an issue from any supported source.
+//
+// IMPORTANT: UpdatedAt MUST be populated by all providers. It is used by
+// systemCommentCutoff to detect upserted (edited) plan comments and prevent
+// infinite re-planning loops. When a plan comment is edited in place,
+// CreatedAt stays frozen but UpdatedAt advances — without it the cutoff
+// uses the stale CreatedAt and already-consumed feedback re-triggers forever.
+//
+// Provider notes:
+//   - GitHub: `gh issue view --json comments` does NOT return updatedAt;
+//     use the REST API (gh api) which returns updated_at.
+//   - Asana: request the `modified_at` opt_field on stories.
+//   - Linear: include `updatedAt` in the GraphQL comments query.
 type IssueComment struct {
 	ID        string    // Provider-specific comment identifier (for updates; empty if not supported)
 	Author    string    // Username or display name

@@ -21,6 +21,11 @@ import (
 // handles upserted comments whose CreatedAt is stale — without this,
 // re-planning loops would use the frozen CreatedAt as cutoff, causing
 // already-consumed feedback to re-trigger indefinitely.
+//
+// This function depends on UpdatedAt being populated correctly by all comment
+// sources. If UpdatedAt is zero (e.g. because the provider doesn't return it),
+// the cutoff falls back to the stale CreatedAt and the re-planning loop recurs.
+// See the IssueComment doc in issues/provider.go for provider-specific notes.
 func systemCommentCutoff(stepEnteredAt time.Time, comments []issues.IssueComment) time.Time {
 	cutoff := stepEnteredAt
 	var latestSystem time.Time

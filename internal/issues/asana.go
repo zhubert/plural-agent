@@ -477,11 +477,12 @@ func (p *AsanaProvider) CheckIssueHasLabel(ctx context.Context, repoPath string,
 
 // asanaStory represents a single story (comment) on an Asana task.
 type asanaStory struct {
-	GID       string `json:"gid"`
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	CreatedAt string `json:"created_at"`
-	CreatedBy struct {
+	GID        string `json:"gid"`
+	Type       string `json:"type"`
+	Text       string `json:"text"`
+	CreatedAt  string `json:"created_at"`
+	ModifiedAt string `json:"modified_at"`
+	CreatedBy  struct {
 		Name string `json:"name"`
 	} `json:"created_by"`
 }
@@ -499,7 +500,7 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 		return nil, secrets.TokenNotFoundError(asanaPATEnvVar)
 	}
 
-	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=gid,type,text,created_at,created_by.name", p.apiBase, issueID)
+	url := fmt.Sprintf("%s/tasks/%s/stories?opt_fields=gid,type,text,created_at,modified_at,created_by.name", p.apiBase, issueID)
 
 	var storiesResp asanaStoriesResponse
 	if err := apiRequest(ctx, p.httpClient, http.MethodGet, url, nil,
@@ -516,11 +517,13 @@ func (p *AsanaProvider) GetIssueComments(ctx context.Context, repoPath string, i
 			continue
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, story.CreatedAt)
+		modifiedAt, _ := time.Parse(time.RFC3339Nano, story.ModifiedAt)
 		comments = append(comments, IssueComment{
 			ID:        story.GID,
 			Author:    story.CreatedBy.Name,
 			Body:      translateMarkersFromAsana(story.Text),
 			CreatedAt: createdAt,
+			UpdatedAt: modifiedAt,
 		})
 	}
 	return comments, nil

@@ -446,6 +446,15 @@ func (s *GitService) fetchInlineReviewComments(ctx context.Context, repoPath str
 }
 
 // IssueComment represents a single comment on a GitHub issue.
+// IssueComment represents a comment on a GitHub issue.
+//
+// IMPORTANT: UpdatedAt is critical for preventing infinite re-planning loops.
+// When plan comments are edited (upserted), CreatedAt stays frozen at the
+// original post time, but UpdatedAt advances. Without UpdatedAt, the daemon's
+// cutoff logic uses the stale CreatedAt and re-triggers on already-consumed
+// feedback forever. This field MUST be populated — `gh issue view --json
+// comments` does NOT return updatedAt, so callers must use the REST API
+// (gh api) which returns updated_at. See GetIssueComments.
 type IssueComment struct {
 	Author    string    // GitHub username
 	Body      string    // Comment text
@@ -493,42 +502,23 @@ func (s *GitService) CheckUserIsCollaborator(ctx context.Context, repoPath, user
 	return err == nil, nil
 }
 
-// GetIssueComments fetches all comments on a GitHub issue using the gh CLI.
-// Uses `gh issue view --json comments` to retrieve the full comment list.
+// GetIssueComments fetches all comments on a GitHub issue using the REST API.
+// Uses `gh api` instead of `gh issue view --json comments` because the latter
+// does not include updatedAt in its response, which is needed by
+// systemCommentCutoff to detect edited comments and prevent re-planning loops.
 func (s *GitService) GetIssueComments(ctx context.Context, repoPath string, issueNumber int) ([]IssueComment, error) {
-	output, err := s.executor.Output(ctx, repoPath, "gh", "issue", "view",
-		fmt.Sprintf("%d", issueNumber),
-		"--json", "comments",
-	)
+	withIDs, err := s.GetIssueCommentsWithIDs(ctx, repoPath, issueNumber)
 	if err != nil {
-		return nil, fmt.Errorf("gh issue view --json comments failed: %w", err)
+		return nil, err
 	}
-
-	var result struct {
-		Comments []struct {
-			Author struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			Body      string    `json:"body"`
-			CreatedAt time.Time `json:"createdAt"`
-			UpdatedAt time.Time `json:"updatedAt"`
-		} `json:"comments"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse issue comments: %w", err)
-	}
-
-	comments := make([]IssueComment, 0, len(result.Comments))
-	for _, c := range result.Comments {
-		if c.Body == "" {
-			continue
-		}
-		comments = append(comments, IssueComment{
-			Author:    c.Author.Login,
+	comments := make([]IssueComment, len(withIDs))
+	for i, c := range withIDs {
+		comments[i] = IssueComment{
+			Author:    c.Author,
 			Body:      c.Body,
 			CreatedAt: c.CreatedAt,
 			UpdatedAt: c.UpdatedAt,
-		})
+		}
 	}
 	return comments, nil
 }

@@ -2381,11 +2381,12 @@ func TestCheckIssueHasLabel_InvalidJSON(t *testing.T) {
 
 func TestGetIssueComments_MultipleComments(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
-		Stdout: []byte(`{"comments":[
-			{"author":{"login":"alice"},"body":"/approve","createdAt":"2024-01-02T10:00:00Z"},
-			{"author":{"login":"bob"},"body":"looks good","createdAt":"2024-01-02T11:00:00Z"}
-		]}`),
+	// GetIssueComments now delegates to GetIssueCommentsWithIDs (REST API)
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
+		Stdout: []byte(`[
+			{"id":1,"body":"/approve","user":{"login":"alice"},"created_at":"2024-01-02T10:00:00Z","updated_at":"2024-01-02T10:00:00Z"},
+			{"id":2,"body":"looks good","user":{"login":"bob"},"created_at":"2024-01-02T11:00:00Z","updated_at":"2024-01-02T12:00:00Z"}
+		]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -2405,12 +2406,19 @@ func TestGetIssueComments_MultipleComments(t *testing.T) {
 	if comments[1].Author != "bob" {
 		t.Errorf("expected bob, got %s", comments[1].Author)
 	}
+	// Verify UpdatedAt is populated (the whole point of this change)
+	if comments[1].UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be populated")
+	}
+	if !comments[1].UpdatedAt.After(comments[1].CreatedAt) {
+		t.Error("expected UpdatedAt to be after CreatedAt for edited comment")
+	}
 }
 
 func TestGetIssueComments_EmptyComments(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"issue", "view", "5", "--json", "comments"}, pexec.MockResponse{
-		Stdout: []byte(`{"comments":[]}`),
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/5/comments"}, pexec.MockResponse{
+		Stdout: []byte(`[]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -2425,11 +2433,11 @@ func TestGetIssueComments_EmptyComments(t *testing.T) {
 
 func TestGetIssueComments_EmptyBodiesExcluded(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"issue", "view", "7", "--json", "comments"}, pexec.MockResponse{
-		Stdout: []byte(`{"comments":[
-			{"author":{"login":"bot"},"body":"","createdAt":"2024-01-01T00:00:00Z"},
-			{"author":{"login":"user"},"body":"real comment","createdAt":"2024-01-01T01:00:00Z"}
-		]}`),
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/7/comments"}, pexec.MockResponse{
+		Stdout: []byte(`[
+			{"id":1,"body":"","user":{"login":"bot"},"created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T00:00:00Z"},
+			{"id":2,"body":"real comment","user":{"login":"user"},"created_at":"2024-01-01T01:00:00Z","updated_at":"2024-01-01T01:00:00Z"}
+		]`),
 	})
 
 	svc := NewGitServiceWithExecutor(mock)
@@ -2448,7 +2456,7 @@ func TestGetIssueComments_EmptyBodiesExcluded(t *testing.T) {
 
 func TestGetIssueComments_CLIError(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
 		Err: fmt.Errorf("not found"),
 	})
 
@@ -2464,7 +2472,7 @@ func TestGetIssueComments_CLIError(t *testing.T) {
 
 func TestGetIssueComments_InvalidJSON(t *testing.T) {
 	mock := pexec.NewMockExecutor(nil)
-	mock.AddExactMatch("gh", []string{"issue", "view", "42", "--json", "comments"}, pexec.MockResponse{
+	mock.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, pexec.MockResponse{
 		Stdout: []byte(`not json`),
 	})
 

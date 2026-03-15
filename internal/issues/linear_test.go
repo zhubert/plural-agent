@@ -788,6 +788,7 @@ func TestLinearProvider_GetIssueComments_ReturnsComments(t *testing.T) {
 			ID        string `json:"id"`
 			Body      string `json:"body"`
 			CreatedAt string `json:"createdAt"`
+			UpdatedAt string `json:"updatedAt"`
 			User      struct {
 				Name string `json:"name"`
 			} `json:"user"`
@@ -841,6 +842,7 @@ func TestLinearProvider_GetIssueComments_MillisecondTimestamps(t *testing.T) {
 			ID        string `json:"id"`
 			Body      string `json:"body"`
 			CreatedAt string `json:"createdAt"`
+			UpdatedAt string `json:"updatedAt"`
 			User      struct {
 				Name string `json:"name"`
 			} `json:"user"`
@@ -881,6 +883,7 @@ func TestLinearProvider_GetIssueComments_EmptyBodyExcluded(t *testing.T) {
 			ID        string `json:"id"`
 			Body      string `json:"body"`
 			CreatedAt string `json:"createdAt"`
+			UpdatedAt string `json:"updatedAt"`
 			User      struct {
 				Name string `json:"name"`
 			} `json:"user"`

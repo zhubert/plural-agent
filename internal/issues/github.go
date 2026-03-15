@@ -117,6 +117,7 @@ func (p *GitHubProvider) GetIssueComments(ctx context.Context, repoPath string, 
 			Author:    gc.Author,
 			Body:      gc.Body,
 			CreatedAt: gc.CreatedAt,
+			UpdatedAt: gc.UpdatedAt,
 		}
 	}
 	return comments, nil

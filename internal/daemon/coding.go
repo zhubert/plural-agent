@@ -51,7 +51,7 @@ func (d *Daemon) fetchIssueComments(ctx context.Context, repoPath string, item d
 		}
 		result := make([]issues.IssueComment, len(gitComments))
 		for i, gc := range gitComments {
-			result[i] = issues.IssueComment{Author: gc.Author, Body: gc.Body, CreatedAt: gc.CreatedAt}
+			result[i] = issues.IssueComment{Author: gc.Author, Body: gc.Body, CreatedAt: gc.CreatedAt, UpdatedAt: gc.UpdatedAt}
 		}
 		return result, nil
 	}

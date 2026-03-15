@@ -1863,8 +1863,8 @@ func TestCheckGateApproved_CommentMatch_Fires(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Comment posted 5 minutes after step was entered — should fire.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"reviewer"},"body":"/approve please proceed","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"/approve please proceed","user":{"login":"reviewer"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -1911,8 +1911,8 @@ func TestCheckGateApproved_CommentMatch_OldCommentIgnored(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Comment posted 5 minutes BEFORE step was entered — should be ignored.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"oldreviewer"},"body":"/approve old comment","createdAt":"2020-01-01T09:55:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"/approve old comment","user":{"login":"oldreviewer"},"created_at":"2020-01-01T09:55:00Z","updated_at":"2020-01-01T09:55:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -1951,8 +1951,8 @@ func TestCheckGateApproved_CommentMatch_NoMatch(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"user"},"body":"just a regular comment","createdAt":"2020-01-01T10:00:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"just a regular comment","user":{"login":"user"},"created_at":"2020-01-01T10:00:00Z","updated_at":"2020-01-01T10:00:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2152,8 +2152,8 @@ func TestCheckGateApproved_CommentMatch_NonCollaboratorIgnored(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Matching comment from a non-collaborator.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"outsider"},"body":"/approve please","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"/approve please","user":{"login":"outsider"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 	// Collaborator check for "outsider" returns 404 (not a collaborator).
@@ -2196,8 +2196,8 @@ func TestCheckGateApproved_CommentMatch_CollaboratorApproves(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Matching comment from a collaborator.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"contributor"},"body":"/approve looks good","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"/approve looks good","user":{"login":"contributor"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 	// Collaborator check for "contributor" succeeds (HTTP 204 → no error).
@@ -2506,8 +2506,8 @@ func TestCheckPlanUserReplied_FiresOnNewComment(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Comment posted after step entry
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"alice"},"body":"Can you add more detail about the error handling?","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"Can you add more detail about the error handling?","user":{"login":"alice"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2554,8 +2554,8 @@ func TestCheckPlanUserReplied_ApprovalPatternMatches(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"bob"},"body":"LGTM, proceed with implementation","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"LGTM, proceed with implementation","user":{"login":"bob"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2599,8 +2599,8 @@ func TestCheckPlanUserReplied_ApprovalPatternNoMatch(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"carol"},"body":"What about error handling?","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"What about error handling?","user":{"login":"carol"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2642,8 +2642,8 @@ func TestCheckPlanUserReplied_NonCollaboratorCannotApprovePlan(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Matching comment from a non-collaborator.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"outsider"},"body":"LGTM, ship it","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"LGTM, ship it","user":{"login":"outsider"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 	// Collaborator check for "outsider" returns 404 (not a collaborator).
@@ -2693,8 +2693,8 @@ func TestCheckPlanUserReplied_CollaboratorCanApprovePlan(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Matching comment from a collaborator.
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"contributor"},"body":"LGTM, proceed","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"LGTM, proceed","user":{"login":"contributor"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 	// Collaborator check for "contributor" succeeds (HTTP 204 → no error).
@@ -2743,8 +2743,8 @@ func TestCheckPlanUserReplied_OldCommentIgnored(t *testing.T) {
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Comment posted BEFORE step was entered
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"dave"},"body":"old comment","createdAt":"2020-01-01T09:55:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"old comment","user":{"login":"dave"},"created_at":"2020-01-01T09:55:00Z","updated_at":"2020-01-01T09:55:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2782,8 +2782,8 @@ func TestCheckPlanUserReplied_NoComments(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	commentsJSON := []byte(`{"comments":[]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2885,7 +2885,7 @@ func TestCheckPlanUserReplied_CLIError(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Err: fmt.Errorf("gh: not found"),
 	})
 
@@ -2924,8 +2924,8 @@ func TestCheckPlanUserReplied_InvalidApprovalPattern(t *testing.T) {
 
 	// Comment exists but approval_pattern is invalid regex — should still fire
 	// with plan_approved=false (pattern treated as absent).
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"eve"},"body":"looks good to me","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"looks good to me","user":{"login":"eve"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -2990,8 +2990,8 @@ func TestCheckEvent_PlanUserReplied_Routed(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
-	commentsJSON := []byte(`{"comments":[{"author":{"login":"frank"},"body":"Please reconsider the approach","createdAt":"2020-01-01T10:05:00Z"}]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[{"id":100,"body":"Please reconsider the approach","user":{"login":"frank"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 
@@ -4155,25 +4155,26 @@ func TestCheckGateApproved_UpsertedSystemCommentNoCutoffRegression(t *testing.T)
 }
 
 // TestCheckPlanUserReplied_GitHubUpdatedAtParsed is a GitHub-path regression
-// test that verifies updatedAt is parsed from gh issue view JSON and used in
-// the cutoff calculation. This exercises the full path from JSON parsing
-// through to event checking.
+// test that verifies updated_at is parsed from the REST API and used in
+// the cutoff calculation. GetIssueComments delegates to GetIssueCommentsWithIDs
+// which uses `gh api` (REST) because `gh issue view --json comments` does not
+// include updatedAt in its response.
 func TestCheckPlanUserReplied_GitHubUpdatedAtParsed(t *testing.T) {
 	cfg := testConfig()
 	mockExec := exec.NewMockExecutor(nil)
 
 	// Simulate a re-plan scenario with upserted system comment:
-	//   - Plan comment: createdAt = 10:00 (original), updatedAt = 10:10 (upserted)
-	//   - User feedback: createdAt = 10:05 (already consumed by first re-plan)
+	//   - Plan comment: created_at = 10:00 (original), updated_at = 10:10 (upserted)
+	//   - User feedback: created_at = 10:05 (already consumed by first re-plan)
 	//   - StepEnteredAt = 10:11 (after re-plan completed)
 	//
 	// Without UpdatedAt: cutoff = 10:00 (stale CreatedAt) → feedback at 10:05 re-triggers (BUG)
 	// With UpdatedAt:    cutoff = 10:10 (fresh UpdatedAt) → feedback at 10:05 is filtered (FIXED)
-	commentsJSON := []byte(`{"comments":[
-		{"author":{"login":"erg-bot"},"body":"Revised plan.\n<!-- erg:plan -->","createdAt":"2020-01-01T10:00:00Z","updatedAt":"2020-01-01T10:10:00Z"},
-		{"author":{"login":"alice"},"body":"Please also update docs/","createdAt":"2020-01-01T10:05:00Z","updatedAt":"2020-01-01T10:05:00Z"}
-	]}`)
-	mockExec.AddPrefixMatch("gh", []string{"issue", "view"}, exec.MockResponse{
+	commentsJSON := []byte(`[
+		{"id":100,"body":"Revised plan.\n<!-- erg:plan -->","user":{"login":"erg-bot"},"created_at":"2020-01-01T10:00:00Z","updated_at":"2020-01-01T10:10:00Z"},
+		{"id":101,"body":"Please also update docs/","user":{"login":"alice"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"}
+	]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
 		Stdout: commentsJSON,
 	})
 

@@ -335,6 +335,7 @@ const linearIssueCommentsQuery = `query($id: String!) {
         id
         body
         createdAt
+        updatedAt
         user {
           name
         }
@@ -352,6 +353,7 @@ type linearIssueCommentsResponse struct {
 					ID        string `json:"id"`
 					Body      string `json:"body"`
 					CreatedAt string `json:"createdAt"`
+					UpdatedAt string `json:"updatedAt"`
 					User      struct {
 						Name string `json:"name"`
 					} `json:"user"`
@@ -376,11 +378,13 @@ func (p *LinearProvider) GetIssueComments(ctx context.Context, repoPath string, 
 			continue
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, n.CreatedAt)
+		updatedAt, _ := time.Parse(time.RFC3339Nano, n.UpdatedAt)
 		comments = append(comments, IssueComment{
 			ID:        n.ID,
 			Author:    n.User.Name,
 			Body:      n.Body,
 			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
 		})
 	}
 	return comments, nil
