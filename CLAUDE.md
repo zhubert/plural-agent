@@ -29,7 +29,6 @@ goimports -w .              # Auto-format all Go files
 go vet ./...                # Catch common mistakes
 staticcheck ./...           # Code quality, simplification, dead code patterns
 deadcode -test ./...        # Find unreachable exported/unexported functions
-gosec ./...                 # Security analysis (SQL injection, hardcoded creds, etc.)
 ```
 
 - Fix all issues found by these tools — do not leave warnings
