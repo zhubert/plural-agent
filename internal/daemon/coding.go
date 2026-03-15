@@ -122,9 +122,19 @@ func (d *Daemon) startPlanning(ctx context.Context, item daemonstate.WorkItem) e
 	issueBody, _ := item.StepData["issue_body"].(string)
 	initialMsg := worker.FormatInitialMessage(item.IssueRef, issueBody)
 
-	// If this is a re-planning attempt triggered by user feedback, include the
-	// feedback so Claude can revise the plan accordingly.
+	// If this is a re-planning attempt triggered by user feedback, include
+	// the previous plan so Claude can revise it, plus all user feedback.
 	if userFeedback, ok := item.StepData["user_feedback"].(string); ok && userFeedback != "" {
+		// Fetch the previous plan so Claude knows what to revise.
+		planCtx, planCancel := context.WithTimeout(ctx, timeoutQuickAPI)
+		prevComments, planErr := d.fetchIssueComments(planCtx, repoPath, item)
+		planCancel()
+		if planErr != nil {
+			log.Debug("could not fetch issue comments for previous plan", "error", planErr)
+		} else if prevPlan := worker.FindPlanComment(prevComments); prevPlan != "" {
+			initialMsg += "\n\n---\nPrevious plan (revise based on the feedback below):\n" + sanitize.UntrustedContent("previous_plan", prevPlan)
+		}
+
 		author, _ := item.StepData["user_feedback_author"].(string)
 		safeFeedback := sanitize.UntrustedContent("user_feedback", userFeedback)
 		if author != "" {

@@ -650,6 +650,14 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 
 	cutoff := systemCommentCutoff(item.StepEnteredAt, comments)
 
+	// Collect ALL new user comments so none are lost across re-plan cycles.
+	type userComment struct {
+		body   string
+		author string
+	}
+	var newComments []userComment
+	approved := false
+
 	for _, comment := range comments {
 		// Skip comments posted by the erg daemon itself (e.g. guidance, markers).
 		if isErgSystemComment(comment) {
@@ -660,29 +668,56 @@ func (c *eventChecker) checkPlanUserReplied(ctx context.Context, params *workflo
 			continue
 		}
 
-		// Found a new comment — check if it's an approval.
-		approved := approvalRe != nil && approvalRe.MatchString(comment.Body)
+		// Check if it's an approval.
+		isApproval := approvalRe != nil && approvalRe.MatchString(comment.Body)
 		// For GitHub issues, only collaborators may approve plans.
-		if approved && workItem.IssueRef.Source == "github" {
+		if isApproval && workItem.IssueRef.Source == "github" {
 			isCollab, err := d.gitService.CheckUserIsCollaborator(pollCtx, repoPath, comment.Author)
 			if err != nil {
 				log.Warn("failed to check collaborator status, denying plan approval", "author", comment.Author, "error", err)
-				approved = false
+				isApproval = false
 			} else if !isCollab {
 				log.Info("plan approval from non-collaborator, treating as feedback only", "author", comment.Author)
-				approved = false
+				isApproval = false
 			}
 		}
-		log.Info("user replied to plan", "author", comment.Author, "approved", approved)
+		if isApproval {
+			approved = true
+		}
+
+		newComments = append(newComments, userComment{body: comment.Body, author: comment.Author})
+		log.Info("user replied to plan", "author", comment.Author, "approved", isApproval)
+	}
+
+	if len(newComments) == 0 {
+		log.Debug("no new user comments found", "since", cutoff)
+		return false, nil, nil
+	}
+
+	// Single comment — preserve existing data shape.
+	if len(newComments) == 1 {
 		return true, map[string]any{
 			"plan_approved":        approved,
-			"user_feedback":        comment.Body,
-			"user_feedback_author": comment.Author,
+			"user_feedback":        newComments[0].body,
+			"user_feedback_author": newComments[0].author,
 		}, nil
 	}
 
-	log.Debug("no new user comments found", "since", cutoff)
-	return false, nil, nil
+	// Multiple comments — combine with per-comment attribution.
+	var parts []string
+	for _, uc := range newComments {
+		if uc.author != "" {
+			parts = append(parts, fmt.Sprintf("From @%s:\n%s", uc.author, uc.body))
+		} else {
+			parts = append(parts, uc.body)
+		}
+	}
+
+	return true, map[string]any{
+		"plan_approved":        approved,
+		"user_feedback":        strings.Join(parts, "\n\n"),
+		"user_feedback_author": "",
+	}, nil
 }
 
 // isRecentCleanRebase returns true if the step data indicates the most recent

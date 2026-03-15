@@ -8850,6 +8850,79 @@ func TestStartPlanning_UsesDefaultPromptWhenNoCustom(t *testing.T) {
 	}
 }
 
+func TestStartPlanning_ReplanIncludesPreviousPlan(t *testing.T) {
+	cfg := testConfig()
+	cfg.Repos = []string{"/test/repo"}
+
+	mockExec := exec.NewMockExecutor(nil)
+	mockExec.AddPrefixMatch("git", []string{"symbolic-ref"}, exec.MockResponse{
+		Stdout: []byte("refs/remotes/origin/main\n"),
+	})
+
+	// Mock the issue comments API to return the previous plan.
+	previousPlan := "## Plan\n1. Change interval to 4 seconds\n2. Fix taglines\n" + worker.PlanMarker
+	commentsJSON, _ := json.Marshal([]struct {
+		ID        int                    `json:"id"`
+		Body      string                 `json:"body"`
+		User      struct{ Login string } `json:"user"`
+		CreatedAt string                 `json:"created_at"`
+		UpdatedAt string                 `json:"updated_at"`
+	}{
+		{ID: 100, Body: previousPlan, User: struct{ Login string }{"bot"}, CreatedAt: "2026-03-05T10:00:00Z", UpdatedAt: "2026-03-05T10:00:00Z"},
+	})
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	sessSvc := session.NewSessionServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.sessionService = sessSvc
+	d.repoFilter = "/test/repo"
+
+	item := &daemonstate.WorkItem{
+		ID:       "work-replan",
+		IssueRef: config.IssueRef{Source: "github", ID: "42", Title: "Fix rotation"},
+		StepData: map[string]any{
+			"issue_body":           "Each tagline should stay up for 4 seconds",
+			"user_feedback":        "change it to 8 seconds",
+			"user_feedback_author": "alice",
+		},
+	}
+	d.state.AddWorkItem(item)
+
+	err := d.startPlanning(t.Context(), *item)
+	if err != nil {
+		t.Fatalf("startPlanning failed: %v", err)
+	}
+
+	d.mu.Lock()
+	w := d.workers["work-replan"]
+	d.mu.Unlock()
+	if w == nil {
+		t.Fatal("expected worker to be registered")
+	}
+
+	msg := w.InitialMsg()
+
+	// The initial message must include the previous plan for context.
+	if !strings.Contains(msg, "Previous plan") {
+		t.Error("re-planning initial message must include the previous plan")
+	}
+	if !strings.Contains(msg, "Change interval to 4 seconds") {
+		t.Error("re-planning initial message must include previous plan content")
+	}
+
+	// The user feedback must also be present.
+	if !strings.Contains(msg, "change it to 8 seconds") {
+		t.Error("re-planning initial message must include user feedback")
+	}
+	if !strings.Contains(msg, "@alice") {
+		t.Error("re-planning initial message must include feedback author")
+	}
+}
+
 func TestStartCoding_IncludesPlanFromIssueComments(t *testing.T) {
 	cfg := testConfig()
 	cfg.Repos = []string{"/test/repo"}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -2547,6 +2548,135 @@ func TestCheckPlanUserReplied_FiresOnNewComment(t *testing.T) {
 	}
 	if data["user_feedback_author"] != "alice" {
 		t.Errorf("expected user_feedback_author=alice, got %v", data["user_feedback_author"])
+	}
+}
+
+func TestCheckPlanUserReplied_MultipleCommentsCombined(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Three feedback comments posted after step entry — all should be captured.
+	commentsJSON := []byte(`[
+		{"id":100,"body":"change it to 8 seconds","user":{"login":"alice"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"},
+		{"id":101,"body":"remove code that ships itself","user":{"login":"alice"},"created_at":"2020-01-01T10:06:00Z","updated_at":"2020-01-01T10:06:00Z"},
+		{"id":102,"body":"relentlessly shipping is a duplicate","user":{"login":"bob"},"created_at":"2020-01-01T10:07:00Z","updated_at":"2020-01-01T10:07:00Z"}
+	]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(nil)
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true when new comments exist")
+	}
+
+	feedback, ok := data["user_feedback"].(string)
+	if !ok {
+		t.Fatal("user_feedback not a string")
+	}
+
+	// All three comments must be present in the combined feedback.
+	if !strings.Contains(feedback, "change it to 8 seconds") {
+		t.Error("combined feedback missing first comment")
+	}
+	if !strings.Contains(feedback, "remove code that ships itself") {
+		t.Error("combined feedback missing second comment")
+	}
+	if !strings.Contains(feedback, "relentlessly shipping is a duplicate") {
+		t.Error("combined feedback missing third comment")
+	}
+
+	// Per-comment attribution should be included.
+	if !strings.Contains(feedback, "@alice") {
+		t.Error("combined feedback missing attribution for alice")
+	}
+	if !strings.Contains(feedback, "@bob") {
+		t.Error("combined feedback missing attribution for bob")
+	}
+
+	// With multiple comments, user_feedback_author should be empty
+	// (attribution is inline in the feedback text).
+	if data["user_feedback_author"] != "" {
+		t.Errorf("expected empty user_feedback_author for multiple comments, got %v", data["user_feedback_author"])
+	}
+}
+
+func TestCheckPlanUserReplied_MultipleCommentsWithApproval(t *testing.T) {
+	cfg := testConfig()
+	mockExec := exec.NewMockExecutor(nil)
+
+	// Feedback comment followed by an approval from a collaborator.
+	commentsJSON := []byte(`[
+		{"id":100,"body":"change it to 8 seconds","user":{"login":"alice"},"created_at":"2020-01-01T10:05:00Z","updated_at":"2020-01-01T10:05:00Z"},
+		{"id":101,"body":"LGTM, ship it","user":{"login":"alice"},"created_at":"2020-01-01T10:06:00Z","updated_at":"2020-01-01T10:06:00Z"}
+	]`)
+	mockExec.AddPrefixMatch("gh", []string{"api", "repos/:owner/:repo/issues/42/comments"}, exec.MockResponse{
+		Stdout: commentsJSON,
+	})
+	mockExec.AddExactMatch("gh", []string{"api", "repos/:owner/:repo/collaborators/alice"}, exec.MockResponse{
+		Stdout: []byte(``),
+	})
+
+	gitSvc := git.NewGitServiceWithExecutor(mockExec)
+	d := testDaemonWithExec(cfg, mockExec)
+	d.gitService = gitSvc
+	d.repoFilter = "/test/repo"
+
+	sess := testSession("sess-1")
+	cfg.AddSession(*sess)
+
+	d.state.AddWorkItem(&daemonstate.WorkItem{
+		ID:          "item-1",
+		IssueRef:    config.IssueRef{Source: "github", ID: "42"},
+		SessionID:   "sess-1",
+		CurrentStep: "plan_review",
+	})
+
+	checker := newEventChecker(d)
+	params := workflow.NewParamHelper(map[string]any{"approval_pattern": "^LGTM"})
+	itemTmp, _ := d.state.GetWorkItem("item-1")
+	view := d.workItemView(itemTmp)
+	view.StepEnteredAt = time.Date(2020, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	fired, data, err := checker.checkPlanUserReplied(context.Background(), params, view)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fired {
+		t.Error("expected fired=true")
+	}
+	// If any comment is an approval, plan_approved should be true.
+	if data["plan_approved"] != true {
+		t.Errorf("expected plan_approved=true when approval comment present, got %v", data["plan_approved"])
+	}
+	// Both comments should still be in the feedback.
+	feedback, _ := data["user_feedback"].(string)
+	if !strings.Contains(feedback, "change it to 8 seconds") {
+		t.Error("combined feedback missing first comment")
 	}
 }
 
